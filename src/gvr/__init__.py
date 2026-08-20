@@ -33,8 +33,18 @@ from .model import (
     VerificationVerdict,
     combine_verdicts,
 )
+from .adapters.graphify import GraphifyTraversalEvidence, ingest_traversal_result
 from .protocol import ProtocolError, handle_request, safe_handle_request
 from .text_search import TextSearchAssertion, TextSearchResult, evaluate_text_search
+from .verifiers.data_flow import (
+    BLOCKING_RESOLUTIONS,
+    COMPLETE_COVERAGE,
+    DATA_FLOW_VERIFIER,
+    SUPPORTED_DATA_FLOW_RELATIONS,
+    DataFlowClaim,
+    DataFlowClaimKind,
+    verify_data_flow_claim,
+)
 from .wire import SCHEMA_VERSION, decode_markers, envelope
 
 __all__ = [
@@ -46,7 +56,10 @@ __all__ = [
     "VerificationIssue", "VerificationReport", "VerificationVerdict",
     "VerifierRegistry", "combine_verdicts", "decode_markers", "default_registry",
     "envelope", "evaluate_predicate", "evaluate_text_search", "simulate",
-    "stable_fingerprint",
+    "stable_fingerprint", "GraphifyTraversalEvidence", "ingest_traversal_result",
+    "BLOCKING_RESOLUTIONS", "COMPLETE_COVERAGE", "DATA_FLOW_VERIFIER",
+    "SUPPORTED_DATA_FLOW_RELATIONS", "DataFlowClaim", "DataFlowClaimKind",
+    "verify_data_flow_claim",
 ]
 
 from .software import Coverage, DeltaKind, FunctionalDeltaItem, FunctionalDeltaResult, FunctionalSnapshot, Observable, RevisionRef, compare_functionality, FUNCTIONAL_REGRESSION_VERIFIER, verify_functional_regression
