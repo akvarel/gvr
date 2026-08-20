@@ -62,7 +62,7 @@ Mapping keys are sorted recursively. Evidence, issue, report dependency, and cla
 ## Final validation
 
 - `python -m pytest -o addopts='' -q tests/test_verification_bundle.py`: `29 passed in 0.07s`.
-- `python -m pytest -o addopts='' -q tests/test_verification_bundle.py tests/test_graphify_adapter.py tests/test_data_flow_verifier.py tests/test_ledger.py tests/test_protocol.py tests/test_wire.py`: `97 passed in 0.19s`.
+- `python -m pytest -o addopts='' -q tests/test_verification_bundle.py tests/test_graphify_adapter.py tests/test_data_flow_verifier.py tests/test_ledger.py tests/test_protocol.py tests/test_wire.py`: `97 passed in 0.20s`.
 - `python -m pytest -o addopts='' -q`: `137 passed in 0.22s`.
 - `python -m compileall -q src`: PASS.
 - `git diff --check`: PASS.
