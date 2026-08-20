@@ -544,6 +544,7 @@ def _global_issues(
 
     required_expansions = 0
     required_visited = 1 if paths else 0
+    returned_path_nodes: set[str] = set()
     for path in paths:
         path_steps = _mapping_sequence(path.get("steps"))
         if path_steps is None:
@@ -557,10 +558,24 @@ def _global_issues(
             for field in ("source", "target")
             if str(step.get(field) or "")
         }
-        required_visited = max(required_visited, len(path_nodes))
+        returned_path_nodes.update(path_nodes)
+    required_visited = max(required_visited, len(returned_path_nodes))
     if counts.get("expanded_count", required_expansions) < required_expansions:
         issues.add("CONTRADICTORY_TRAVERSAL")
     if counts.get("visited_count", required_visited) < required_visited:
+        issues.add("CONTRADICTORY_TRAVERSAL")
+    if counts.get("expanded_count", 0) > 0 and counts.get("visited_count", 0) < 2:
+        issues.add("CONTRADICTORY_TRAVERSAL")
+    if resolution == "RESOLVED" and counts.get("visited_count", 0) > counts.get("expanded_count", 0) + 1:
+        issues.add("CONTRADICTORY_TRAVERSAL")
+    if resolution != "RESOLVED" and any(counts.get(name, 0) != 0 for name in ("visited_count", "expanded_count")):
+        issues.add("CONTRADICTORY_TRAVERSAL")
+    non_identity_path_count = sum(
+        1
+        for path in paths
+        if (_mapping_sequence(path.get("steps")) or ())
+    )
+    if non_identity_path_count > counts.get("expanded_count", non_identity_path_count):
         issues.add("CONTRADICTORY_TRAVERSAL")
     if len(paths) > query_limits.get("max_paths", len(paths)):
         issues.add("CONTRADICTORY_TRAVERSAL")

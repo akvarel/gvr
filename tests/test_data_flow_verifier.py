@@ -117,13 +117,19 @@ def _result(
     max_paths: int = 50,
     max_expansions: int = 2000,
 ) -> dict[str, object]:
+    expanded_count = sum(len(path["steps"]) for path in paths)
+    visited_count = (
+        0
+        if input_resolution != "RESOLVED"
+        else 1 + expanded_count
+    )
     return {
         "paths": deepcopy(paths),
         "start": start,
         "target": target,
         "direction": direction,
-        "visited_count": 3 if start_node_found else 0,
-        "expanded_count": sum(len(path["steps"]) for path in paths),
+        "visited_count": visited_count,
+        "expanded_count": expanded_count,
         "truncated": truncated,
         "termination_reason": termination_reason,
         "query_bounds": {
@@ -508,6 +514,48 @@ def test_expanded_count_greater_than_max_expansions_is_unknown():
     assert "CONTRADICTORY_TRAVERSAL" in _codes(report)
 
 
+def test_resolved_visited_count_cannot_exceed_expansions_plus_start():
+    result = _result([])
+    result["visited_count"] = 2
+    report = verify_data_flow_claim(_claim(DataFlowClaimKind.NO_SUPPORTED_PATH), result)
+    assert report.verdict is VerificationVerdict.UNKNOWN
+    assert "CONTRADICTORY_TRAVERSAL" in _codes(report)
+
+
+def test_positive_expansion_requires_a_visited_node_beyond_the_start():
+    result = _result([])
+    result["expanded_count"] = 1
+    result["visited_count"] = 1
+    report = verify_data_flow_claim(_claim(DataFlowClaimKind.NO_SUPPORTED_PATH), result)
+    assert report.verdict is VerificationVerdict.UNKNOWN
+    assert "CONTRADICTORY_TRAVERSAL" in _codes(report)
+
+
+def test_visited_count_covers_the_union_of_returned_path_nodes():
+    paths = [
+        _path(_evidence("A", "B"), _evidence("B", "C")),
+        _path(_evidence("A", "D"), _evidence("D", "C")),
+    ]
+    result = _result(paths)
+    result["visited_count"] = 3
+    report = verify_data_flow_claim(_claim(), result)
+    assert report.verdict is VerificationVerdict.UNKNOWN
+    assert "CONTRADICTORY_TRAVERSAL" in _codes(report)
+
+
+def test_non_identity_path_count_cannot_exceed_expanded_count():
+    paths = [
+        _path(_evidence("A", "C", location="L1")),
+        _path(_evidence("A", "C", location="L2")),
+    ]
+    result = _result(paths)
+    result["expanded_count"] = 1
+    result["visited_count"] = 2
+    report = verify_data_flow_claim(_claim(), result)
+    assert report.verdict is VerificationVerdict.UNKNOWN
+    assert "CONTRADICTORY_TRAVERSAL" in _codes(report)
+
+
 def test_identity_path_at_zero_depth_remains_valid_and_uses_query_evidence():
     claim = _claim(start="A", target="A")
     result = _result([_path()], start="A", target="A", max_depth=0)
@@ -599,15 +647,19 @@ def test_can_flow_to_fail_becomes_stale_when_query_result_changes():
     empty = _result([])
     report = verify_data_flow_claim(claim, empty)
     query_evidence = build_query_result_evidence(claim, empty)
+    changed_context_evidence = build_query_result_evidence(
+        _claim(source_context="rev2"),
+        empty,
+    )
     ledger = ClaimLedger()
     ledger.define(ClaimDefinition("flow", "A can flow to C", DATA_FLOW_VERIFIER))
     ledger.put_evidence(query_evidence.id, query_evidence.payload)
     ledger.record_verification("flow", report)
 
     assert report.verdict is VerificationVerdict.FAIL
-    changed_payload = dict(query_evidence.payload)
-    changed_payload["source_context"] = "rev2"
-    ledger.put_evidence(query_evidence.id, changed_payload)
+    assert changed_context_evidence.id == query_evidence.id
+    assert changed_context_evidence.payload != query_evidence.payload
+    ledger.put_evidence(changed_context_evidence.id, changed_context_evidence.payload)
     assert ledger.status("flow").effective_verdict is VerificationVerdict.UNKNOWN
 
 
@@ -647,6 +699,19 @@ def test_identical_query_evidence_does_not_spuriously_stale_claim():
     assert first == second
     assert ledger.dependencies.evidence[first.id].version == before
     assert ledger.status("no-flow").effective_verdict is VerificationVerdict.PASS
+
+
+def test_semantically_reordered_query_result_builds_identical_evidence():
+    claim = _claim()
+    path_b = _path(_evidence("A", "B", location="B1"), _evidence("B", "C", location="B2"))
+    path_d = _path(_evidence("A", "D", location="D1"), _evidence("D", "C", location="D2"))
+    first = _result([path_b, path_d])
+    second = _result(
+        [path_d, path_b],
+        allowed_relations=tuple(reversed(FULL_RELATIONS)),
+    )
+
+    assert build_query_result_evidence(claim, first) == build_query_result_evidence(claim, second)
 
 
 def test_version_1_wire_operation_preserves_auditable_fields():

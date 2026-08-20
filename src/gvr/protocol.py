@@ -12,7 +12,14 @@ from .verifiers.data_flow import (
     verify_data_flow_claim,
 )
 from .wire import SCHEMA_VERSION, decode_markers, envelope
-from .software import Coverage, FunctionalSnapshot, Observable, RevisionRef, compare_functionality, verify_functional_regression
+from .software import (
+    Coverage,
+    FunctionalSnapshot,
+    Observable,
+    RevisionRef,
+    compare_functionality,
+    verify_functional_regression,
+)
 
 
 class ProtocolError(ValueError):

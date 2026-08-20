@@ -2,7 +2,11 @@
 
 ## Source task
 
-Google Drive taskbus document `09-gvr-graphify-claim-verification`.
+Google Drive taskbus documents:
+
+- `09-gvr-graphify-claim-verification`;
+- `10-gvr-graphify-claim-supervising-remediation`.
+
 Approved base: `958651411b843f5903ad0eaf6bfdc2220e2240a5`.
 
 ## User journeys
@@ -22,6 +26,10 @@ Approved base: `958651411b843f5903ad0eaf6bfdc2220e2240a5`.
 | Regression GREEN | `0bd2d1028d1c4f0dad0a15c103910bccbcf16786` | `python -m pytest -q` | Existing and new tests passed before adversarial hardening. |
 | Adversarial RED | working tree after GREEN | `python -m pytest -q tests/test_data_flow_verifier.py` | Four newly added probes reproduced false absence conclusions or insufficient validation. |
 | Adversarial GREEN | working tree after fixes | `python -m pytest -q tests/test_data_flow_verifier.py` | All 28 focused tests passed. |
+| Remediation RED | `50ccf4ea3a587fc741b3655db3aeea6a97f99552` | `python -m pytest -q tests/test_data_flow_verifier.py` | Collection failed because immutable scope and query-result evidence APIs did not exist. |
+| Remediation GREEN | `b79c5360f4e83f27e53157ce92ae3b395fdc4786` | `python -m pytest -q tests/test_data_flow_verifier.py` | Scope binding, query evidence, ledger freshness, and mandatory accounting tests passed. |
+| Independent accounting RED | working tree after remediation GREEN | Two focused malformed-result tests | Underreported visits still produced definitive verdicts for a positive expansion and for divergent returned paths. |
+| Independent accounting GREEN | working tree after fixes | `python -m pytest -o addopts='' -q tests/test_data_flow_verifier.py` | All 45 focused tests passed. |
 
 ## Test specification
 
@@ -36,15 +44,19 @@ Approved base: `958651411b843f5903ad0eaf6bfdc2220e2240a5`.
 | 7 | Direct evidence mutation or removal makes a recorded PASS stale and effectively UNKNOWN. | `test_positive_claim_recorded_in_ledger_becomes_stale_after_evidence_mutation_or_removal` | Integration | PASS |
 | 8 | Schema v1 preserves verdict, verifier, dependencies, issue codes, claim endpoints, and Graphify audit metadata. | `test_version_1_wire_operation_preserves_auditable_fields` | Protocol integration | PASS |
 | 9 | Real forward and backward Graphify dataclass payloads are accepted without importing Graphify into GVR. | Manual `PYTHONPATH=/sharedssd/git/graphify:$PWD/src` integration snippets | Cross-repository integration | PASS |
+| 10 | Definitive verdicts require exact relation, direction, and stop-node scope equality between claim and traversal. | Scope laundering and explicit-scope tests | Adversarial unit | PASS |
+| 11 | Empty-search and identity-path verdicts depend on deterministic replaceable `gvrq:...` evidence and become stale after result, context, or evidence changes. | Query evidence and ClaimLedger tests | Integration | PASS |
+| 12 | Producer-impossible path depth, path count, expansion count, visited/expanded relationships, and unresolved accounting fail closed. | Accounting remediation tests | Adversarial unit | PASS |
 
 ## Final validation
 
-- `python -m pytest -o addopts='' -q`: `91 passed in 0.15s`.
+- `python -m pytest -o addopts='' -q tests/test_data_flow_verifier.py`: `45 passed in 0.08s`.
+- `python -m pytest -o addopts='' -q`: `108 passed in 0.18s`.
 - `python -m compileall -q src`: PASS.
 - `git diff --check`: PASS.
 - Real Graphify forward payload: `PASS`, two direct evidence IDs.
-- Real Graphify backward payload: `PASS`.
-- Independent adversarial review found and drove fixes for invalid relation partitions, impossible completeness/coverage state, and impossible zero traversal accounting with returned paths.
+- Real Graphify backward payload with explicit `BACKWARD` claim scope: `PASS`.
+- Independent adversarial review found and drove fixes for invalid relation partitions, impossible completeness/coverage state, impossible zero traversal accounting with returned paths, underreported visits after expansion, and visit counts that do not cover the union of returned path nodes.
 
 ## Coverage and known gaps
 

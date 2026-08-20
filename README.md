@@ -29,9 +29,18 @@ policy belongs in the private BugZero Verify service.
 mapping. It does not parse source code or build a second graph. A positive flow
 claim passes only for an individually exact `PROVEN` path with complete coverage
 and valid deterministic `df:...` dependencies. Absence is accepted only when
-Graphify reports a complete supported search with no path and no MAY evidence.
-Malformed, contradictory, truncated, unresolved, partial, ambiguous, or
-unsupported evidence fails closed to `UNKNOWN`.
+Graphify reports a complete supported search with no path and no MAY evidence,
+and the traversal relation/direction/stop-node scope exactly matches the
+immutable `DataFlowQueryScope` carried by the claim. Malformed, contradictory,
+truncated, unresolved, partial, ambiguous, scope-mismatched, or unsupported
+evidence fails closed to `UNKNOWN`.
+
+Empty-search and zero-step identity verdicts depend on deterministic `gvrq:...`
+query-result evidence rather than fabricated direct edges. The evidence ID names
+the semantic query slot; its normalized payload carries the current result and
+optional `source_context`, so replacing or removing it makes recorded
+`ClaimLedger` verdicts stale. Callers can use `evidence_namespace` to isolate
+query slots and `build_query_result_evidence()` to construct the record.
 
 Schema version 1 also exposes the `verify_data_flow_claim` wire operation. Its
 report preserves the claim kind and endpoints, exact evidence IDs, issue codes,
