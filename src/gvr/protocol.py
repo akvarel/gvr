@@ -5,7 +5,7 @@ from typing import Any, Mapping
 from .core import Action, Goal, Predicate, Proposal, StateEffect, VerificationContext, default_registry
 from .text_search import TextSearchAssertion, evaluate_text_search
 from .wire import SCHEMA_VERSION, decode_markers, envelope
-from .software import Coverage, FunctionalSnapshot, Observable, RevisionRef, compare_functionality
+from .software import Coverage, FunctionalSnapshot, Observable, RevisionRef, compare_functionality, verify_functional_regression
 
 
 class ProtocolError(ValueError):
@@ -113,6 +113,19 @@ def handle_request(request: Mapping[str, Any]) -> dict[str, Any]:
         baseline = _snapshot(_require_mapping(payload.get("baseline", {}), "baseline"))
         candidate = _snapshot(_require_mapping(payload.get("candidate", {}), "candidate"))
         return envelope("functional_delta", compare_functionality(baseline, candidate))
+
+    if op == "verify_functional_regression":
+        baseline = _snapshot(_require_mapping(payload.get("baseline", {}), "baseline"))
+        candidate = _snapshot(_require_mapping(payload.get("candidate", {}), "candidate"))
+        required = payload.get("required_kinds")
+        if required is not None and not isinstance(required, (list, tuple)):
+            raise ProtocolError("INVALID_PAYLOAD", "required_kinds must be an array")
+        delta, report = verify_functional_regression(
+            baseline,
+            candidate,
+            required_kinds=(None if required is None else tuple(str(x) for x in required)),
+        )
+        return envelope("functional_regression_verification", {"delta": delta, "report": report})
 
     if op == "verify_text_search":
         corpus = payload.get("corpus", ())

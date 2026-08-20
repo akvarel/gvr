@@ -117,3 +117,42 @@ def test_functional_delta_protocol_partial_candidate_returns_unknown():
     out = handle_request(request)
     assert out["payload"]["items"][0]["delta"] == "UNKNOWN"
     assert out["payload"]["items"][0]["verdict"] == "UNKNOWN"
+
+
+def test_functional_regression_protocol_fails_on_proven_removal():
+    request = {
+        "schema_version": 1,
+        "op": "verify_functional_regression",
+        "payload": {
+            "baseline": {
+                "revision": {"repository": "repo", "revision": "main"},
+                "coverage_by_kind": {"DATA_FLOW": "COMPLETE"},
+                "observables": [{"kind": "DATA_FLOW", "key": "x", "value": 1, "evidence_ids": ["e1"]}],
+            },
+            "candidate": {
+                "revision": {"repository": "repo", "revision": "feature"},
+                "coverage_by_kind": {"DATA_FLOW": "COMPLETE"},
+                "observables": [],
+            },
+            "required_kinds": ["DATA_FLOW"],
+        },
+    }
+    out = handle_request(request)
+    assert out["kind"] == "functional_regression_verification"
+    assert out["payload"]["report"]["verdict"] == "FAIL"
+    assert out["payload"]["report"]["verifier"] == "functional_regression"
+    assert out["payload"]["delta"]["items"][0]["delta"] == "REMOVED"
+
+
+def test_functional_regression_protocol_rejects_non_array_required_kinds():
+    out = safe_handle_request({
+        "schema_version": 1,
+        "op": "verify_functional_regression",
+        "payload": {
+            "baseline": {"revision": {"repository": "repo", "revision": "a"}, "observables": [], "coverage_by_kind": {}},
+            "candidate": {"revision": {"repository": "repo", "revision": "b"}, "observables": [], "coverage_by_kind": {}},
+            "required_kinds": "DATA_FLOW",
+        },
+    })
+    assert out["kind"] == "protocol_error"
+    assert out["payload"]["code"] == "INVALID_PAYLOAD"

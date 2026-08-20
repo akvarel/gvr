@@ -49,5 +49,5 @@ __all__ = [
     "stable_fingerprint",
 ]
 
-from .software import Coverage, DeltaKind, FunctionalDeltaItem, FunctionalDeltaResult, FunctionalSnapshot, Observable, RevisionRef, compare_functionality
-__all__ += ["Coverage", "DeltaKind", "FunctionalDeltaItem", "FunctionalDeltaResult", "FunctionalSnapshot", "Observable", "RevisionRef", "compare_functionality"]
+from .software import Coverage, DeltaKind, FunctionalDeltaItem, FunctionalDeltaResult, FunctionalSnapshot, Observable, RevisionRef, compare_functionality, FUNCTIONAL_REGRESSION_VERIFIER, verify_functional_regression
+__all__ += ["Coverage", "DeltaKind", "FunctionalDeltaItem", "FunctionalDeltaResult", "FunctionalSnapshot", "Observable", "RevisionRef", "compare_functionality", "FUNCTIONAL_REGRESSION_VERIFIER", "verify_functional_regression"]
