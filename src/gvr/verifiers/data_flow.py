@@ -8,6 +8,7 @@ from enum import Enum
 from typing import Any, Mapping, Sequence
 
 from ..adapters.graphify import ingest_traversal_result
+from ..bundle import VerificationBundle, build_verification_bundle
 from ..model import Evidence, VerificationIssue, VerificationReport, VerificationVerdict
 
 
@@ -786,3 +787,24 @@ def verify_data_flow_claim(
         evidence_ids=evidence_ids,
         metadata=metadata,
     )
+
+
+def verify_data_flow_claim_bundle(
+    claim: DataFlowClaim,
+    traversal_result: Mapping[str, Any],
+) -> VerificationBundle:
+    """Verify a data-flow claim and package exactly its recordable evidence."""
+
+    report = verify_data_flow_claim(claim, traversal_result)
+    ingested = ingest_traversal_result(traversal_result)
+    query_evidence = build_query_result_evidence(claim, traversal_result)
+    available = {
+        evidence.id: evidence
+        for evidence in (*ingested.evidence, query_evidence)
+    }
+    selected = tuple(
+        available[evidence_id]
+        for evidence_id in report.evidence_ids
+        if evidence_id in available
+    )
+    return build_verification_bundle(report, selected)

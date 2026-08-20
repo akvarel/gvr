@@ -8,6 +8,7 @@ from .data_flow import (
     DataFlowQueryScope,
     build_query_result_evidence,
     verify_data_flow_claim,
+    verify_data_flow_claim_bundle,
 )
 
 __all__ = [
@@ -20,4 +21,5 @@ __all__ = [
     "DataFlowQueryScope",
     "build_query_result_evidence",
     "verify_data_flow_claim",
+    "verify_data_flow_claim_bundle",
 ]

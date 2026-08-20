@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass
 from typing import Iterable, Mapping
 
+from .bundle import VerificationBundle, validate_verification_bundle
 from .dependencies import ClaimDependencyGraph
 from .model import Freshness, VerificationReport, VerificationVerdict
 
@@ -103,6 +105,29 @@ class ClaimLedger:
             claim_version=record.version,
         )
         self._history[claim_id].append(snapshot)
+        return snapshot
+
+    def record_bundle(
+        self,
+        claim_id: str,
+        bundle: VerificationBundle,
+    ) -> VerificationSnapshot:
+        """Atomically register a bundle's evidence and record its report."""
+
+        validate_verification_bundle(bundle)
+        trial = deepcopy(self)
+        for evidence in bundle.evidence:
+            trial.put_evidence(evidence.id, evidence.payload)
+        snapshot = trial.record_verification(
+            claim_id,
+            bundle.report,
+            evidence_ids=bundle.report.evidence_ids,
+            claim_dependency_ids=bundle.claim_dependency_ids,
+        )
+        self.dependencies = trial.dependencies
+        self._definitions = trial._definitions
+        self._history = trial._history
+        self._run_clock = trial._run_clock
         return snapshot
 
     def status(self, claim_id: str) -> ClaimStatus:

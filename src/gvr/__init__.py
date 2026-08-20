@@ -21,6 +21,14 @@ from .dependencies import (
     UnknownDependencyError,
     stable_fingerprint,
 )
+from .bundle import (
+    VERIFICATION_BUNDLE_KIND,
+    VERIFICATION_BUNDLE_SCHEMA_VERSION,
+    BundleValidationError,
+    VerificationBundle,
+    build_verification_bundle,
+    validate_verification_bundle,
+)
 from .ledger import ClaimDefinition, ClaimLedger, ClaimStatus, VerificationSnapshot
 from .model import (
     Evidence,
@@ -46,6 +54,7 @@ from .verifiers.data_flow import (
     DataFlowQueryScope,
     build_query_result_evidence,
     verify_data_flow_claim,
+    verify_data_flow_claim_bundle,
 )
 from .wire import SCHEMA_VERSION, decode_markers, envelope
 
@@ -62,6 +71,10 @@ __all__ = [
     "BLOCKING_RESOLUTIONS", "COMPLETE_COVERAGE", "DATA_FLOW_VERIFIER",
     "SUPPORTED_DATA_FLOW_RELATIONS", "DataFlowClaim", "DataFlowClaimKind",
     "DataFlowQueryScope", "build_query_result_evidence", "verify_data_flow_claim",
+    "verify_data_flow_claim_bundle", "VERIFICATION_BUNDLE_KIND",
+    "VERIFICATION_BUNDLE_SCHEMA_VERSION", "BundleValidationError",
+    "VerificationBundle", "build_verification_bundle",
+    "validate_verification_bundle",
 ]
 
 from .software import Coverage, DeltaKind, FunctionalDeltaItem, FunctionalDeltaResult, FunctionalSnapshot, Observable, RevisionRef, compare_functionality, FUNCTIONAL_REGRESSION_VERIFIER, verify_functional_regression

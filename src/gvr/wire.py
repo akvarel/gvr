@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import fields, is_dataclass
 from enum import Enum
-from typing import Any
+from typing import Any, Mapping
 
 from .model import INDETERMINATE, MISSING
 
@@ -18,8 +18,8 @@ def _encode(value: Any) -> Any:
         return value.value
     if is_dataclass(value):
         return {f.name: _encode(getattr(value, f.name)) for f in fields(value)}
-    if isinstance(value, dict):
-        return {str(k): _encode(v) for k, v in value.items()}
+    if isinstance(value, Mapping):
+        return {str(key): _encode(value[key]) for key in sorted(value, key=str)}
     if isinstance(value, (tuple, list)):
         return [_encode(v) for v in value]
     return value
