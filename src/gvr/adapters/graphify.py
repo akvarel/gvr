@@ -16,6 +16,7 @@ class GraphifyTraversalEvidence:
     termination_reason: str
     blocking_boundary_keys: tuple[str, ...]
     boundary_evidence: tuple[Evidence, ...] = ()
+    conflicting_evidence_ids: tuple[str, ...] = ()
     start: str = ""
     target: str | None = None
     direction: str = "UNKNOWN"
@@ -50,21 +51,24 @@ def ingest_traversal_result(result: Mapping[str, Any]) -> GraphifyTraversalEvide
     """
 
     direct_by_key: dict[str, Evidence] = {}
+    conflicting_evidence_ids: set[str] = set()
     for path in _mapping_items(result.get("paths")):
         for item in _mapping_items(path.get("supporting_evidence")):
             key = str(item.get("key") or "")
             if not key:
                 continue
-            direct_by_key.setdefault(
-                key,
-                Evidence(
-                    id=key,
-                    kind="graphify.data_flow_edge",
-                    payload=dict(item),
-                    source=str(item.get("source_file") or "") or None,
-                    fingerprint=key,
-                ),
+            candidate = Evidence(
+                id=key,
+                kind="graphify.data_flow_edge",
+                payload=dict(item),
+                source=str(item.get("source_file") or "") or None,
+                fingerprint=key,
             )
+            existing = direct_by_key.get(key)
+            if existing is not None and existing != candidate:
+                conflicting_evidence_ids.add(key)
+            else:
+                direct_by_key.setdefault(key, candidate)
 
     boundary_by_key: dict[str, Evidence] = {}
     for event in _mapping_items(result.get("boundary_events")):
@@ -75,17 +79,20 @@ def ingest_traversal_result(result: Mapping[str, Any]) -> GraphifyTraversalEvide
         )
         if not key:
             continue
-        boundary_by_key.setdefault(
-            key,
-            Evidence(
-                id=key,
-                kind="graphify.data_flow_boundary",
-                payload=dict(event),
-                source=str(event.get("canonical_caller_file") or "") or None,
-                fingerprint=key,
-            ),
+        candidate = Evidence(
+            id=key,
+            kind="graphify.data_flow_boundary",
+            payload=dict(event),
+            source=str(event.get("canonical_caller_file") or "") or None,
+            fingerprint=key,
         )
+        existing = boundary_by_key.get(key)
+        if existing is not None and existing != candidate:
+            conflicting_evidence_ids.add(key)
+        else:
+            boundary_by_key.setdefault(key, candidate)
 
+    conflicting_evidence_ids.update(set(direct_by_key) & set(boundary_by_key))
     boundary_keys = tuple(sorted(boundary_by_key))
     all_evidence = {**direct_by_key, **boundary_by_key}
     return GraphifyTraversalEvidence(
@@ -95,6 +102,7 @@ def ingest_traversal_result(result: Mapping[str, Any]) -> GraphifyTraversalEvide
         termination_reason=str(result.get("termination_reason") or "UNKNOWN"),
         blocking_boundary_keys=boundary_keys,
         boundary_evidence=tuple(boundary_by_key[key] for key in boundary_keys),
+        conflicting_evidence_ids=tuple(sorted(conflicting_evidence_ids)),
         start=str(result.get("start") or ""),
         target=(None if result.get("target") is None else str(result.get("target"))),
         direction=str(result.get("direction") or "UNKNOWN"),

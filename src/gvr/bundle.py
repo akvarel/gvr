@@ -25,6 +25,25 @@ class BundleValidationError(ValueError):
     """Raised when a verification bundle is incomplete or ambiguous."""
 
 
+class _FrozenDict(dict[str, Any]):
+    """JSON-compatible immutable mapping used inside a frozen bundle."""
+
+    def _immutable(self, *_args: Any, **_kwargs: Any) -> None:
+        raise TypeError("verification bundle semantic content is immutable")
+
+    __setitem__ = _immutable
+    __delitem__ = _immutable
+    clear = _immutable
+    pop = _immutable
+    popitem = _immutable
+    setdefault = _immutable
+    update = _immutable
+    __ior__ = _immutable
+
+    def __deepcopy__(self, _memo: dict[int, Any]) -> _FrozenDict:
+        return self
+
+
 def _canonical_value(value: Any, *, path: str) -> Any:
     """Return strict JSON-compatible semantic content with sorted mapping keys."""
 
@@ -55,6 +74,21 @@ def _canonical_value(value: Any, *, path: str) -> Any:
     raise BundleValidationError(
         f"{path} contains unsupported semantic value {type(value).__name__}"
     )
+
+
+def _freeze_canonical(value: Any) -> Any:
+    if isinstance(value, dict):
+        return _FrozenDict({
+            key: _freeze_canonical(item)
+            for key, item in value.items()
+        })
+    if isinstance(value, list):
+        return tuple(_freeze_canonical(item) for item in value)
+    return value
+
+
+def _freeze_value(value: Any, *, path: str) -> Any:
+    return _freeze_canonical(_canonical_value(value, path=path))
 
 
 def _canonical_json(value: Any) -> str:
@@ -94,7 +128,7 @@ def _normalize_report(report: VerificationReport) -> VerificationReport:
         raise BundleValidationError("report verifier must be a non-empty string")
     if not isinstance(report.metadata, Mapping):
         raise BundleValidationError("report metadata must be a mapping")
-    _canonical_value(report.metadata, path="report.metadata")
+    metadata = _freeze_value(report.metadata, path="report.metadata")
 
     evidence_ids = _normalize_ids(report.evidence_ids, name="report evidence_ids")
     normalized_issues: list[VerificationIssue] = []
@@ -128,7 +162,7 @@ def _normalize_report(report: VerificationReport) -> VerificationReport:
         verifier=report.verifier,
         issues=tuple(normalized_issues),
         evidence_ids=evidence_ids,
-        metadata=report.metadata,
+        metadata=metadata,
     )
 
 
@@ -162,14 +196,24 @@ def _normalize_evidence(
             raise BundleValidationError(
                 f"evidence {evidence.id} fingerprint must be a string"
             )
-        semantic = _canonical_json(_canonical_evidence(evidence))
+        normalized = Evidence(
+            id=evidence.id,
+            kind=evidence.kind,
+            payload=_freeze_value(
+                evidence.payload,
+                path=f"evidence[{evidence.id}].payload",
+            ),
+            source=evidence.source,
+            fingerprint=evidence.fingerprint,
+        )
+        semantic = _canonical_json(_canonical_evidence(normalized))
         previous = semantics_by_id.get(evidence.id)
         if previous is not None and previous != semantic:
             raise BundleValidationError(
                 f"conflicting evidence records share ID {evidence.id}"
             )
         semantics_by_id[evidence.id] = semantic
-        by_id.setdefault(evidence.id, evidence)
+        by_id.setdefault(evidence.id, normalized)
     return tuple(by_id[evidence_id] for evidence_id in sorted(by_id))
 
 

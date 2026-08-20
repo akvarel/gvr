@@ -18,6 +18,7 @@ Current modules:
 - Claim Dependency Graph with evidence invalidation and transitive STALE propagation;
 - Graphify traversal evidence adapter and deterministic `CAN_FLOW_TO` /
   `NO_SUPPORTED_PATH` claim verifier;
+- deterministic `VerificationBundle` transport packages with exact evidence manifests;
 - versioned wire envelope for future CLI / hooks / MCP / standalone runtime.
 
 The repository intentionally does not contain BugZero product policy. Product
@@ -45,3 +46,30 @@ query slots and `build_query_result_evidence()` to construct the record.
 Schema version 1 also exposes the `verify_data_flow_claim` wire operation. Its
 report preserves the claim kind and endpoints, exact evidence IDs, issue codes,
 and Graphify termination, bounds, boundary, and search-coverage metadata.
+
+## Verification bundles
+
+`build_verification_bundle()` packages a `VerificationReport` with exactly the
+`Evidence` records named by `report.evidence_ids`, optional claim dependencies,
+and a deterministic SHA-256 fingerprint of canonical semantic content. Bundle
+construction rejects missing dependencies, conflicting duplicate IDs, unrelated
+extra evidence, unsupported semantic values, and issue evidence outside the
+report dependency set. Evidence order and mapping key order do not affect the
+fingerprint. Report metadata and evidence payloads are snapshotted into immutable
+canonical structures so later caller mutation cannot invalidate bundle identity.
+
+`verify_data_flow_claim_bundle()` is the first producer integration. It includes
+only the selected direct `df:...` records for a proven path, the stable `gvrq:...`
+record for complete absence or zero-step identity, and exact `bnd:...` records for
+blocking boundaries. Conflicting Graphify records sharing one ID are rejected.
+
+`ClaimLedger.record_bundle()` validates and records the complete package on a
+transactional copy before publishing any evidence or verdict state. Failed
+validation, verifier mismatch, missing claim dependencies, or dependency-cycle
+errors therefore cannot partially mutate the ledger. Existing evidence-version
+and stale-propagation behavior remains unchanged.
+
+Schema version 1 additionally exposes `verify_data_flow_claim_bundle`. Its
+`verification_bundle` envelope preserves the bundle version, kind, verifier,
+fingerprint, report, claim dependencies, and deterministically ordered evidence
+records with IDs, kinds, payloads, sources, and producer fingerprints.

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
+from .bundle import BundleValidationError
 from .core import Action, Goal, Predicate, Proposal, StateEffect, VerificationContext, default_registry
 from .text_search import TextSearchAssertion, evaluate_text_search
 from .verifiers.data_flow import (
@@ -221,7 +222,10 @@ def handle_request(request: Mapping[str, Any]) -> dict[str, Any]:
 
     if op == "verify_data_flow_claim_bundle":
         claim, traversal = _data_flow_inputs(payload)
-        bundle = verify_data_flow_claim_bundle(claim, traversal)
+        try:
+            bundle = verify_data_flow_claim_bundle(claim, traversal)
+        except BundleValidationError as exc:
+            raise ProtocolError("INVALID_VERIFICATION_BUNDLE", str(exc)) from exc
         return envelope("verification_bundle", bundle)
 
     raise ProtocolError("UNKNOWN_OPERATION", f"unsupported operation: {op!r}")

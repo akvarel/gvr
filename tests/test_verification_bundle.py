@@ -23,6 +23,7 @@ from gvr import (
     VerificationVerdict,
     build_verification_bundle,
     handle_request,
+    safe_handle_request,
     verify_data_flow_claim_bundle,
 )
 
@@ -264,6 +265,31 @@ def test_boundary_unknown_bundle_contains_exact_boundary_evidence():
     )
 
 
+def test_data_flow_bundle_rejects_conflicting_boundary_records_with_one_id():
+    first = {
+        "boundary_evidence_key": "bnd:shared",
+        "resolution": "AMBIGUOUS",
+        "reason": "first",
+    }
+    second = {
+        "boundary_evidence_key": "bnd:shared",
+        "resolution": "UNRESOLVED",
+        "reason": "second",
+    }
+    result = _result(
+        [],
+        complete_supported_search=False,
+        search_coverage="PARTIAL",
+        boundary_events=[first, second],
+    )
+
+    with pytest.raises(BundleValidationError, match="conflicting Graphify evidence"):
+        verify_data_flow_claim_bundle(
+            _claim(DataFlowClaimKind.NO_SUPPORTED_PATH),
+            result,
+        )
+
+
 def test_unknown_without_dependencies_has_explicit_deterministic_empty_manifest():
     result = _result([], complete_supported_search=False, search_coverage="PARTIAL")
     first = verify_data_flow_claim_bundle(_claim(), result)
@@ -351,6 +377,27 @@ def test_reordered_mapping_keys_have_identical_bundle_fingerprint():
     )
 
     assert first.fingerprint == second.fingerprint
+
+
+def test_bundle_snapshots_and_freezes_report_and_evidence_semantic_content():
+    metadata = {"nested": {"value": 1}}
+    payload = {"nested": {"value": 1}}
+    bundle = build_verification_bundle(
+        _report(evidence_ids=("E",), metadata=metadata),
+        (_evidence("E", payload),),
+    )
+    fingerprint = bundle.fingerprint
+
+    metadata["nested"]["value"] = 2
+    payload["nested"]["value"] = 2
+
+    assert bundle.report.metadata["nested"]["value"] == 1
+    assert bundle.evidence[0].payload["nested"]["value"] == 1
+    assert bundle.fingerprint == fingerprint
+    with pytest.raises(TypeError):
+        bundle.report.metadata["nested"]["value"] = 3
+    with pytest.raises(TypeError):
+        bundle.evidence[0].payload["nested"]["value"] = 3
 
 
 def test_semantic_report_or_evidence_changes_change_bundle_fingerprint():
@@ -441,6 +488,26 @@ def test_replacing_query_result_payload_stales_a_bundle_recorded_claim():
     assert ledger.status("no-flow").freshness is Freshness.STALE
 
 
+def test_reverification_from_a_replacement_bundle_restores_freshness():
+    first = verify_data_flow_claim_bundle(
+        _claim(DataFlowClaimKind.NO_SUPPORTED_PATH),
+        _result([]),
+    )
+    changed = verify_data_flow_claim_bundle(
+        _claim(DataFlowClaimKind.NO_SUPPORTED_PATH, source_context="rev2"),
+        _result([]),
+    )
+    ledger = ClaimLedger()
+    ledger.define(ClaimDefinition("no-flow", "No path", DATA_FLOW_VERIFIER))
+    ledger.record_bundle("no-flow", first)
+
+    ledger.record_bundle("no-flow", changed)
+
+    assert ledger.status("no-flow").effective_verdict is VerificationVerdict.PASS
+    assert ledger.status("no-flow").freshness is Freshness.FRESH
+    assert len(ledger.history("no-flow")) == 2
+
+
 def test_replacing_direct_payload_stales_a_bundle_recorded_claim():
     bundle = verify_data_flow_claim_bundle(_claim(), _result([_path(_direct("A", "C"))]))
     ledger = ClaimLedger()
@@ -453,6 +520,40 @@ def test_replacing_direct_payload_stales_a_bundle_recorded_claim():
     ledger.put_evidence(direct.id, changed_payload)
 
     assert ledger.status("flow").effective_verdict is VerificationVerdict.UNKNOWN
+
+
+def test_removing_bundle_evidence_stales_the_recorded_claim():
+    bundle = verify_data_flow_claim_bundle(_claim(), _result([_path(_direct("A", "C"))]))
+    ledger = ClaimLedger()
+    ledger.define(ClaimDefinition("flow", "A flows to C", DATA_FLOW_VERIFIER))
+    ledger.record_bundle("flow", bundle)
+
+    ledger.remove_evidence(bundle.evidence[0].id)
+
+    assert ledger.status("flow").effective_verdict is VerificationVerdict.UNKNOWN
+    assert ledger.status("flow").freshness is Freshness.STALE
+
+
+def test_bundle_claim_dependencies_preserve_transitive_stale_propagation():
+    ledger = ClaimLedger()
+    ledger.define(ClaimDefinition("source", "source claim", "v"))
+    ledger.define(ClaimDefinition("derived", "derived claim", "v"))
+    ledger.put_evidence("E", {"value": 1})
+    ledger.record_verification(
+        "source",
+        _report(evidence_ids=("E",)),
+    )
+    bundle = build_verification_bundle(
+        _report(),
+        (),
+        claim_dependency_ids=("source",),
+    )
+    ledger.record_bundle("derived", bundle)
+
+    ledger.put_evidence("E", {"value": 2})
+
+    assert ledger.status("source").effective_verdict is VerificationVerdict.UNKNOWN
+    assert ledger.status("derived").effective_verdict is VerificationVerdict.UNKNOWN
 
 
 def test_failed_bundle_recording_does_not_partially_mutate_ledger():
@@ -469,6 +570,22 @@ def test_failed_bundle_recording_does_not_partially_mutate_ledger():
     assert "E" not in ledger.dependencies.evidence
     assert ledger.history("C") == ()
     assert ledger.status("C").effective_verdict is VerificationVerdict.UNKNOWN
+
+
+def test_undefined_bundle_claim_dependency_does_not_register_evidence():
+    bundle = build_verification_bundle(
+        _report(evidence_ids=("E",)),
+        (_evidence("E", {"x": 1}),),
+        claim_dependency_ids=("missing-claim",),
+    )
+    ledger = ClaimLedger()
+    ledger.define(ClaimDefinition("C", "claim", "v"))
+
+    with pytest.raises(ValueError, match="undefined claim dependency"):
+        ledger.record_bundle("C", bundle)
+
+    assert "E" not in ledger.dependencies.evidence
+    assert ledger.history("C") == ()
 
 
 def test_existing_and_bundle_wire_operations_remain_distinct_and_compatible():
@@ -526,3 +643,29 @@ def test_bundle_wire_output_is_deterministic_under_reordered_paths_and_keys():
         })
 
     assert request(first_result) == request(second_result)
+
+
+def test_safe_bundle_wire_operation_fails_closed_on_ambiguous_evidence():
+    result = _result(
+        [],
+        complete_supported_search=False,
+        search_coverage="PARTIAL",
+        boundary_events=[
+            {"boundary_evidence_key": "bnd:x", "resolution": "AMBIGUOUS"},
+            {"boundary_evidence_key": "bnd:x", "resolution": "UNRESOLVED"},
+        ],
+    )
+
+    response = safe_handle_request({
+        "schema_version": 1,
+        "op": "verify_data_flow_claim_bundle",
+        "payload": {
+            "claim_kind": "NO_SUPPORTED_PATH",
+            "start": "A",
+            "target": "C",
+            "traversal_result": result,
+        },
+    })
+
+    assert response["kind"] == "protocol_error"
+    assert response["payload"]["code"] == "INVALID_VERIFICATION_BUNDLE"

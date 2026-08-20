@@ -8,7 +8,11 @@ from enum import Enum
 from typing import Any, Mapping, Sequence
 
 from ..adapters.graphify import ingest_traversal_result
-from ..bundle import VerificationBundle, build_verification_bundle
+from ..bundle import (
+    BundleValidationError,
+    VerificationBundle,
+    build_verification_bundle,
+)
 from ..model import Evidence, VerificationIssue, VerificationReport, VerificationVerdict
 
 
@@ -797,6 +801,11 @@ def verify_data_flow_claim_bundle(
 
     report = verify_data_flow_claim(claim, traversal_result)
     ingested = ingest_traversal_result(traversal_result)
+    if ingested.conflicting_evidence_ids:
+        raise BundleValidationError(
+            "conflicting Graphify evidence records share IDs: "
+            + ", ".join(ingested.conflicting_evidence_ids)
+        )
     query_evidence = build_query_result_evidence(claim, traversal_result)
     available = {
         evidence.id: evidence
