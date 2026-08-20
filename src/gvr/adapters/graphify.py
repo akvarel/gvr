@@ -87,8 +87,9 @@ def ingest_traversal_result(result: Mapping[str, Any]) -> GraphifyTraversalEvide
         )
 
     boundary_keys = tuple(sorted(boundary_by_key))
+    all_evidence = {**direct_by_key, **boundary_by_key}
     return GraphifyTraversalEvidence(
-        evidence=tuple(direct_by_key[key] for key in sorted(direct_by_key)),
+        evidence=tuple(all_evidence[key] for key in sorted(all_evidence)),
         complete_supported_search=bool(result.get("complete_supported_search", False)),
         search_coverage=str(result.get("search_coverage") or "UNKNOWN"),
         termination_reason=str(result.get("termination_reason") or "UNKNOWN"),

@@ -37,6 +37,12 @@ class DataFlowClaim:
     start: str
     target: str
 
+    def __post_init__(self) -> None:
+        if not isinstance(self.kind, DataFlowClaimKind):
+            object.__setattr__(self, "kind", DataFlowClaimKind(str(self.kind)))
+        if not self.start or not self.target:
+            raise ValueError("data-flow claim requires non-empty start and target")
+
 
 @dataclass(frozen=True)
 class _PathAnalysis:
@@ -51,6 +57,7 @@ _ISSUE_MESSAGES = {
     "NO_SUPPORTED_PATH": "The complete supported search returned no path.",
     "INCOMPLETE_SUPPORTED_SEARCH": "The supported search is incomplete, so absence is not proven.",
     "MAY_PATH": "A returned path has MAY receiver confidence.",
+    "MAY_SEARCH_EVIDENCE": "The explored search region contains MAY evidence.",
     "PARTIAL_PATH": "A returned path has partial supported-construct coverage.",
     "START_NODE_NOT_FOUND": "Graphify did not resolve the traversal start node.",
     "TARGET_NODE_NOT_FOUND": "Graphify did not resolve the traversal target node.",
@@ -110,6 +117,7 @@ def _path_analysis(
     *,
     flow_start: str,
     flow_target: str,
+    effective_allowed_relations: frozenset[str],
     seen_evidence: dict[str, Any],
 ) -> _PathAnalysis:
     issues: set[str] = set()
@@ -144,6 +152,8 @@ def _path_analysis(
         relation = str(ref.get("relation") or "")
         if relation not in SUPPORTED_DATA_FLOW_RELATIONS:
             issues.add("UNSUPPORTED_PATH_RELATION")
+        elif relation not in effective_allowed_relations:
+            issues.add("CONTRADICTORY_TRAVERSAL")
         if not all(str(ref.get(field) or "") for field in ("source", "target", "source_file", "source_location")):
             issues.add("MALFORMED_PATH")
 
@@ -219,7 +229,7 @@ def _boundary_events(result: Mapping[str, Any]) -> tuple[dict[str, Any], ...] | 
         return None
     events: list[dict[str, Any]] = []
     for event in raw:
-        key = str(event.get("boundary_evidence_key") or event.get("diagnostic_evidence_key") or "")
+        key = str(event.get("boundary_evidence_key") or "")
         resolution = str(event.get("resolution") or "")
         normalized = dict(_stable(event))
         normalized["evidence_key"] = key
@@ -238,7 +248,7 @@ def _global_issues(
     result: Mapping[str, Any],
     paths: Sequence[Mapping[str, Any]],
     boundaries: Sequence[Mapping[str, Any]],
-) -> tuple[set[str], str, str]:
+) -> tuple[set[str], str, str, frozenset[str]]:
     issues: set[str] = set()
     direction = str(result.get("direction") or "")
     query_start = str(result.get("start") or "")
@@ -259,6 +269,66 @@ def _global_issues(
         issues.add("CLAIM_QUERY_MISMATCH")
     if result.get("query_validity") is not True:
         issues.add("INVALID_QUERY")
+
+    query_bounds = result.get("query_bounds")
+    effective_allowed_relations: frozenset[str] = frozenset()
+    if not isinstance(query_bounds, Mapping):
+        issues.add("MALFORMED_TRAVERSAL")
+    else:
+        requested = query_bounds.get("requested_allowed_relations")
+        effective = query_bounds.get("effective_allowed_relations")
+        bounds_rejected = query_bounds.get("rejected_relations")
+        stop_nodes = query_bounds.get("stop_nodes")
+        string_arrays = (requested, effective, bounds_rejected, stop_nodes)
+        if any(
+            not isinstance(items, (list, tuple))
+            or not all(isinstance(item, str) for item in items)
+            for items in string_arrays
+        ):
+            issues.add("MALFORMED_TRAVERSAL")
+        else:
+            requested_relations = frozenset(requested)
+            effective_allowed_relations = frozenset(effective)
+            expected_effective = requested_relations & SUPPORTED_DATA_FLOW_RELATIONS
+            expected_rejected = requested_relations - SUPPORTED_DATA_FLOW_RELATIONS
+            if effective_allowed_relations != expected_effective:
+                issues.add("CONTRADICTORY_TRAVERSAL")
+            if frozenset(bounds_rejected) != expected_rejected:
+                issues.add("CONTRADICTORY_TRAVERSAL")
+        if str(query_bounds.get("direction") or "") != direction:
+            issues.add("CONTRADICTORY_TRAVERSAL")
+        for name, minimum in (("max_depth", 0), ("max_paths", 1), ("max_expansions", 1)):
+            value = query_bounds.get(name)
+            if not isinstance(value, int) or isinstance(value, bool) or value < minimum:
+                issues.add("MALFORMED_TRAVERSAL")
+
+    rejected_relations = result.get("rejected_relations")
+    if not isinstance(rejected_relations, (list, tuple)) or not all(
+        isinstance(item, str) for item in rejected_relations
+    ):
+        issues.add("MALFORMED_TRAVERSAL")
+    elif isinstance(query_bounds, Mapping) and isinstance(
+        query_bounds.get("rejected_relations"), (list, tuple)
+    ) and tuple(sorted(rejected_relations)) != tuple(sorted(query_bounds["rejected_relations"])):
+        issues.add("CONTRADICTORY_TRAVERSAL")
+
+    counts: dict[str, int] = {}
+    for count_field in ("visited_count", "expanded_count"):
+        count = result.get(count_field)
+        if not isinstance(count, int) or isinstance(count, bool) or count < 0:
+            issues.add("MALFORMED_TRAVERSAL")
+        else:
+            counts[count_field] = count
+
+    epistemic_flags = (
+        "encountered_partial_evidence",
+        "encountered_unknown_evidence",
+        "encountered_may_evidence",
+    )
+    if any(not isinstance(result.get(field), bool) for field in epistemic_flags):
+        issues.add("MALFORMED_TRAVERSAL")
+    if result.get("encountered_may_evidence") is True:
+        issues.add("MAY_SEARCH_EVIDENCE")
 
     complete = result.get("complete_supported_search")
     truncated = result.get("truncated")
@@ -283,7 +353,9 @@ def _global_issues(
     for event in boundaries:
         key = str(event.get("evidence_key") or "")
         boundary_resolution = str(event.get("resolution") or "")
-        if not key or boundary_resolution not in BLOCKING_RESOLUTIONS:
+        if not key:
+            issues.add("MALFORMED_TRAVERSAL")
+        if boundary_resolution not in BLOCKING_RESOLUTIONS:
             issues.add("MALFORMED_TRAVERSAL")
         else:
             blocking = True
@@ -301,32 +373,72 @@ def _global_issues(
     elif resolution == "RESOLVED" and (start_found is not True or target_found is not True):
         issues.add("CONTRADICTORY_TRAVERSAL")
 
+    if resolution == "RESOLVED" and counts.get("visited_count", 0) < 1:
+        issues.add("CONTRADICTORY_TRAVERSAL")
+    if resolution == "START_NODE_NOT_FOUND" and counts.get("visited_count") not in {None, 0}:
+        issues.add("CONTRADICTORY_TRAVERSAL")
+
+    required_expansions = 0
+    required_visited = 1 if paths else 0
+    for path in paths:
+        path_steps = _mapping_sequence(path.get("steps"))
+        if path_steps is None:
+            continue
+        required_expansions = max(required_expansions, len(path_steps))
+        path_nodes = {
+            str(step.get(field) or "")
+            for step in path_steps
+            for field in ("source", "target")
+            if str(step.get(field) or "")
+        }
+        required_visited = max(required_visited, len(path_nodes))
+    if counts.get("expanded_count", required_expansions) < required_expansions:
+        issues.add("CONTRADICTORY_TRAVERSAL")
+    if counts.get("visited_count", required_visited) < required_visited:
+        issues.add("CONTRADICTORY_TRAVERSAL")
+
     if truncated is True and termination not in _TRUNCATION_REASONS:
         issues.add("CONTRADICTORY_TRAVERSAL")
     if truncated is False and termination in _TRUNCATION_REASONS:
         issues.add("CONTRADICTORY_TRAVERSAL")
-    if complete is True:
-        completeness_contradiction = (
-            truncated is not False
-            or termination != "COMPLETE"
-            or coverage != COMPLETE_COVERAGE
-            or resolution != "RESOLVED"
-            or result.get("query_validity") is not True
-            or blocking
-            or result.get("encountered_partial_evidence") is True
-            or result.get("encountered_unknown_evidence") is True
-            or start_found is not True
-            or target_found is not True
-        )
-        if completeness_contradiction:
-            issues.add("CONTRADICTORY_TRAVERSAL")
+    if resolution != "RESOLVED":
+        expected_coverage = "UNKNOWN"
+    elif (
+        truncated is True
+        or blocking
+        or result.get("encountered_partial_evidence") is True
+        or result.get("encountered_unknown_evidence") is True
+    ):
+        expected_coverage = "PARTIAL"
+    else:
+        expected_coverage = COMPLETE_COVERAGE
+    if coverage != expected_coverage:
+        issues.add("CONTRADICTORY_TRAVERSAL")
+
+    expected_complete = (
+        resolution == "RESOLVED"
+        and result.get("query_validity") is True
+        and truncated is False
+        and not blocking
+        and result.get("encountered_partial_evidence") is False
+        and result.get("encountered_unknown_evidence") is False
+        and coverage == COMPLETE_COVERAGE
+        and start_found is True
+        and target_found is True
+    )
+    if isinstance(complete, bool) and complete is not expected_complete:
+        issues.add("CONTRADICTORY_TRAVERSAL")
     if complete is False and not paths:
         issues.add("INCOMPLETE_SUPPORTED_SEARCH")
 
-    return issues, flow_start, flow_target
+    return issues, flow_start, flow_target, effective_allowed_relations
 
 
-def _issues(codes: Sequence[str], verdict: VerificationVerdict, evidence_ids: tuple[str, ...]) -> tuple[VerificationIssue, ...]:
+def _issues(
+    codes: Sequence[str],
+    verdict: VerificationVerdict,
+    evidence_ids: tuple[str, ...],
+) -> tuple[VerificationIssue, ...]:
     return tuple(
         VerificationIssue(
             code=code,
@@ -356,7 +468,7 @@ def verify_data_flow_claim(
     paths = () if raw_paths is None else raw_paths
     normalized_boundaries = () if boundaries is None else boundaries
 
-    global_codes, flow_start, flow_target = _global_issues(
+    global_codes, flow_start, flow_target, effective_allowed_relations = _global_issues(
         claim, traversal_result, paths, normalized_boundaries
     )
     if structural_issue:
@@ -368,6 +480,7 @@ def verify_data_flow_claim(
             path,
             flow_start=flow_start,
             flow_target=flow_target,
+            effective_allowed_relations=effective_allowed_relations,
             seen_evidence=seen_evidence,
         )
         for path in paths
@@ -415,7 +528,10 @@ def verify_data_flow_claim(
     elif analyses:
         verdict = VerificationVerdict.UNKNOWN
         evidence_ids = tuple(sorted(set(valid_evidence_ids) | set(boundary_ids)))
-    elif traversal_result.get("complete_supported_search") is True:
+    elif (
+        traversal_result.get("complete_supported_search") is True
+        and "MAY_SEARCH_EVIDENCE" not in global_codes
+    ):
         verdict = (
             VerificationVerdict.FAIL
             if claim.kind is DataFlowClaimKind.CAN_FLOW_TO

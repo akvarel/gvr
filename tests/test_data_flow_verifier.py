@@ -273,6 +273,7 @@ def test_blocking_boundary_prevents_absence_proof_and_is_exposed_as_evidence():
     assert report.evidence_ids == ("bnd:ambiguous-call",)
     assert "BLOCKING_BOUNDARY" in _codes(report)
     assert [item.id for item in ingested.boundary_evidence] == ["bnd:ambiguous-call"]
+    assert [item.id for item in ingested.evidence] == list(report.evidence_ids)
 
 
 def test_unsupported_relation_inside_fake_path_is_rejected():
@@ -345,6 +346,83 @@ def test_multiple_may_paths_do_not_aggregate_into_truth():
     assert report.verdict is VerificationVerdict.UNKNOWN
 
 
+def test_empty_search_with_encountered_may_evidence_cannot_prove_absence():
+    result = _result([], encountered_may_evidence=True)
+    assert verify_data_flow_claim(_claim(), result).verdict is VerificationVerdict.UNKNOWN
+    assert verify_data_flow_claim(
+        _claim(DataFlowClaimKind.NO_SUPPORTED_PATH), result
+    ).verdict is VerificationVerdict.UNKNOWN
+
+
+def test_non_boolean_epistemic_flags_fail_closed():
+    result = _result([])
+    result["encountered_partial_evidence"] = "false"
+    report = verify_data_flow_claim(_claim(DataFlowClaimKind.NO_SUPPORTED_PATH), result)
+    assert report.verdict is VerificationVerdict.UNKNOWN
+    assert "MALFORMED_TRAVERSAL" in _codes(report)
+
+
+def test_malformed_query_bounds_cannot_support_absence():
+    result = _result([])
+    result["query_bounds"]["max_depth"] = "4"
+    report = verify_data_flow_claim(_claim(DataFlowClaimKind.NO_SUPPORTED_PATH), result)
+    assert report.verdict is VerificationVerdict.UNKNOWN
+    assert "MALFORMED_TRAVERSAL" in _codes(report)
+
+
+def test_invalid_requested_effective_rejected_relation_partition_fails_closed():
+    result = _result([])
+    result["query_bounds"]["effective_allowed_relations"] = []
+    report = verify_data_flow_claim(_claim(DataFlowClaimKind.NO_SUPPORTED_PATH), result)
+    assert report.verdict is VerificationVerdict.UNKNOWN
+    assert "CONTRADICTORY_TRAVERSAL" in _codes(report)
+
+
+def test_false_incomplete_flag_with_otherwise_complete_search_fails_closed():
+    exact = _evidence("A", "C")
+    result = _result(
+        [_path(exact)],
+        complete_supported_search=False,
+        search_coverage=COMPLETE,
+    )
+    report = verify_data_flow_claim(_claim(), result)
+    assert report.verdict is VerificationVerdict.UNKNOWN
+    assert "CONTRADICTORY_TRAVERSAL" in _codes(report)
+
+
+def test_returned_path_cannot_coexist_with_zero_traversal_accounting():
+    exact = _evidence("A", "C")
+    result = _result([_path(exact)])
+    result["visited_count"] = 0
+    result["expanded_count"] = 0
+    report = verify_data_flow_claim(_claim(), result)
+    assert report.verdict is VerificationVerdict.UNKNOWN
+    assert "CONTRADICTORY_TRAVERSAL" in _codes(report)
+
+
+def test_path_relation_must_be_in_the_effective_query_allowlist():
+    returned = _evidence("A", "C", relation="RETURNED_AS")
+    result = _result([_path(returned)])
+    report = verify_data_flow_claim(_claim(), result)
+    assert report.verdict is VerificationVerdict.UNKNOWN
+    assert "CONTRADICTORY_TRAVERSAL" in _codes(report)
+
+
+def test_boundary_requires_its_portable_boundary_evidence_key():
+    result = _result(
+        [],
+        complete_supported_search=False,
+        search_coverage="PARTIAL",
+        boundary_events=[{
+            "diagnostic_evidence_key": "diag:42",
+            "resolution": "AMBIGUOUS",
+        }],
+    )
+    report = verify_data_flow_claim(_claim(DataFlowClaimKind.NO_SUPPORTED_PATH), result)
+    assert report.verdict is VerificationVerdict.UNKNOWN
+    assert "MALFORMED_TRAVERSAL" in _codes(report)
+
+
 def test_no_supported_path_fails_when_proven_path_exists():
     exact = _evidence("A", "C")
     report = verify_data_flow_claim(
@@ -352,6 +430,12 @@ def test_no_supported_path_fails_when_proven_path_exists():
     )
     assert report.verdict is VerificationVerdict.FAIL
     assert report.evidence_ids == (exact["key"],)
+
+
+def test_library_api_normalizes_a_valid_string_claim_kind():
+    exact = _evidence("A", "C")
+    claim = DataFlowClaim(kind="CAN_FLOW_TO", start="A", target="C")  # type: ignore[arg-type]
+    assert verify_data_flow_claim(claim, _result([_path(exact)])).verdict is VerificationVerdict.PASS
 
 
 def test_positive_claim_recorded_in_ledger_becomes_stale_after_evidence_mutation_or_removal():
