@@ -43,6 +43,8 @@ from .verifiers.data_flow import (
     SUPPORTED_DATA_FLOW_RELATIONS,
     DataFlowClaim,
     DataFlowClaimKind,
+    DataFlowQueryScope,
+    build_query_result_evidence,
     verify_data_flow_claim,
 )
 from .wire import SCHEMA_VERSION, decode_markers, envelope
@@ -59,7 +61,7 @@ __all__ = [
     "stable_fingerprint", "GraphifyTraversalEvidence", "ingest_traversal_result",
     "BLOCKING_RESOLUTIONS", "COMPLETE_COVERAGE", "DATA_FLOW_VERIFIER",
     "SUPPORTED_DATA_FLOW_RELATIONS", "DataFlowClaim", "DataFlowClaimKind",
-    "verify_data_flow_claim",
+    "DataFlowQueryScope", "build_query_result_evidence", "verify_data_flow_claim",
 ]
 
 from .software import Coverage, DeltaKind, FunctionalDeltaItem, FunctionalDeltaResult, FunctionalSnapshot, Observable, RevisionRef, compare_functionality, FUNCTIONAL_REGRESSION_VERIFIER, verify_functional_regression

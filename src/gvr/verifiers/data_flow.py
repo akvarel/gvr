@@ -3,12 +3,12 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Mapping, Sequence
 
 from ..adapters.graphify import ingest_traversal_result
-from ..model import VerificationIssue, VerificationReport, VerificationVerdict
+from ..model import Evidence, VerificationIssue, VerificationReport, VerificationVerdict
 
 
 DATA_FLOW_VERIFIER = "gvr.graphify.data_flow.v1"
@@ -32,16 +32,54 @@ class DataFlowClaimKind(str, Enum):
 
 
 @dataclass(frozen=True)
+class DataFlowQueryScope:
+    """Immutable semantic scope that gives an absence claim its exact meaning."""
+
+    direction: str = "FORWARD"
+    effective_allowed_relations: frozenset[str] = field(
+        default_factory=lambda: frozenset(SUPPORTED_DATA_FLOW_RELATIONS)
+    )
+    stop_nodes: frozenset[str] = field(default_factory=frozenset)
+
+    def __post_init__(self) -> None:
+        direction = str(self.direction).upper()
+        relations = frozenset(str(item) for item in self.effective_allowed_relations)
+        stop_nodes = frozenset(str(item) for item in self.stop_nodes)
+        if direction not in {"FORWARD", "BACKWARD"}:
+            raise ValueError(f"invalid data-flow scope direction: {direction!r}")
+        if not relations <= SUPPORTED_DATA_FLOW_RELATIONS:
+            raise ValueError("data-flow claim scope contains unsupported relations")
+        if any(not item for item in stop_nodes):
+            raise ValueError("data-flow claim scope contains an empty stop node")
+        object.__setattr__(self, "direction", direction)
+        object.__setattr__(self, "effective_allowed_relations", relations)
+        object.__setattr__(self, "stop_nodes", stop_nodes)
+
+
+@dataclass(frozen=True)
 class DataFlowClaim:
     kind: DataFlowClaimKind
     start: str
     target: str
+    scope: DataFlowQueryScope = field(default_factory=DataFlowQueryScope)
+    evidence_namespace: str = "default"
+    source_context: str | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.kind, DataFlowClaimKind):
             object.__setattr__(self, "kind", DataFlowClaimKind(str(self.kind)))
+        if not isinstance(self.scope, DataFlowQueryScope):
+            if not isinstance(self.scope, Mapping):
+                raise ValueError("data-flow claim scope must be a DataFlowQueryScope")
+            object.__setattr__(self, "scope", DataFlowQueryScope(**dict(self.scope)))
         if not self.start or not self.target:
             raise ValueError("data-flow claim requires non-empty start and target")
+        namespace = str(self.evidence_namespace)
+        if not namespace:
+            raise ValueError("data-flow claim requires a non-empty evidence namespace")
+        object.__setattr__(self, "evidence_namespace", namespace)
+        if self.source_context is not None:
+            object.__setattr__(self, "source_context", str(self.source_context))
 
 
 @dataclass(frozen=True)
@@ -70,6 +108,7 @@ _ISSUE_MESSAGES = {
     "MALFORMED_TRAVERSAL": "The traversal payload does not satisfy the public Graphify result contract.",
     "MALFORMED_PATH": "A returned path is structurally inconsistent with its supporting evidence.",
     "CLAIM_QUERY_MISMATCH": "The claim endpoints do not match the traversal query direction.",
+    "CLAIM_SCOPE_MISMATCH": "The traversal query scope does not match the immutable claim scope.",
     "INVALID_QUERY": "Graphify reports an invalid traversal query.",
 }
 
@@ -90,6 +129,119 @@ def _mapping_sequence(value: Any) -> tuple[Mapping[str, Any], ...] | None:
     if not all(isinstance(item, Mapping) for item in value):
         return None
     return tuple(value)
+
+
+def _scope_metadata(scope: DataFlowQueryScope) -> dict[str, Any]:
+    return {
+        "direction": scope.direction,
+        "effective_allowed_relations": sorted(scope.effective_allowed_relations),
+        "stop_nodes": sorted(scope.stop_nodes),
+    }
+
+
+def _canonical_query_result(result: Mapping[str, Any]) -> dict[str, Any]:
+    """Normalize the public result facts used as a replaceable ledger basis."""
+
+    raw_paths = _mapping_sequence(result.get("paths")) or ()
+    paths: list[dict[str, Any]] = []
+    for path in raw_paths:
+        refs = _mapping_sequence(path.get("supporting_evidence")) or ()
+        steps = _mapping_sequence(path.get("steps")) or ()
+        paths.append({
+            "path_identity": [str(item) for item in (path.get("path_identity") or ())],
+            "path_exactness": str(path.get("path_exactness") or ""),
+            "path_receiver_confidence": str(path.get("path_receiver_confidence") or ""),
+            "path_coverage": str(path.get("path_coverage") or ""),
+            "evidence_ids": [str(ref.get("key") or "") for ref in refs],
+            "steps": [
+                {
+                    "source": str(step.get("source") or ""),
+                    "target": str(step.get("target") or ""),
+                    "relation": str(step.get("relation") or ""),
+                }
+                for step in steps
+            ],
+        })
+    paths.sort(key=lambda path: json.dumps(path, sort_keys=True, separators=(",", ":")))
+
+    raw_boundaries = _mapping_sequence(result.get("boundary_events")) or ()
+    boundaries = [dict(_stable(event)) for event in raw_boundaries]
+    boundaries.sort(key=lambda event: json.dumps(event, sort_keys=True, separators=(",", ":")))
+
+    raw_bounds = result.get("query_bounds")
+    bounds = dict(raw_bounds) if isinstance(raw_bounds, Mapping) else {}
+    normalized_bounds = {
+        "direction": str(bounds.get("direction") or ""),
+        "max_depth": bounds.get("max_depth"),
+        "max_paths": bounds.get("max_paths"),
+        "max_expansions": bounds.get("max_expansions"),
+        "requested_allowed_relations": sorted(str(item) for item in (bounds.get("requested_allowed_relations") or ())),
+        "effective_allowed_relations": sorted(str(item) for item in (bounds.get("effective_allowed_relations") or ())),
+        "rejected_relations": sorted(str(item) for item in (bounds.get("rejected_relations") or ())),
+        "stop_nodes": sorted(str(item) for item in (bounds.get("stop_nodes") or ())),
+    }
+    return {
+        "query_start": str(result.get("start") or ""),
+        "query_target": None if result.get("target") is None else str(result.get("target")),
+        "direction": str(result.get("direction") or ""),
+        "visited_count": result.get("visited_count"),
+        "expanded_count": result.get("expanded_count"),
+        "truncated": result.get("truncated"),
+        "termination_reason": str(result.get("termination_reason") or ""),
+        "query_bounds": normalized_bounds,
+        "boundary_events": boundaries,
+        "search_coverage": str(result.get("search_coverage") or ""),
+        "complete_supported_search": result.get("complete_supported_search"),
+        "start_node_found": result.get("start_node_found"),
+        "target_node_found": result.get("target_node_found"),
+        "query_validity": result.get("query_validity"),
+        "input_resolution": str(result.get("input_resolution") or ""),
+        "rejected_relations": sorted(str(item) for item in (result.get("rejected_relations") or ())),
+        "encountered_partial_evidence": result.get("encountered_partial_evidence"),
+        "encountered_unknown_evidence": result.get("encountered_unknown_evidence"),
+        "encountered_may_evidence": result.get("encountered_may_evidence"),
+        "paths": paths,
+    }
+
+
+def build_query_result_evidence(
+    claim: DataFlowClaim,
+    traversal_result: Mapping[str, Any],
+) -> Evidence:
+    """Build the stable query-evidence slot whose payload changes invalidate a claim.
+
+    The ID names the semantic query slot, not one result version. Updating the
+    normalized payload for the same ID therefore makes ClaimLedger dependents
+    stale. ``source_context`` is deliberately payload state rather than part of
+    the ID so a revision change invalidates the existing verification basis.
+    """
+
+    identity = {
+        "schema_version": 1,
+        "verifier": DATA_FLOW_VERIFIER,
+        "evidence_namespace": claim.evidence_namespace,
+        "start": claim.start,
+        "target": claim.target,
+        "scope": _scope_metadata(claim.scope),
+    }
+    canonical_identity = json.dumps(identity, sort_keys=True, separators=(",", ":"))
+    evidence_id = "gvrq:" + hashlib.sha256(canonical_identity.encode("utf-8")).hexdigest()
+    payload = {
+        "schema_version": 1,
+        "kind": "graphify.data_flow_query_result",
+        "evidence_namespace": claim.evidence_namespace,
+        "source_context": claim.source_context,
+        "query_identity": identity,
+        "result": _canonical_query_result(traversal_result),
+    }
+    canonical_payload = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return Evidence(
+        id=evidence_id,
+        kind="graphify.data_flow_query_result",
+        payload=payload,
+        source=claim.source_context,
+        fingerprint=hashlib.sha256(canonical_payload.encode("utf-8")).hexdigest(),
+    )
 
 
 def _expected_evidence_key(item: Mapping[str, Any]) -> str:
@@ -272,6 +424,8 @@ def _global_issues(
 
     query_bounds = result.get("query_bounds")
     effective_allowed_relations: frozenset[str] = frozenset()
+    actual_stop_nodes: frozenset[str] = frozenset()
+    query_limits: dict[str, int] = {}
     if not isinstance(query_bounds, Mapping):
         issues.add("MALFORMED_TRAVERSAL")
     else:
@@ -289,6 +443,7 @@ def _global_issues(
         else:
             requested_relations = frozenset(requested)
             effective_allowed_relations = frozenset(effective)
+            actual_stop_nodes = frozenset(stop_nodes)
             expected_effective = requested_relations & SUPPORTED_DATA_FLOW_RELATIONS
             expected_rejected = requested_relations - SUPPORTED_DATA_FLOW_RELATIONS
             if effective_allowed_relations != expected_effective:
@@ -301,6 +456,15 @@ def _global_issues(
             value = query_bounds.get(name)
             if not isinstance(value, int) or isinstance(value, bool) or value < minimum:
                 issues.add("MALFORMED_TRAVERSAL")
+            else:
+                query_limits[name] = value
+
+    if (
+        claim.scope.direction != direction
+        or claim.scope.effective_allowed_relations != effective_allowed_relations
+        or claim.scope.stop_nodes != actual_stop_nodes
+    ):
+        issues.add("CLAIM_SCOPE_MISMATCH")
 
     rejected_relations = result.get("rejected_relations")
     if not isinstance(rejected_relations, (list, tuple)) or not all(
@@ -384,6 +548,8 @@ def _global_issues(
         path_steps = _mapping_sequence(path.get("steps"))
         if path_steps is None:
             continue
+        if len(path_steps) > query_limits.get("max_depth", len(path_steps)):
+            issues.add("CONTRADICTORY_TRAVERSAL")
         required_expansions = max(required_expansions, len(path_steps))
         path_nodes = {
             str(step.get(field) or "")
@@ -395,6 +561,12 @@ def _global_issues(
     if counts.get("expanded_count", required_expansions) < required_expansions:
         issues.add("CONTRADICTORY_TRAVERSAL")
     if counts.get("visited_count", required_visited) < required_visited:
+        issues.add("CONTRADICTORY_TRAVERSAL")
+    if len(paths) > query_limits.get("max_paths", len(paths)):
+        issues.add("CONTRADICTORY_TRAVERSAL")
+    if counts.get("expanded_count", 0) > query_limits.get(
+        "max_expansions", counts.get("expanded_count", 0)
+    ):
         issues.add("CONTRADICTORY_TRAVERSAL")
 
     if truncated is True and termination not in _TRUNCATION_REASONS:
@@ -462,6 +634,7 @@ def verify_data_flow_claim(
     """
 
     ingested = ingest_traversal_result(traversal_result)
+    query_evidence = build_query_result_evidence(claim, traversal_result)
     raw_paths = _mapping_sequence(traversal_result.get("paths"))
     boundaries = _boundary_events(traversal_result)
     structural_issue = raw_paths is None or boundaries is None
@@ -510,6 +683,7 @@ def verify_data_flow_claim(
         "MALFORMED_TRAVERSAL",
         "CONTRADICTORY_TRAVERSAL",
         "CLAIM_QUERY_MISMATCH",
+        "CLAIM_SCOPE_MISMATCH",
         "INVALID_QUERY",
     }) or bool(hard_path_codes)
 
@@ -524,7 +698,11 @@ def verify_data_flow_claim(
             else VerificationVerdict.FAIL
         )
         decision_code = "PROVEN_SUPPORTED_PATH"
-        evidence_ids = selected.evidence_ids
+        evidence_ids = (
+            selected.evidence_ids
+            if selected.identity
+            else (query_evidence.id,)
+        )
     elif analyses:
         verdict = VerificationVerdict.UNKNOWN
         evidence_ids = tuple(sorted(set(valid_evidence_ids) | set(boundary_ids)))
@@ -538,7 +716,7 @@ def verify_data_flow_claim(
             else VerificationVerdict.PASS
         )
         decision_code = "NO_SUPPORTED_PATH"
-        evidence_ids = ()
+        evidence_ids = (query_evidence.id,)
     else:
         verdict = VerificationVerdict.UNKNOWN
         evidence_ids = boundary_ids
@@ -575,6 +753,10 @@ def verify_data_flow_claim(
         "claim_kind": claim.kind.value,
         "start": claim.start,
         "target": claim.target,
+        "claim_scope": _scope_metadata(claim.scope),
+        "evidence_namespace": claim.evidence_namespace,
+        "source_context": claim.source_context,
+        "query_evidence_id": query_evidence.id,
         "returned_path_count": len(analyses),
         "qualifying_path_count": len(qualifying),
         "selected_path_identity": (

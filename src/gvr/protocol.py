@@ -4,7 +4,13 @@ from typing import Any, Mapping
 
 from .core import Action, Goal, Predicate, Proposal, StateEffect, VerificationContext, default_registry
 from .text_search import TextSearchAssertion, evaluate_text_search
-from .verifiers.data_flow import DataFlowClaim, DataFlowClaimKind, verify_data_flow_claim
+from .verifiers.data_flow import (
+    DataFlowClaim,
+    DataFlowClaimKind,
+    DataFlowQueryScope,
+    SUPPORTED_DATA_FLOW_RELATIONS,
+    verify_data_flow_claim,
+)
 from .wire import SCHEMA_VERSION, decode_markers, envelope
 from .software import Coverage, FunctionalSnapshot, Observable, RevisionRef, compare_functionality, verify_functional_regression
 
@@ -155,10 +161,41 @@ def handle_request(request: Mapping[str, Any]) -> dict[str, Any]:
         except ValueError as exc:
             raise ProtocolError("INVALID_CLAIM_KIND", "claim_kind is not supported") from exc
         traversal = _require_mapping(payload.get("traversal_result", {}), "traversal_result")
-        report = verify_data_flow_claim(
-            DataFlowClaim(kind=kind, start=str(payload["start"]), target=str(payload["target"])),
-            traversal,
+        scope_data = _require_mapping(payload.get("scope", {}), "scope")
+        relations = scope_data.get(
+            "effective_allowed_relations",
+            sorted(SUPPORTED_DATA_FLOW_RELATIONS),
         )
+        stop_nodes = scope_data.get("stop_nodes", ())
+        if not isinstance(relations, (list, tuple)) or not all(
+            isinstance(item, str) for item in relations
+        ):
+            raise ProtocolError("INVALID_CLAIM_SCOPE", "effective_allowed_relations must be an array of strings")
+        if not isinstance(stop_nodes, (list, tuple)) or not all(
+            isinstance(item, str) for item in stop_nodes
+        ):
+            raise ProtocolError("INVALID_CLAIM_SCOPE", "stop_nodes must be an array of strings")
+        try:
+            scope = DataFlowQueryScope(
+                direction=str(scope_data.get("direction", "FORWARD")),
+                effective_allowed_relations=frozenset(relations),
+                stop_nodes=frozenset(stop_nodes),
+            )
+            claim = DataFlowClaim(
+                kind=kind,
+                start=str(payload["start"]),
+                target=str(payload["target"]),
+                scope=scope,
+                evidence_namespace=str(payload.get("evidence_namespace") or "default"),
+                source_context=(
+                    None
+                    if payload.get("source_context") is None
+                    else str(payload.get("source_context"))
+                ),
+            )
+        except ValueError as exc:
+            raise ProtocolError("INVALID_CLAIM_SCOPE", str(exc)) from exc
+        report = verify_data_flow_claim(claim, traversal)
         return envelope("data_flow_claim_verification", report)
 
     raise ProtocolError("UNKNOWN_OPERATION", f"unsupported operation: {op!r}")
