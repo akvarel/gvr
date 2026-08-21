@@ -897,3 +897,21 @@ def test_36_protocol_rejects_omitted_nested_fingerprints(
     })
 
     assert response["payload"]["code"] == "INVALID_VERIFICATION_PLANNING_REQUEST"
+
+
+@pytest.mark.parametrize(
+    "details",
+    (
+        {"status": "PASS"},
+        {"outcome": "FAIL"},
+        {"result": "UNKNOWN"},
+        {"truth_value": True},
+        {"is_sufficient": True},
+        {"evidence_adequacy": "complete"},
+    ),
+)
+def test_37_planner_issues_reject_verdict_and_sufficiency_metadata_aliases(
+    details: dict[str, Any],
+) -> None:
+    with pytest.raises(VerificationPlanningError, match="unsupported field"):
+        gvr.VerificationPlannerIssue(code="TEST_ISSUE", details=details)
