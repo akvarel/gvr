@@ -313,3 +313,5 @@ The falsification layer contains no:
 - direct truth verdict.
 
 Those omissions are deliberate. Falsification challenges a claim under an exact finite contract. The declared verifier remains the only component that returns verification truth.
+
+RED, GREEN, post-GREEN adversarial review, and fresh-wheel validation evidence is recorded in [Task 20 falsification layer TDD evidence](testing/falsification-task-20.tdd.md).
