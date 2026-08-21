@@ -13,6 +13,7 @@ from gvr import (
     VerifierCost,
     VerifierDeterminism,
     handle_request,
+    safe_handle_request,
 )
 from gvr.evidence_providers import (
     BUILTIN_EVIDENCE_PROVIDER_REGISTRY,
@@ -279,3 +280,79 @@ def test_provider_to_verifier_compatibility_is_exact_and_never_upgrades_truth() 
     assert compatibility.truth_upgraded is False
     assert compatibility.evidence_kinds == ("graphify.data_flow_edge", "graphify.data_flow_query_result")
     assert provider_capability_is_compatible_with_verifier(provider_cap, verifier_cap, claim_kind="NO_SUPPORTED_PATH").compatible is False
+
+
+def test_registry_queries_by_request_and_evidence_kind_not_claim_kind() -> None:
+    alpha = capability(provider_id="provider.alpha", claim_kinds=("CAN_FLOW_TO",), produced_evidence_kinds=("graphify.data_flow_query_result",))
+    beta = capability(provider_id="provider.beta", claim_kinds=("NO_SUPPORTED_PATH",), produced_evidence_kinds=("graphify.data_flow_edge",))
+    reg = EvidenceProviderRegistry((beta, alpha))
+
+    assert reg.query(request_kind="CAN_FLOW_TO") == (alpha,)
+    assert reg.query(evidence_kind="graphify.data_flow_edge") == (beta,)
+    assert reg.query(request_kind="NO_SUPPORTED_PATH", evidence_kind="graphify.data_flow_query_result") == ()
+    with pytest.raises(TypeError):
+        reg.query(claim_kind="CAN_FLOW_TO")  # type: ignore[call-arg]
+
+
+def test_describe_evidence_provider_capabilities_rejects_claim_kind_filter() -> None:
+    response = safe_handle_request({"schema_version": 1, "op": "describe_evidence_provider_capabilities", "payload": {"claim_kind": "CAN_FLOW_TO"}})
+    assert response["kind"] == "protocol_error"
+    assert response["payload"]["code"] == "INVALID_PAYLOAD"
+    assert "claim_kind" in response["payload"]["message"]
+
+
+def test_validate_evidence_provider_result_protocol_operation_normalizes_serialized_result() -> None:
+    cap = capability()
+    req = request()
+    res = result()
+    response = handle_request({
+        "schema_version": 1,
+        "op": "validate_evidence_provider_result",
+        "payload": {
+            "request": {
+                "request_id": req.request_id,
+                "provider_id": req.provider_id,
+                "provider_version": req.provider_version,
+                "claim_kind": req.claim_kind,
+                "required_evidence_kinds": list(reversed(req.required_evidence_kinds)),
+                "accepted_evidence_kinds": list(reversed(req.accepted_evidence_kinds)),
+                "input": {"scope": ["a", "b"], "target": "x"},
+                "bounds": dict(req.bounds),
+            },
+            "capability": cap.to_dict(),
+            "result": res.to_dict(),
+        },
+    })
+
+    assert response["kind"] == "evidence_provider_result"
+    assert response["payload"]["request_id"] == "req-1"
+    assert response["payload"]["coverage"]["covered_evidence_kinds"] == ["graphify.data_flow_query_result"]
+    assert response["payload"]["evidence"][0]["payload"] == {"complete": True}
+
+
+def test_validate_evidence_provider_result_protocol_operation_returns_machine_readable_errors() -> None:
+    cap = capability()
+    req = request()
+    bad = result(capability_fingerprint="0" * 64).to_dict()
+    response = safe_handle_request({
+        "schema_version": 1,
+        "op": "validate_evidence_provider_result",
+        "payload": {
+            "request": {
+                "request_id": req.request_id,
+                "provider_id": req.provider_id,
+                "provider_version": req.provider_version,
+                "claim_kind": req.claim_kind,
+                "required_evidence_kinds": list(req.required_evidence_kinds),
+                "accepted_evidence_kinds": list(req.accepted_evidence_kinds),
+                "input": dict(req.input),
+                "bounds": dict(req.bounds),
+            },
+            "capability": cap.to_dict(),
+            "result": bad,
+        },
+    })
+
+    assert response["kind"] == "protocol_error"
+    assert response["payload"]["code"] == "INVALID_EVIDENCE_PROVIDER_RESULT"
+    assert "fingerprint" in response["payload"]["message"]
