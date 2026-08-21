@@ -15,6 +15,15 @@ class CanonicalizationError(ValueError):
     """Raised when semantic content cannot be canonically transported."""
 
 
+def canonical_utf8_key(value: str, *, path: str = "string") -> bytes:
+    try:
+        return value.encode("utf-8", errors="strict")
+    except UnicodeEncodeError as exc:
+        raise CanonicalizationError(
+            f"{path} contains an invalid Unicode surrogate"
+        ) from exc
+
+
 def _number_token(value: int | float, *, path: str) -> dict[str, str]:
     if isinstance(value, int):
         if abs(value) > _JS_SAFE_INTEGER_MAX:
@@ -27,8 +36,6 @@ def _number_token(value: int | float, *, path: str) -> dict[str, str]:
             raise CanonicalizationError(f"{path} contains a non-finite number")
         number = float(value)
 
-    # JSON consumers preserve the sign bit of -0 inconsistently during
-    # stringify/canonicalization. Treat both zero spellings as one semantic value.
     if number == 0.0:
         number = 0.0
     bits = struct.pack(">d", number).hex()
@@ -38,14 +45,15 @@ def _number_token(value: int | float, *, path: str) -> dict[str, str]:
 def canonical_transport_value(value: Any, *, path: str = "value") -> Any:
     """Build a language-neutral canonical tree for bundle fingerprinting.
 
-    JSON itself does not preserve lexical number distinctions such as ``1`` vs
-    ``1.0`` and different runtimes stringify exponent forms differently. The
-    fingerprint tree therefore tags maps/lists and encodes every finite numeric
-    value by its normalized IEEE-754 binary64 bits. Safe integers and equivalent
-    floats intentionally share one semantic numeric representation.
+    Numbers use normalized IEEE-754 binary64 tokens. Mapping keys are ordered by
+    their exact UTF-8 byte sequences rather than host-language string ordering.
+    Strings must be valid Unicode scalar sequences encodable as strict UTF-8.
     """
 
-    if value is None or isinstance(value, (str, bool)):
+    if value is None or isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        canonical_utf8_key(value, path=path)
         return value
     if isinstance(value, int):
         return _number_token(value, path=path)
@@ -56,11 +64,12 @@ def canonical_transport_value(value: Any, *, path: str = "value") -> Any:
         for key in value:
             if not isinstance(key, str):
                 raise CanonicalizationError(f"{path} contains a non-string mapping key")
+            canonical_utf8_key(key, path=f"{path} key")
             items.append([
                 key,
                 canonical_transport_value(value[key], path=f"{path}.{key}"),
             ])
-        items.sort(key=lambda item: item[0])
+        items.sort(key=lambda item: canonical_utf8_key(item[0], path=f"{path} key"))
         return {"$gvr_map": items}
     if isinstance(value, (list, tuple)):
         return {
@@ -76,12 +85,11 @@ def canonical_transport_value(value: Any, *, path: str = "value") -> Any:
 
 def canonical_transport_json(value: Any) -> str:
     envelope = {
-        "format": BUNDLE_FINGERPRINT_FORMAT,
         "content": canonical_transport_value(value),
+        "format": BUNDLE_FINGERPRINT_FORMAT,
     }
     return json.dumps(
         envelope,
-        sort_keys=True,
         separators=(",", ":"),
         ensure_ascii=False,
         allow_nan=False,
@@ -89,4 +97,10 @@ def canonical_transport_json(value: Any) -> str:
 
 
 def canonical_transport_fingerprint(value: Any) -> str:
-    return hashlib.sha256(canonical_transport_json(value).encode("utf-8")).hexdigest()
+    try:
+        encoded = canonical_transport_json(value).encode("utf-8", errors="strict")
+    except UnicodeEncodeError as exc:
+        raise CanonicalizationError(
+            "canonical content contains an invalid Unicode surrogate"
+        ) from exc
+    return hashlib.sha256(encoded).hexdigest()
