@@ -2,8 +2,19 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
-from .bundle import BundleValidationError
+from .bundle import BundleValidationError, VerificationBundle
 from .core import Action, Goal, Predicate, Proposal, StateEffect, VerificationContext, default_registry
+from .model import Evidence, VerificationIssue, VerificationReport, VerificationVerdict
+from .session import (
+    AtomicClaim,
+    ClaimGraph,
+    ClaimGraphValidationError,
+    ClaimOperator,
+    CompositeClaim,
+    SessionBudget,
+    VerificationSession,
+    VerificationSessionError,
+)
 from .text_search import TextSearchAssertion, evaluate_text_search
 from .verifiers.data_flow import (
     DataFlowClaim,
@@ -100,6 +111,161 @@ def _snapshot(data: Mapping[str, Any]) -> FunctionalSnapshot:
         observables=tuple(_observable(_require_mapping(x, "observable")) for x in observables),
         coverage_by_kind=parsed_coverage,
     )
+
+
+def _string_array(value: Any, name: str) -> tuple[str, ...]:
+    if not isinstance(value, (list, tuple)) or not all(
+        isinstance(item, str) and item for item in value
+    ):
+        raise ProtocolError("INVALID_PAYLOAD", f"{name} must be an array of non-empty strings")
+    return tuple(value)
+
+
+def _verification_bundle(data: Mapping[str, Any]) -> VerificationBundle:
+    report_data = _require_mapping(data.get("report", {}), "bundle report")
+    issues_data = report_data.get("issues", ())
+    if not isinstance(issues_data, (list, tuple)):
+        raise ProtocolError("INVALID_VERIFICATION_BUNDLE", "bundle report issues must be an array")
+    try:
+        report = VerificationReport(
+            verdict=VerificationVerdict(str(report_data.get("verdict") or "")),
+            verifier=str(report_data.get("verifier") or ""),
+            issues=tuple(
+                VerificationIssue(
+                    code=str(issue_data.get("code") or ""),
+                    message=str(issue_data.get("message") or ""),
+                    verdict=VerificationVerdict(str(issue_data.get("verdict") or "")),
+                    evidence_ids=_string_array(
+                        issue_data.get("evidence_ids", ()),
+                        "issue evidence_ids",
+                    ),
+                )
+                for issue_data in (
+                    _require_mapping(item, "bundle issue")
+                    for item in issues_data
+                )
+            ),
+            evidence_ids=_string_array(
+                report_data.get("evidence_ids", ()),
+                "bundle report evidence_ids",
+            ),
+            metadata=decode_markers(dict(_require_mapping(
+                report_data.get("metadata", {}),
+                "bundle report metadata",
+            ))),
+        )
+    except ValueError as exc:
+        raise ProtocolError("INVALID_VERIFICATION_BUNDLE", str(exc)) from exc
+
+    evidence_data = data.get("evidence", ())
+    if not isinstance(evidence_data, (list, tuple)):
+        raise ProtocolError("INVALID_VERIFICATION_BUNDLE", "bundle evidence must be an array")
+    evidence: list[Evidence] = []
+    for item in evidence_data:
+        record = _require_mapping(item, "bundle evidence record")
+        payload = _require_mapping(record.get("payload", {}), "evidence payload")
+        source = record.get("source")
+        fingerprint = record.get("fingerprint")
+        if source is not None and not isinstance(source, str):
+            raise ProtocolError("INVALID_VERIFICATION_BUNDLE", "evidence source must be a string")
+        if fingerprint is not None and not isinstance(fingerprint, str):
+            raise ProtocolError("INVALID_VERIFICATION_BUNDLE", "evidence fingerprint must be a string")
+        evidence.append(Evidence(
+            id=str(record.get("id") or ""),
+            kind=str(record.get("kind") or ""),
+            payload=decode_markers(dict(payload)),
+            source=source,
+            fingerprint=fingerprint,
+        ))
+
+    try:
+        bundle = VerificationBundle(
+            schema_version=data.get("schema_version", 1),
+            kind=data.get("kind", "gvr.verification_bundle"),
+            report=report,
+            evidence=tuple(evidence),
+            claim_dependency_ids=_string_array(
+                data.get("claim_dependency_ids", ()),
+                "bundle claim_dependency_ids",
+            ),
+        )
+    except (BundleValidationError, TypeError, ValueError) as exc:
+        raise ProtocolError("INVALID_VERIFICATION_BUNDLE", str(exc)) from exc
+    supplied_verifier = data.get("verifier")
+    if supplied_verifier is not None and supplied_verifier != bundle.verifier:
+        raise ProtocolError(
+            "INVALID_VERIFICATION_BUNDLE",
+            "bundle verifier does not match the normalized report",
+        )
+    supplied_fingerprint = data.get("fingerprint")
+    if supplied_fingerprint is not None and supplied_fingerprint != bundle.fingerprint:
+        raise ProtocolError(
+            "INVALID_VERIFICATION_BUNDLE",
+            "bundle fingerprint does not match canonical content",
+        )
+    return bundle
+
+
+def _claim_graph(data: Mapping[str, Any]) -> ClaimGraph:
+    nodes_data = data.get("nodes", ())
+    if not isinstance(nodes_data, (list, tuple)):
+        raise ProtocolError("INVALID_CLAIM_GRAPH", "claim graph nodes must be an array")
+    nodes = []
+    try:
+        for item in nodes_data:
+            node = _require_mapping(item, "claim graph node")
+            node_type = node.get("node_type")
+            dependencies = _string_array(
+                node.get("dependencies", ()),
+                "claim dependencies",
+            )
+            if node_type == "ATOMIC":
+                nodes.append(AtomicClaim(
+                    claim_id=str(node.get("claim_id") or ""),
+                    claim_kind=str(node.get("claim_kind") or ""),
+                    spec=decode_markers(dict(_require_mapping(
+                        node.get("spec", {}),
+                        "claim spec",
+                    ))),
+                    verifier=str(node.get("verifier") or ""),
+                    scope=decode_markers(dict(_require_mapping(
+                        node.get("scope", {}),
+                        "claim scope",
+                    ))),
+                    dependencies=dependencies,
+                    description=node.get("description"),
+                ))
+            elif node_type == "COMPOSITE":
+                nodes.append(CompositeClaim(
+                    claim_id=str(node.get("claim_id") or ""),
+                    operator=ClaimOperator(str(node.get("operator") or "")),
+                    dependencies=dependencies,
+                    description=node.get("description"),
+                ))
+            else:
+                raise ClaimGraphValidationError(
+                    f"unsupported claim node_type {node_type!r}"
+                )
+        return ClaimGraph(
+            schema_version=data.get("schema_version", 1),
+            kind=data.get("kind", "gvr.claim_graph"),
+            nodes=tuple(nodes),
+        )
+    except (ClaimGraphValidationError, TypeError, ValueError) as exc:
+        raise ProtocolError("INVALID_CLAIM_GRAPH", str(exc)) from exc
+
+
+def _session_budget(data: Mapping[str, Any]) -> SessionBudget:
+    try:
+        return SessionBudget(
+            max_claims=data.get("max_claims"),
+            max_bundles=data.get("max_bundles"),
+            max_evidence_records=data.get("max_evidence_records"),
+            max_evidence_bytes=data.get("max_evidence_bytes"),
+            max_steps=data.get("max_steps"),
+        )
+    except VerificationSessionError as exc:
+        raise ProtocolError("INVALID_BUDGET", str(exc)) from exc
 
 
 def _data_flow_inputs(
@@ -227,6 +393,55 @@ def handle_request(request: Mapping[str, Any]) -> dict[str, Any]:
         except BundleValidationError as exc:
             raise ProtocolError("INVALID_VERIFICATION_BUNDLE", str(exc)) from exc
         return envelope("verification_bundle", bundle)
+
+    if op == "compose_verification_session":
+        graph = _claim_graph(_require_mapping(
+            payload.get("claim_graph", {}),
+            "claim_graph",
+        ))
+        roots = _string_array(payload.get("roots", ()), "roots")
+        bundle_items = payload.get("bundles", ())
+        if not isinstance(bundle_items, (list, tuple)):
+            raise ProtocolError("INVALID_VERIFICATION_BUNDLE", "bundles must be an array")
+        bundles: dict[str, VerificationBundle] = {}
+        for item in bundle_items:
+            entry = _require_mapping(item, "session bundle")
+            claim_id = str(entry.get("claim_id") or "")
+            if not claim_id:
+                raise ProtocolError(
+                    "INVALID_VERIFICATION_BUNDLE",
+                    "session bundle requires claim_id",
+                )
+            if claim_id in bundles:
+                raise ProtocolError(
+                    "INVALID_VERIFICATION_BUNDLE",
+                    f"duplicate session bundle for claim {claim_id}",
+                )
+            bundles[claim_id] = _verification_bundle(_require_mapping(
+                entry.get("bundle", {}),
+                "verification bundle",
+            ))
+        budget = _session_budget(_require_mapping(
+            payload.get("budget", {}),
+            "budget",
+        ))
+        try:
+            session = VerificationSession.compose(
+                graph=graph,
+                roots=roots,
+                bundles=bundles,
+                budget=budget,
+            )
+        except BundleValidationError as exc:
+            raise ProtocolError("INVALID_VERIFICATION_BUNDLE", str(exc)) from exc
+        except VerificationSessionError as exc:
+            code = (
+                "INVALID_VERIFICATION_BUNDLE"
+                if "bundle" in str(exc).lower()
+                else "INVALID_VERIFICATION_SESSION"
+            )
+            raise ProtocolError(code, str(exc)) from exc
+        return envelope("verification_session", session.to_dict())
 
     raise ProtocolError("UNKNOWN_OPERATION", f"unsupported operation: {op!r}")
 

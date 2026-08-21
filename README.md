@@ -85,3 +85,43 @@ Schema version 1 additionally exposes `verify_data_flow_claim_bundle`. Its
 `verification_bundle` envelope preserves the bundle version, kind, verifier,
 fingerprint, report, claim dependencies, and deterministically ordered evidence
 records with IDs, kinds, payloads, sources, and producer fingerprints.
+
+## Claim graphs and verification sessions
+
+`ClaimGraph` is the deterministic multi-claim semantic layer. `AtomicClaim`
+records carry a stable ID, claim kind, strict JSON-compatible specification,
+required verifier, semantic scope, and explicit claim dependencies.
+`CompositeClaim` records support only exact `AND`, `OR`, and `NOT` tri-state
+logic. Graph construction canonicalizes node and dependency order, rejects
+unknown or self dependencies, cycles, ambiguous duplicate IDs, invalid arity,
+and unsupported runtime values, and exposes a strict SHA-256 fingerprint.
+Human descriptions are retained on the public claim records but are not treated
+as truth-bearing semantic identity.
+
+`VerificationSession` owns a `ClaimLedger` and accepts trusted atomic results
+only as validated `VerificationBundle` objects. Bundle verifier and claim
+dependency requirements must exactly match the graph. Missing bundles and stale
+claims remain effective `UNKNOWN`; changed typed Evidence semantics re-version
+the atomic claim and stale dependent composites; identical bundle rerecording
+does not change claim or dependent versions. Composite claims are explicitly
+recomputed from effective, fresh dependency states using these rules:
+
+- `AND`: `FAIL` dominates, then `UNKNOWN`, otherwise `PASS`;
+- `OR`: `PASS` dominates, then `UNKNOWN`, otherwise `FAIL`;
+- `NOT`: swaps `PASS`/`FAIL` and preserves `UNKNOWN`.
+
+Session state includes canonical graph and roots, atomic bundle fingerprints and
+evidence references, stored/effective claim verdicts and freshness, unverified
+atomic claims, deterministic budget declaration and consumption, explicit
+`COMPLETE` / `BUDGET_EXHAUSTED` / `UNSUPPORTED_CLAIM` termination, and a strict
+session fingerprint. Budgets cover claims, bundles, evidence records, canonical
+evidence bytes, and generic steps. No wall-clock value participates in identity.
+A defensive ledger snapshot is exposed for inspection, while trusted writes go
+through the bundle-only session API.
+
+Schema version 1 exposes `compose_verification_session`. It accepts a claim graph,
+roots, materialized verification bundles keyed by atomic claim ID, and a budget.
+The `verification_session` response contains the canonical graph, claim states,
+root verdicts, atomic verification references, budget accounting, termination,
+and fingerprint. Cyclic graphs, malformed or mismatched bundles, invalid roots,
+and invalid budgets fail closed as protocol errors without partial session state.

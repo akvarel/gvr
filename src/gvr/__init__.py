@@ -31,6 +31,25 @@ from .bundle import (
     validate_verification_bundle,
 )
 from .ledger import ClaimDefinition, ClaimLedger, ClaimStatus, VerificationSnapshot
+from .session import (
+    CLAIM_GRAPH_KIND,
+    CLAIM_GRAPH_SCHEMA_VERSION,
+    COMPOSITE_CLAIM_VERIFIER,
+    VERIFICATION_SESSION_KIND,
+    VERIFICATION_SESSION_SCHEMA_VERSION,
+    AtomicClaim,
+    ClaimGraph,
+    ClaimGraphValidationError,
+    ClaimOperator,
+    CompositeClaim,
+    SessionBudget,
+    SessionClaimState,
+    SessionConsumption,
+    SessionTermination,
+    VerificationSession,
+    VerificationSessionError,
+    compose_claim_verdict,
+)
 from .model import (
     Evidence,
     EvidenceState,
@@ -76,7 +95,13 @@ __all__ = [
     "verify_data_flow_claim_bundle", "VERIFICATION_BUNDLE_KIND",
     "VERIFICATION_BUNDLE_SCHEMA_VERSION", "BundleValidationError",
     "VerificationBundle", "build_verification_bundle",
-    "validate_verification_bundle",
+    "validate_verification_bundle", "CLAIM_GRAPH_KIND",
+    "CLAIM_GRAPH_SCHEMA_VERSION", "COMPOSITE_CLAIM_VERIFIER",
+    "VERIFICATION_SESSION_KIND", "VERIFICATION_SESSION_SCHEMA_VERSION",
+    "AtomicClaim", "ClaimGraph", "ClaimGraphValidationError", "ClaimOperator",
+    "CompositeClaim", "SessionBudget", "SessionClaimState",
+    "SessionConsumption", "SessionTermination", "VerificationSession",
+    "VerificationSessionError", "compose_claim_verdict",
 ]
 
 from .software import Coverage, DeltaKind, FunctionalDeltaItem, FunctionalDeltaResult, FunctionalSnapshot, Observable, RevisionRef, compare_functionality, FUNCTIONAL_REGRESSION_VERIFIER, verify_functional_regression

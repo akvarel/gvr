@@ -350,6 +350,75 @@ def test_removed_evidence_and_stale_stored_pass_cannot_compose_as_pass():
     assert session.root_verdicts["ROOT"] is VerificationVerdict.UNKNOWN
 
 
+def test_session_owned_ledger_view_cannot_bypass_bundle_only_atomic_recording():
+    session = VerificationSession(
+        graph=ClaimGraph(nodes=(_atomic("A"),)),
+        roots=("A",),
+    )
+
+    exposed = session.ledger
+    exposed.record_verification(
+        "A",
+        VerificationReport(
+            verdict=VerificationVerdict.PASS,
+            verifier="test.verifier.v1",
+        ),
+    )
+
+    assert session.root_verdicts["A"] is VerificationVerdict.UNKNOWN
+    assert session.unverified_claim_ids == ("A",)
+
+
+def test_session_graph_definition_cannot_be_replaced_after_construction():
+    session = VerificationSession(
+        graph=ClaimGraph(nodes=(_atomic("A"),)),
+        roots=("A",),
+    )
+
+    with pytest.raises(AttributeError):
+        session.graph = ClaimGraph(nodes=(_atomic("B"),))
+
+
+def test_stale_composite_cannot_report_complete_termination_before_recompute():
+    session = _compose_binary(
+        ClaimOperator.AND,
+        VerificationVerdict.PASS,
+        VerificationVerdict.PASS,
+    )
+
+    session.record_bundle(
+        "A",
+        _bundle("A", VerificationVerdict.PASS, source="revision-B"),
+    )
+
+    assert session.root_verdicts["ROOT"] is VerificationVerdict.UNKNOWN
+    assert session.termination_reason is SessionTermination.UNSUPPORTED_CLAIM
+
+
+@pytest.mark.parametrize(
+    "budget",
+    [
+        SessionBudget(max_claims=2),
+        SessionBudget(max_evidence_records=0),
+        SessionBudget(max_evidence_bytes=0),
+        SessionBudget(max_steps=0),
+    ],
+)
+def test_every_deterministic_budget_dimension_fails_closed(budget):
+    session = VerificationSession.compose(
+        graph=_graph_for(ClaimOperator.AND),
+        roots=("ROOT",),
+        bundles={
+            "A": _bundle("A", VerificationVerdict.PASS),
+            "B": _bundle("B", VerificationVerdict.PASS),
+        },
+        budget=budget,
+    )
+
+    assert session.root_verdicts["ROOT"] is VerificationVerdict.UNKNOWN
+    assert session.termination_reason is SessionTermination.BUDGET_EXHAUSTED
+
+
 def test_budget_cutoff_leaves_affected_root_unknown_with_explicit_termination():
     session = VerificationSession.compose(
         graph=_graph_for(ClaimOperator.AND),
