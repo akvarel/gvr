@@ -4,13 +4,25 @@ from typing import Any, Mapping
 
 from .bundle import BundleValidationError, VerificationBundle
 from .capabilities import (
+    VERIFIER_CAPABILITY_FINGERPRINT_FORMAT,
+    VERIFIER_CAPABILITY_KIND,
+    VERIFIER_CAPABILITY_REGISTRY_FINGERPRINT_FORMAT,
+    VERIFIER_CAPABILITY_REGISTRY_KIND,
+    VERIFIER_CAPABILITY_REGISTRY_SCHEMA_VERSION,
+    VERIFIER_CAPABILITY_SCHEMA_VERSION,
+    VerifierCapability,
     VerifierCapabilityError,
     VerifierCapabilityRegistry,
+    VerifierCost,
+    VerifierDeterminism,
     builtin_verifier_capability_registry,
 )
 from .evidence_providers import (
     EVIDENCE_PROVIDER_CAPABILITY_FINGERPRINT_FORMAT,
     EVIDENCE_PROVIDER_CAPABILITY_KIND,
+    EVIDENCE_PROVIDER_CAPABILITY_REGISTRY_FINGERPRINT_FORMAT,
+    EVIDENCE_PROVIDER_CAPABILITY_REGISTRY_KIND,
+    EVIDENCE_PROVIDER_CAPABILITY_REGISTRY_SCHEMA_VERSION,
     EVIDENCE_PROVIDER_CAPABILITY_SCHEMA_VERSION,
     EvidenceAcquisitionStatus,
     EvidenceCompleteness,
@@ -23,6 +35,19 @@ from .evidence_providers import (
     EvidenceRequest,
     builtin_evidence_provider_capability_registry,
     validate_evidence_provider_result,
+)
+from .planning import (
+    ATOMIC_CLAIM_BINDING_FINGERPRINT_FORMAT,
+    ATOMIC_CLAIM_BINDING_KIND,
+    ATOMIC_CLAIM_BINDING_SCHEMA_VERSION,
+    VERIFICATION_PLANNING_REQUEST_FINGERPRINT_FORMAT,
+    VERIFICATION_PLANNING_REQUEST_KIND,
+    VERIFICATION_PLANNING_REQUEST_SCHEMA_VERSION,
+    AtomicClaimBinding,
+    VerificationPlanningBudget,
+    VerificationPlanningError,
+    VerificationPlanningRequest,
+    compile_verification_plan,
 )
 from .core import Action, Goal, Predicate, Proposal, StateEffect, VerificationContext, default_registry
 from .model import Evidence, VerificationIssue, VerificationReport, VerificationVerdict
@@ -480,6 +505,429 @@ def _claim_graph(data: Mapping[str, Any]) -> ClaimGraph:
         raise ProtocolError("INVALID_CLAIM_GRAPH", str(exc)) from exc
 
 
+def _strict_claim_graph(data: Mapping[str, Any]) -> ClaimGraph:
+    _reject_unexpected_fields(
+        data,
+        {"schema_version", "kind", "nodes", "fingerprint"},
+        code="INVALID_VERIFICATION_PLANNING_REQUEST",
+        noun="claim graph",
+    )
+    if type(data.get("schema_version")) is not int:
+        raise ProtocolError(
+            "INVALID_VERIFICATION_PLANNING_REQUEST",
+            "claim graph schema_version must be an integer",
+        )
+    nodes = data.get("nodes")
+    if not isinstance(nodes, (list, tuple)):
+        raise ProtocolError(
+            "INVALID_VERIFICATION_PLANNING_REQUEST",
+            "claim graph nodes must be an array",
+        )
+    for item in nodes:
+        node = _require_mapping(item, "claim graph node")
+        node_type = node.get("node_type")
+        allowed = (
+            {
+                "node_type", "claim_id", "claim_kind", "spec", "verifier",
+                "scope", "dependencies",
+            }
+            if node_type == "ATOMIC"
+            else {"node_type", "claim_id", "operator", "dependencies"}
+        )
+        _reject_unexpected_fields(
+            node,
+            allowed,
+            code="INVALID_VERIFICATION_PLANNING_REQUEST",
+            noun="claim graph node",
+        )
+    try:
+        graph = _claim_graph(data)
+    except ProtocolError as exc:
+        raise ProtocolError(
+            "INVALID_VERIFICATION_PLANNING_REQUEST",
+            exc.message,
+        ) from exc
+    supplied = data.get("fingerprint")
+    if not isinstance(supplied, str) or supplied != graph.fingerprint:
+        raise ProtocolError(
+            "INVALID_VERIFICATION_PLANNING_REQUEST",
+            "claim graph fingerprint does not match canonical content",
+        )
+    return graph
+
+
+def _verifier_capability(data: Mapping[str, Any]) -> VerifierCapability:
+    _reject_unexpected_fields(
+        data,
+        {
+            "schema_version", "kind", "fingerprint_format", "fingerprint",
+            "verifier_id", "version", "claim_kinds",
+            "accepted_evidence_kinds", "required_evidence_kinds",
+            "input_schema", "output_schema", "determinism",
+            "side_effect_free", "cost", "bounds", "coverage",
+            "authoritative", "description",
+        },
+        code="INVALID_VERIFICATION_PLANNING_REQUEST",
+        noun="verifier capability",
+    )
+    if data.get("schema_version") != VERIFIER_CAPABILITY_SCHEMA_VERSION:
+        raise ProtocolError(
+            "INVALID_VERIFICATION_PLANNING_REQUEST",
+            "unsupported verifier capability schema_version",
+        )
+    if data.get("kind") != VERIFIER_CAPABILITY_KIND:
+        raise ProtocolError(
+            "INVALID_VERIFICATION_PLANNING_REQUEST",
+            "unsupported verifier capability kind",
+        )
+    if data.get("fingerprint_format") != VERIFIER_CAPABILITY_FINGERPRINT_FORMAT:
+        raise ProtocolError(
+            "INVALID_VERIFICATION_PLANNING_REQUEST",
+            "unsupported verifier capability fingerprint format",
+        )
+    try:
+        capability = VerifierCapability(
+            verifier_id=data.get("verifier_id"),
+            version=data.get("version"),
+            claim_kinds=_string_array(data.get("claim_kinds"), "claim_kinds"),
+            accepted_evidence_kinds=_string_array(
+                data.get("accepted_evidence_kinds"),
+                "accepted_evidence_kinds",
+            ),
+            required_evidence_kinds=_string_array(
+                data.get("required_evidence_kinds"),
+                "required_evidence_kinds",
+            ),
+            input_schema=decode_markers(dict(_require_mapping(
+                data.get("input_schema"),
+                "verifier input_schema",
+            ))),
+            output_schema=decode_markers(dict(_require_mapping(
+                data.get("output_schema"),
+                "verifier output_schema",
+            ))),
+            determinism=VerifierDeterminism(data.get("determinism")),
+            side_effect_free=data.get("side_effect_free"),
+            cost=VerifierCost(data.get("cost")),
+            bounds=decode_markers(dict(_require_mapping(
+                data.get("bounds"),
+                "verifier bounds",
+            ))),
+            coverage=decode_markers(dict(_require_mapping(
+                data.get("coverage"),
+                "verifier coverage",
+            ))),
+            authoritative=data.get("authoritative"),
+            description=data.get("description"),
+        )
+    except (ProtocolError, VerifierCapabilityError, TypeError, ValueError) as exc:
+        if isinstance(exc, ProtocolError):
+            raise ProtocolError(
+                "INVALID_VERIFICATION_PLANNING_REQUEST",
+                exc.message,
+            ) from exc
+        raise ProtocolError(
+            "INVALID_VERIFICATION_PLANNING_REQUEST",
+            str(exc),
+        ) from exc
+    if data.get("fingerprint") != capability.fingerprint:
+        raise ProtocolError(
+            "INVALID_VERIFICATION_PLANNING_REQUEST",
+            "verifier capability fingerprint does not match canonical content",
+        )
+    return capability
+
+
+def _verifier_capability_registry(
+    data: Mapping[str, Any],
+) -> VerifierCapabilityRegistry:
+    _reject_unexpected_fields(
+        data,
+        {
+            "schema_version", "kind", "fingerprint_format", "fingerprint",
+            "capabilities",
+        },
+        code="INVALID_VERIFICATION_PLANNING_REQUEST",
+        noun="verifier capability registry",
+    )
+    if data.get("schema_version") != VERIFIER_CAPABILITY_REGISTRY_SCHEMA_VERSION:
+        raise ProtocolError(
+            "INVALID_VERIFICATION_PLANNING_REQUEST",
+            "unsupported verifier capability registry schema_version",
+        )
+    if data.get("kind") != VERIFIER_CAPABILITY_REGISTRY_KIND:
+        raise ProtocolError(
+            "INVALID_VERIFICATION_PLANNING_REQUEST",
+            "unsupported verifier capability registry kind",
+        )
+    if (
+        data.get("fingerprint_format")
+        != VERIFIER_CAPABILITY_REGISTRY_FINGERPRINT_FORMAT
+    ):
+        raise ProtocolError(
+            "INVALID_VERIFICATION_PLANNING_REQUEST",
+            "unsupported verifier capability registry fingerprint format",
+        )
+    items = data.get("capabilities")
+    if not isinstance(items, (list, tuple)):
+        raise ProtocolError(
+            "INVALID_VERIFICATION_PLANNING_REQUEST",
+            "verifier capabilities must be an array",
+        )
+    try:
+        registry = VerifierCapabilityRegistry(tuple(
+            _verifier_capability(_require_mapping(item, "verifier capability"))
+            for item in items
+        ))
+    except VerifierCapabilityError as exc:
+        raise ProtocolError(
+            "INVALID_VERIFICATION_PLANNING_REQUEST",
+            str(exc),
+        ) from exc
+    if data.get("fingerprint") != registry.fingerprint:
+        raise ProtocolError(
+            "INVALID_VERIFICATION_PLANNING_REQUEST",
+            "verifier capability registry fingerprint does not match canonical content",
+        )
+    return registry
+
+
+def _provider_capability_registry(
+    data: Mapping[str, Any],
+) -> EvidenceProviderCapabilityRegistry:
+    _reject_unexpected_fields(
+        data,
+        {
+            "schema_version", "kind", "fingerprint_format", "fingerprint",
+            "capabilities",
+        },
+        code="INVALID_VERIFICATION_PLANNING_REQUEST",
+        noun="evidence provider capability registry",
+    )
+    if data.get("schema_version") != EVIDENCE_PROVIDER_CAPABILITY_REGISTRY_SCHEMA_VERSION:
+        raise ProtocolError(
+            "INVALID_VERIFICATION_PLANNING_REQUEST",
+            "unsupported evidence provider capability registry schema_version",
+        )
+    if data.get("kind") != EVIDENCE_PROVIDER_CAPABILITY_REGISTRY_KIND:
+        raise ProtocolError(
+            "INVALID_VERIFICATION_PLANNING_REQUEST",
+            "unsupported evidence provider capability registry kind",
+        )
+    if (
+        data.get("fingerprint_format")
+        != EVIDENCE_PROVIDER_CAPABILITY_REGISTRY_FINGERPRINT_FORMAT
+    ):
+        raise ProtocolError(
+            "INVALID_VERIFICATION_PLANNING_REQUEST",
+            "unsupported evidence provider capability registry fingerprint format",
+        )
+    items = data.get("capabilities")
+    if not isinstance(items, (list, tuple)):
+        raise ProtocolError(
+            "INVALID_VERIFICATION_PLANNING_REQUEST",
+            "evidence provider capabilities must be an array",
+        )
+    try:
+        registry = EvidenceProviderCapabilityRegistry(tuple(
+            _evidence_provider_capability(
+                _require_mapping(item, "evidence provider capability")
+            )
+            for item in items
+        ))
+    except (EvidenceProviderError, ProtocolError) as exc:
+        if isinstance(exc, ProtocolError):
+            raise ProtocolError(
+                "INVALID_VERIFICATION_PLANNING_REQUEST",
+                exc.message,
+            ) from exc
+        raise ProtocolError(
+            "INVALID_VERIFICATION_PLANNING_REQUEST",
+            str(exc),
+        ) from exc
+    if data.get("fingerprint") != registry.fingerprint:
+        raise ProtocolError(
+            "INVALID_VERIFICATION_PLANNING_REQUEST",
+            "evidence provider capability registry fingerprint does not match canonical content",
+        )
+    return registry
+
+
+def _planning_budget(data: Mapping[str, Any]) -> VerificationPlanningBudget:
+    allowed = {
+        "max_atomic_claims", "max_composite_claims", "max_steps",
+        "max_requests", "max_dependency_edges", "max_requests_per_claim",
+        "max_depth",
+    }
+    _reject_unexpected_fields(
+        data,
+        allowed,
+        code="INVALID_VERIFICATION_PLANNING_REQUEST",
+        noun="verification planning budget",
+    )
+    try:
+        return VerificationPlanningBudget(**{key: data.get(key) for key in allowed})
+    except VerificationPlanningError as exc:
+        raise ProtocolError(
+            "INVALID_VERIFICATION_PLANNING_REQUEST",
+            str(exc),
+        ) from exc
+
+
+def _atomic_claim_binding(data: Mapping[str, Any]) -> AtomicClaimBinding:
+    _reject_unexpected_fields(
+        data,
+        {
+            "schema_version", "kind", "fingerprint_format", "fingerprint",
+            "claim_id", "verifier_id", "verifier_version",
+            "verifier_capability_fingerprint", "evidence_requests",
+        },
+        code="INVALID_VERIFICATION_PLANNING_REQUEST",
+        noun="atomic claim binding",
+    )
+    if data.get("schema_version") != ATOMIC_CLAIM_BINDING_SCHEMA_VERSION:
+        raise ProtocolError(
+            "INVALID_VERIFICATION_PLANNING_REQUEST",
+            "unsupported atomic claim binding schema_version",
+        )
+    if data.get("kind") != ATOMIC_CLAIM_BINDING_KIND:
+        raise ProtocolError(
+            "INVALID_VERIFICATION_PLANNING_REQUEST",
+            "unsupported atomic claim binding kind",
+        )
+    if data.get("fingerprint_format") != ATOMIC_CLAIM_BINDING_FINGERPRINT_FORMAT:
+        raise ProtocolError(
+            "INVALID_VERIFICATION_PLANNING_REQUEST",
+            "unsupported atomic claim binding fingerprint format",
+        )
+    items = data.get("evidence_requests")
+    if not isinstance(items, (list, tuple)):
+        raise ProtocolError(
+            "INVALID_VERIFICATION_PLANNING_REQUEST",
+            "evidence_requests must be an array",
+        )
+    try:
+        requests = tuple(
+            _evidence_provider_request(_require_mapping(item, "evidence request"))
+            for item in items
+        )
+        binding = AtomicClaimBinding(
+            schema_version=data.get("schema_version"),
+            kind=data.get("kind"),
+            fingerprint_format=data.get("fingerprint_format"),
+            claim_id=data.get("claim_id"),
+            verifier_id=data.get("verifier_id"),
+            verifier_version=data.get("verifier_version"),
+            verifier_capability_fingerprint=data.get(
+                "verifier_capability_fingerprint"
+            ),
+            evidence_requests=requests,
+        )
+    except ProtocolError as exc:
+        raise ProtocolError(
+            "INVALID_VERIFICATION_PLANNING_REQUEST",
+            exc.message,
+        ) from exc
+    except VerificationPlanningError as exc:
+        raise ProtocolError(
+            "INVALID_VERIFICATION_PLANNING_REQUEST",
+            str(exc),
+        ) from exc
+    if data.get("fingerprint") != binding.fingerprint:
+        raise ProtocolError(
+            "INVALID_VERIFICATION_PLANNING_REQUEST",
+            "atomic claim binding fingerprint does not match canonical content",
+        )
+    return binding
+
+
+def _verification_planning_request(
+    data: Mapping[str, Any],
+) -> VerificationPlanningRequest:
+    _reject_unexpected_fields(
+        data,
+        {
+            "schema_version", "kind", "fingerprint_format", "fingerprint",
+            "claim_graph", "bindings", "verifier_capability_registry",
+            "verifier_capability_registry_fingerprint",
+            "evidence_provider_capability_registry",
+            "evidence_provider_capability_registry_fingerprint", "budget",
+        },
+        code="INVALID_VERIFICATION_PLANNING_REQUEST",
+        noun="verification planning request",
+    )
+    if data.get("schema_version") != VERIFICATION_PLANNING_REQUEST_SCHEMA_VERSION:
+        raise ProtocolError(
+            "INVALID_VERIFICATION_PLANNING_REQUEST",
+            "unsupported verification planning request schema_version",
+        )
+    if data.get("kind") != VERIFICATION_PLANNING_REQUEST_KIND:
+        raise ProtocolError(
+            "INVALID_VERIFICATION_PLANNING_REQUEST",
+            "unsupported verification planning request kind",
+        )
+    if (
+        data.get("fingerprint_format")
+        != VERIFICATION_PLANNING_REQUEST_FINGERPRINT_FORMAT
+    ):
+        raise ProtocolError(
+            "INVALID_VERIFICATION_PLANNING_REQUEST",
+            "unsupported verification planning request fingerprint format",
+        )
+    bindings_data = data.get("bindings")
+    if not isinstance(bindings_data, (list, tuple)):
+        raise ProtocolError(
+            "INVALID_VERIFICATION_PLANNING_REQUEST",
+            "bindings must be an array",
+        )
+    try:
+        request = VerificationPlanningRequest(
+            schema_version=data.get("schema_version"),
+            kind=data.get("kind"),
+            fingerprint_format=data.get("fingerprint_format"),
+            claim_graph=_strict_claim_graph(_require_mapping(
+                data.get("claim_graph"),
+                "claim_graph",
+            )),
+            bindings=tuple(
+                _atomic_claim_binding(_require_mapping(item, "atomic claim binding"))
+                for item in bindings_data
+            ),
+            verifier_capability_registry=_verifier_capability_registry(
+                _require_mapping(
+                    data.get("verifier_capability_registry"),
+                    "verifier_capability_registry",
+                )
+            ),
+            verifier_capability_registry_fingerprint=data.get(
+                "verifier_capability_registry_fingerprint"
+            ),
+            evidence_provider_capability_registry=_provider_capability_registry(
+                _require_mapping(
+                    data.get("evidence_provider_capability_registry"),
+                    "evidence_provider_capability_registry",
+                )
+            ),
+            evidence_provider_capability_registry_fingerprint=data.get(
+                "evidence_provider_capability_registry_fingerprint"
+            ),
+            budget=_planning_budget(_require_mapping(data.get("budget"), "budget")),
+        )
+    except ProtocolError:
+        raise
+    except VerificationPlanningError as exc:
+        raise ProtocolError(
+            "INVALID_VERIFICATION_PLANNING_REQUEST",
+            str(exc),
+        ) from exc
+    if data.get("fingerprint") != request.fingerprint:
+        raise ProtocolError(
+            "INVALID_VERIFICATION_PLANNING_REQUEST",
+            "verification planning request fingerprint does not match canonical content",
+        )
+    return request
+
+
 def _session_budget(data: Mapping[str, Any]) -> SessionBudget:
     try:
         return SessionBudget(
@@ -554,6 +1002,26 @@ def handle_request(request: Mapping[str, Any]) -> dict[str, Any]:
         )
     op = str(request.get("op") or "")
     payload = _require_mapping(request.get("payload", {}), "payload")
+
+    if op == "compile_verification_plan":
+        unexpected_request_fields = set(request) - {
+            "schema_version", "op", "payload",
+        }
+        if unexpected_request_fields:
+            raise ProtocolError(
+                "INVALID_VERIFICATION_PLANNING_REQUEST",
+                "unsupported protocol request fields: "
+                + ", ".join(sorted(unexpected_request_fields)),
+            )
+        planning_request = _verification_planning_request(payload)
+        try:
+            plan = compile_verification_plan(planning_request)
+        except VerificationPlanningError as exc:
+            raise ProtocolError(
+                "INVALID_VERIFICATION_PLANNING_REQUEST",
+                str(exc),
+            ) from exc
+        return envelope("verification_plan", plan.to_dict())
 
     if op == "describe_verifier_capabilities":
         unexpected = set(payload) - {"claim_kind", "authoritative_only"}

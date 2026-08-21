@@ -122,6 +122,14 @@ claim.validate_capability(registry, version="1")
 
 Unknown verifier IDs, unknown versions, unsupported claim kinds, and ambiguous omitted versions are rejected. No substitution is attempted.
 
+## Use by the verification planner
+
+`VerificationPlanningRequest` carries one exact `VerifierCapabilityRegistry` plus the exact registry fingerprint expected by the caller. Each `AtomicClaimBinding` separately names an exact verifier ID, version, and capability fingerprint.
+
+The planner checks all three identity levels before compiling a `VERIFY_ATOMIC_CLAIM` step. It also checks that the descriptor supports the atomic claim kind, is authoritative, and that bound requests cover every required evidence kind through evidence accepted by that verifier.
+
+Planning never queries for a preferred verifier and never falls back to another version. A missing or mismatched exact capability produces stable `UNSUPPORTED_CLAIM` planning termination with no executable steps.
+
 ## Built-in snapshot
 
 `builtin_verifier_capability_registry()` returns the immutable schema-v1 snapshot shipped with GVR.
@@ -224,4 +232,4 @@ It does not yet:
 - authorize product side effects;
 - attest who produced a descriptor.
 
-Those concerns belong to later planning, provider, policy, and trust layers.
+The deterministic planner can validate caller-supplied exact selections and compile bounded work descriptions. It does not add ranking, discovery policy, acquisition, or execution to this registry.

@@ -17,6 +17,13 @@ This page shows how the current GVR pieces fit together.
         +-----------------------+
                    |
                    v
+       +-----------------------+
+       | verification planner  |
+       | validates exact       |
+       | bindings and budgets  |
+       +-----------------------+
+                   |
+                   v
         +-----------------------+
         |       verifier        |
         | clear rules for one   |
@@ -85,6 +92,14 @@ The protocol layer:
 
 It should not invent evidence or change truth rules.
 
+## Verification planner layer
+
+The planner accepts a `ClaimGraph`, exact `AtomicClaimBinding` records, exact verifier and provider capability registry fingerprints, and deterministic budgets.
+
+It validates exact IDs, versions, claim and request kinds, evidence-kind structure, source/snapshot classes, required evidence kinds, graph dependencies, and work limits. It then emits only `ACQUIRE_EVIDENCE`, `VERIFY_ATOMIC_CLAIM`, and `COMPOSE_CLAIM` steps in deterministic order.
+
+The planner invokes nothing. It has no runtime provider bindings and does not call verifiers, Graphify, a network, or the file system. Non-complete planning returns stable structured issues and no executable steps.
+
 ## Verifier layer
 
 A verifier knows how to check one kind of claim.
@@ -141,6 +156,8 @@ An evidence provider is an acquisition contract, not a truth-producing verifier.
 The built-in schema-v1 `EvidenceProviderCapabilityRegistry` is honestly empty and purely descriptive. Its public request validator enforces exact source/snapshot class compatibility. `EvidenceProviderRuntimeRegistry` separately owns detached immutable runtime bindings and uses that validator before every invocation. It rechecks provider identity, converts only real execution exceptions to deterministic allowlisted secret-safe categories, and leaves malformed returned results as contract errors. Provider-to-verifier adapters expose structural evidence-kind facts without a generic sufficiency or truth field.
 
 The schema-v1 protocol exposes `describe_evidence_provider_capabilities` with optional `request_kind` and `evidence_kind` filters, and `validate_evidence_provider_result`, which parses serialized request, capability, and result payloads and returns either a normalized `evidence_provider_result` or a machine-readable protocol error.
+
+The schema-v1 `compile_verification_plan` operation separately parses exact claim, binding, request, registry, budget, and fingerprint artifacts and returns an immutable `verification_plan`. It does not dispatch through the runtime provider registry.
 
 ## VerificationReport
 

@@ -137,6 +137,65 @@ Parses strict serialized `request`, `capability`, and `result` objects, includin
 
 Unknown or obsolete nested fields and invalid values return machine-readable `protocol_error` responses through the safe handler, including `INVALID_EVIDENCE_PROVIDER_REQUEST`, `INVALID_EVIDENCE_PROVIDER_CAPABILITY`, and `INVALID_EVIDENCE_PROVIDER_RESULT`.
 
+### `compile_verification_plan`
+
+Compiles an immutable deterministic work description from exact claims, bindings, capability snapshots, and budgets. It does not acquire evidence, invoke a verifier, call Graphify, or access a network or file system.
+
+The payload is the exact `VerificationPlanningRequest.to_dict()` shape:
+
+```json
+{
+  "schema_version": 1,
+  "op": "compile_verification_plan",
+  "payload": {
+    "schema_version": 1,
+    "kind": "gvr.verification_planning_request",
+    "fingerprint_format": "gvr.verification_planning_request.ieee754-json.v1",
+    "fingerprint": "...",
+    "claim_graph": {
+      "schema_version": 1,
+      "kind": "gvr.claim_graph",
+      "nodes": [],
+      "fingerprint": "..."
+    },
+    "bindings": [],
+    "verifier_capability_registry": {
+      "schema_version": 1,
+      "kind": "gvr.verifier_capability_registry",
+      "fingerprint_format": "gvr.verifier_capability_registry.ieee754-json.v1",
+      "fingerprint": "...",
+      "capabilities": []
+    },
+    "verifier_capability_registry_fingerprint": "...",
+    "evidence_provider_capability_registry": {
+      "schema_version": 1,
+      "kind": "gvr.evidence_provider_capability_registry",
+      "fingerprint_format": "gvr.evidence_provider_capability_registry.ieee754-json.v1",
+      "fingerprint": "...",
+      "capabilities": []
+    },
+    "evidence_provider_capability_registry_fingerprint": "...",
+    "budget": {
+      "max_atomic_claims": null,
+      "max_composite_claims": null,
+      "max_steps": null,
+      "max_requests": null,
+      "max_dependency_edges": null,
+      "max_requests_per_claim": null,
+      "max_depth": null
+    }
+  }
+}
+```
+
+Each atomic binding includes its own schema, kind, fingerprint format, fingerprint, exact claim ID, verifier ID/version/capability fingerprint, and full serialized evidence requests. Each nested request and capability also carries its existing exact schema, kind, format, and fingerprint fields.
+
+The response kind is `verification_plan`. A complete plan contains deterministic `ACQUIRE_EVIDENCE`, `VERIFY_ATOMIC_CLAIM`, and `COMPOSE_CLAIM` steps. Unsupported contracts or exhausted budgets return stable termination and structured planner issues with no executable steps.
+
+The wire parser is strict. It rejects unknown fields at every new planning layer, malformed arrays and objects, unsupported schema/kind/format values, duplicate bindings, request ID conflicts, and mismatched claim graph, evidence request, binding, capability, registry, or planning request fingerprints. These failures return `INVALID_VERIFICATION_PLANNING_REQUEST` through `safe_handle_request`.
+
+See [Verification planning](VERIFICATION_PLANNING.md) for sharing, ordering, compatibility, budget, issue, and identity rules.
+
 ### `verify_goal`
 
 Checks a proposed action sequence against an initial state and goal predicates.

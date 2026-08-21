@@ -90,6 +90,18 @@ These checks prevent cross-request replay, including replay where the attacker p
 
 `provider_result_for_verifier(result, verifier)` validates every emitted evidence kind against the exact verifier capability and preserves the provider result's status, coverage, evidence, issues, and fingerprint. It exposes only structural compatibility facts: emitted evidence kinds, present required evidence kinds, and missing required evidence kinds. It has no generic `sufficient` or truth-upgrade field. Acquisition status and coverage never become verification truth.
 
+## Use by the verification planner
+
+`AtomicClaimBinding` contains full immutable `EvidenceRequest` records. The planning request supplies one exact `EvidenceProviderCapabilityRegistry` plus the exact registry fingerprint expected by the caller.
+
+Before emitting an `ACQUIRE_EVIDENCE` step, the planner validates exact provider ID and version, request-kind support, every requested evidence kind, source class, snapshot class, structural evidence intersection with the exact verifier, and the verifier's combined required evidence kinds.
+
+The provider request kind remains distinct from the verifier claim kind. The planner does not infer one from the other.
+
+Acquisition sharing uses only the exact canonical `EvidenceRequest.fingerprint`. The correlation request ID is retained on the acquisition step, but similar requests with different semantic fingerprints are never merged. Reusing one request ID with different semantics is rejected.
+
+The planner never calls `EvidenceProviderRuntimeRegistry.acquire`. It only describes possible acquisition work.
+
 Graphify materialized evidence kinds remain the stable data-flow evidence surface:
 
 - `graphify.data_flow_edge`

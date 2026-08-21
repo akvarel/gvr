@@ -17,6 +17,14 @@ Example:
 
 At this point the claim is only a proposal. GVR does not trust it yet.
 
+## Optional planning step: compile exact work descriptions
+
+Before evidence exists, a caller may submit a `ClaimGraph`, exact atomic bindings, exact capability registries, and deterministic budgets to the verification planner.
+
+The planner can describe acquisition, atomic verification, and composition steps. It does not run any of them and does not decide a claim result.
+
+If an exact capability is missing, evidence structure does not match, required evidence is not requested, the graph is cyclic, or a budget is exceeded, planning fails closed before execution.
+
 ## Step 2: GVR receives evidence
 
 A verifier needs evidence that matches the kind of claim.

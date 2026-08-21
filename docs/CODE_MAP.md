@@ -120,6 +120,19 @@ It uses `ClaimLedger`; it does not replace the ledger's evidence-version logic.
 
 Read [Verification sessions](VERIFICATION_SESSIONS.md) before changing this file.
 
+## `src/gvr/planning.py`
+
+This contains deterministic verification planning:
+
+- `AtomicClaimBinding`;
+- `VerificationPlanningRequest` and `VerificationPlanningBudget`;
+- stable planner issues and termination;
+- immutable `VerificationPlan` and `VerificationPlanStep`;
+- canonical `ACQUIRE_EVIDENCE`, `VERIFY_ATOMIC_CLAIM`, and `COMPOSE_CLAIM` steps;
+- exact capability, evidence-kind, class, graph, sharing, and budget validation.
+
+The planner compiles descriptions only. It does not call runtime providers, verifiers, Graphify, a network, or the file system. Read [Verification planning](VERIFICATION_PLANNING.md) before changing this file.
+
 ## `src/gvr/adapters/graphify.py`
 
 This converts Graphify traversal output into evidence structures GVR can check.
@@ -205,9 +218,10 @@ Current operations include:
 - `compose_verification_session`;
 - `describe_verifier_capabilities`;
 - `describe_evidence_provider_capabilities`;
-- `validate_evidence_provider_result`.
+- `validate_evidence_provider_result`;
+- `compile_verification_plan`.
 
-The session wire path also validates the explicit bundle fingerprint format before accepting a materialized bundle.
+The session wire path also validates the explicit bundle fingerprint format before accepting a materialized bundle. The planning wire path strictly validates every nested schema, kind, unknown field, and claimed fingerprint before compilation.
 
 ## `src/gvr/wire.py`
 

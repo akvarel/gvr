@@ -196,7 +196,10 @@ def test_03_unknown_verifier_capability_fails_closed() -> None:
         verifier_id="unknown.verifier",
         verifier_capability_fingerprint="0" * 64,
     )
-    plan = compile_verification_plan(planning_request(bindings=(unknown,)))
+    graph = ClaimGraph(nodes=(atomic_claim(verifier="unknown.verifier"),))
+    plan = compile_verification_plan(
+        planning_request(graph=graph, bindings=(unknown,))
+    )
     assert plan.termination is VerificationPlanTermination.UNSUPPORTED_CLAIM
     assert issue_codes(plan) == ("UNKNOWN_VERIFIER_CAPABILITY",)
     assert plan.steps == ()
@@ -456,7 +459,15 @@ def test_22_claim_graph_insertion_order_is_nonsemantic() -> None:
     )
     bindings = (
         binding("A", requests=(evidence_request(request_id="request-A"),)),
-        binding("B", requests=(evidence_request(request_id="request-B"),)),
+        binding(
+            "B",
+            requests=(
+                evidence_request(
+                    request_id="request-B",
+                    subject={"entity": "B"},
+                ),
+            ),
+        ),
     )
     first = compile_verification_plan(planning_request(graph=first_graph, bindings=bindings))
     second = compile_verification_plan(planning_request(graph=second_graph, bindings=tuple(reversed(bindings))))
@@ -594,7 +605,15 @@ def budget_fixture(*, reverse: bool = False) -> VerificationPlanningRequest:
     )
     bindings = (
         binding("A", requests=(evidence_request(request_id="request-A"),)),
-        binding("B", requests=(evidence_request(request_id="request-B"),)),
+        binding(
+            "B",
+            requests=(
+                evidence_request(
+                    request_id="request-B",
+                    subject={"entity": "B"},
+                ),
+            ),
+        ),
     )
     if reverse:
         graph = ClaimGraph(nodes=tuple(reversed(graph.nodes)))

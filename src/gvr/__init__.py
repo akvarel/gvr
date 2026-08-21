@@ -122,6 +122,29 @@ from .evidence_providers import (
     validate_evidence_provider_result,
 )
 from .protocol import ProtocolError, handle_request, safe_handle_request
+from .planning import (
+    ATOMIC_CLAIM_BINDING_FINGERPRINT_FORMAT,
+    ATOMIC_CLAIM_BINDING_KIND,
+    ATOMIC_CLAIM_BINDING_SCHEMA_VERSION,
+    VERIFICATION_PLAN_FINGERPRINT_FORMAT,
+    VERIFICATION_PLAN_KIND,
+    VERIFICATION_PLAN_SCHEMA_VERSION,
+    VERIFICATION_PLAN_STEP_FINGERPRINT_FORMAT,
+    VERIFICATION_PLANNING_REQUEST_FINGERPRINT_FORMAT,
+    VERIFICATION_PLANNING_REQUEST_KIND,
+    VERIFICATION_PLANNING_REQUEST_SCHEMA_VERSION,
+    AtomicClaimBinding,
+    VerificationPlan,
+    VerificationPlannerIssue,
+    VerificationPlanStep,
+    VerificationPlanStepKind,
+    VerificationPlanTermination,
+    VerificationPlanningBudget,
+    VerificationPlanningConsumption,
+    VerificationPlanningError,
+    VerificationPlanningRequest,
+    compile_verification_plan,
+)
 from .text_search import (
     TEXT_SEARCH_VERIFIER,
     TextSearchAssertion,
@@ -202,6 +225,20 @@ __all__ = [
     "provider_result_for_verifier",
     "validate_evidence_provider_request",
     "validate_evidence_provider_result",
+    "ATOMIC_CLAIM_BINDING_SCHEMA_VERSION",
+    "ATOMIC_CLAIM_BINDING_KIND",
+    "ATOMIC_CLAIM_BINDING_FINGERPRINT_FORMAT",
+    "VERIFICATION_PLANNING_REQUEST_SCHEMA_VERSION",
+    "VERIFICATION_PLANNING_REQUEST_KIND",
+    "VERIFICATION_PLANNING_REQUEST_FINGERPRINT_FORMAT",
+    "VERIFICATION_PLAN_SCHEMA_VERSION", "VERIFICATION_PLAN_KIND",
+    "VERIFICATION_PLAN_FINGERPRINT_FORMAT",
+    "VERIFICATION_PLAN_STEP_FINGERPRINT_FORMAT", "AtomicClaimBinding",
+    "VerificationPlanningBudget", "VerificationPlanningConsumption",
+    "VerificationPlanningError", "VerificationPlanningRequest",
+    "VerificationPlannerIssue", "VerificationPlanStep",
+    "VerificationPlanStepKind", "VerificationPlanTermination",
+    "VerificationPlan", "compile_verification_plan",
 ]
 
 from .software import Coverage, DeltaKind, FunctionalDeltaItem, FunctionalDeltaResult, FunctionalSnapshot, Observable, RevisionRef, compare_functionality, FUNCTIONAL_REGRESSION_VERIFIER, verify_functional_regression
