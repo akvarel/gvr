@@ -334,18 +334,12 @@ class AtomicClaimBinding:
                 "evidence_requests must contain exact EvidenceRequest records"
             )
         request_ids: set[str] = set()
-        request_fingerprints: set[str] = set()
         for request in requests:
             if request.request_id in request_ids:
                 raise VerificationPlanningError(
                     f"duplicate evidence request ID {request.request_id} in claim {self.claim_id}"
                 )
-            if request.fingerprint in request_fingerprints:
-                raise VerificationPlanningError(
-                    f"duplicate evidence request semantics in claim {self.claim_id}"
-                )
             request_ids.add(request.request_id)
-            request_fingerprints.add(request.fingerprint)
         requests = tuple(
             sorted(
                 requests,

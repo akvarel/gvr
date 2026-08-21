@@ -133,6 +133,44 @@ All commands completed successfully. A post-GREEN adversarial probe exercised al
 
 The package was built as `gvr-0.2.0-py3-none-any.whl` with SHA-256 `f2c9e3619b6d8c0169a718ee2ad86092e5a1cdb0fb5deca1eb9e3a0cae24039a`, installed without dependencies into a fresh virtual environment, and exercised outside the repository with `PYTHONPATH` cleared. The installed package produced two singular acquisition identities for identical semantics under `request-A` and `request-B`, reported `requests=2` and `steps=4`, preserved both identities through schema-v1 protocol output, and exhausted `max_requests=1` with `required=2`.
 
+### Separate post-GREEN adversarial review
+
+Review target: `793964472905fab1adbf13da5ee28e1ae3cf2310`.
+
+The separate review found one remaining semantic-versus-executable conflation. `AtomicClaimBinding` rejected two requests in the same claim whenever their semantic fingerprints matched, even when their request IDs differed. That validation prevented the planner's exact `(request_id, request_fingerprint)` accounting from representing two required executions, two verifier dependencies, same-claim budget consumption, or the equivalent schema-v1 protocol flow.
+
+RED command:
+
+```bash
+python -m pytest -o addopts='' -q \
+  tests/test_verification_planner.py::test_43_same_claim_preserves_same_semantics_different_request_ids
+# 1 failed: duplicate evidence request semantics in claim A
+```
+
+The fix removes only the semantic-fingerprint duplicate rejection inside one binding. Duplicate request IDs remain rejected, including conflicting semantics, while different request IDs with the same fingerprint remain distinct exact executions. Regression tests cover same-claim acquisition and verifier dependency IDs, request order determinism, exact `max_requests`, `max_steps`, and `max_requests_per_claim` exhaustion, and schema-v1 protocol preservation.
+
+GREEN validation:
+
+```bash
+python -m pytest -o addopts='' -q tests/test_verification_planner.py
+# 65 passed
+
+python -m pytest -o addopts='' -q \
+  tests/test_verification_planner.py \
+  tests/test_evidence_provider_hardening.py
+# 124 passed
+
+python -m pytest
+# 447 passed
+
+python -m compileall -q src/gvr tests
+git diff --check
+```
+
+A separate executable probe also passed exact-key sharing, same-claim dependencies, all three affected budget counters, request-ID-only step and plan identity, schema-v1 roundtrip, provider-result request-ID rejection, four independent graph/binding reorder combinations plus request reversal, provider and verifier capability identity, and claim/dependency step identity.
+
+The final code was also built as `gvr-0.2.0-py3-none-any.whl`, installed without dependencies into a fresh virtual environment, and exercised outside the repository with `PYTHONPATH` removed. The installed public API emitted acquisition IDs `request-A` and `request-B`, two exact verifier dependency step IDs, and consumption `requests=2`, `requests_per_claim=2`, `steps=3`. The installed `gvr` console command accepted the serialized request through stdin, returned `kind=verification_plan`, and produced a payload exactly equal to the public API result. Installed provider-result validation rejected replay from `request-A` to same-semantic `request-B` with `result request_id does not match request`.
+
 ## Test specification
 
 | # | Guarantee | Test target | Type | Result |
@@ -157,9 +195,12 @@ The package was built as `gvr-0.2.0-py3-none-any.whl` with SHA-256 `f2c9e3619b6d
 | 18 | Schema-v1 protocol preserves two same-semantics request identities | test 41 | protocol integration | PASS |
 | 19 | Reordering the exact request set remains deterministic | test 42 | determinism | PASS |
 | 20 | A provider result for request A cannot validate against same-semantics request B | `test_result_for_request_a_cannot_validate_against_same_semantics_request_b` | adversarial integration | PASS |
+| 21 | One claim preserves two same-semantics request IDs as two exact acquisition dependencies | test 43 | executable identity | PASS |
+| 22 | Same-claim exact executions exhaust request, step, and per-claim request budgets exactly | test 44 | boundary | PASS |
+| 23 | Schema-v1 protocol preserves both same-claim exact request identities and dependencies | test 45 | protocol integration | PASS |
 
 ## Coverage and known gaps
 
-The planner-focused file contains 42 named adversarial scenarios and 60 executed pytest cases. Together with evidence-provider hardening, the remediation-focused run contains 119 cases. Budget overflow is parameterized across seven independent limits, nested fingerprint omission across two locations, and metadata aliases across twelve direct, compound, nested, case, and hyphenation forms.
+The planner-focused file contains 45 named adversarial scenarios and 65 executed pytest cases. Together with evidence-provider hardening, the remediation-focused run contains 124 cases. Budget overflow is parameterized across seven independent limits, with three additional same-claim exact-execution boundary cases. Nested fingerprint omission spans two locations, and metadata aliases span twelve direct, compound, nested, case, and hyphenation forms.
 
 No provider, verifier, Graphify, network, or file-system execution path is part of the planner. Runtime acquisition and verification remain intentionally outside this task.

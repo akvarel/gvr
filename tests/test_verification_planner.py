@@ -1042,3 +1042,107 @@ def test_42_reordering_exact_request_set_remains_deterministic() -> None:
         "request-A",
         "request-B",
     )
+
+
+def test_43_same_claim_preserves_same_semantics_different_request_ids() -> None:
+    request_a = evidence_request(request_id="request-A")
+    request_b = evidence_request(request_id="request-B")
+    assert request_a.fingerprint == request_b.fingerprint
+
+    first = compile_verification_plan(planning_request(
+        bindings=(binding(requests=(request_a, request_b)),),
+    ))
+    plan = compile_verification_plan(planning_request(
+        bindings=(binding(requests=(request_b, request_a)),),
+    ))
+    assert first.to_dict() == plan.to_dict()
+    acquisitions = acquisition_steps(plan)
+    verification = next(
+        step
+        for step in plan.steps
+        if step.kind is VerificationPlanStepKind.VERIFY_ATOMIC_CLAIM
+    )
+
+    assert tuple(step.request_id for step in acquisitions) == (
+        "request-A",
+        "request-B",
+    )
+    assert verification.dependency_step_ids == tuple(
+        step.step_id for step in acquisitions
+    )
+    assert plan.consumption.requests == 2
+    assert plan.consumption.requests_per_claim == 2
+    assert plan.consumption.steps == 3
+
+
+@pytest.mark.parametrize(
+    ("budget", "budget_name", "limit", "required"),
+    (
+        (VerificationPlanningBudget(max_requests=1), "max_requests", 1, 2),
+        (VerificationPlanningBudget(max_steps=2), "max_steps", 2, 3),
+        (
+            VerificationPlanningBudget(max_requests_per_claim=1),
+            "max_requests_per_claim",
+            1,
+            2,
+        ),
+    ),
+)
+def test_44_same_claim_exact_executions_exhaust_exact_budgets(
+    budget: VerificationPlanningBudget,
+    budget_name: str,
+    limit: int,
+    required: int,
+) -> None:
+    request_a = evidence_request(request_id="request-A")
+    request_b = evidence_request(request_id="request-B")
+    plan = compile_verification_plan(planning_request(
+        bindings=(binding(requests=(request_a, request_b)),),
+        budget=budget,
+    ))
+
+    assert plan.termination is VerificationPlanTermination.BUDGET_EXHAUSTED
+    assert plan.steps == ()
+    assert tuple(issue.to_dict() for issue in plan.issues) == ({
+        "code": "BUDGET_EXHAUSTED",
+        "claim_id": None,
+        "request_id": None,
+        "details": {
+            "budget": budget_name,
+            "limit": limit,
+            "required": required,
+        },
+    },)
+
+
+def test_45_protocol_preserves_same_claim_exact_request_identities() -> None:
+    request_a = evidence_request(request_id="request-A")
+    request_b = evidence_request(request_id="request-B")
+    request = planning_request(
+        bindings=(binding(requests=(request_b, request_a)),),
+    )
+    response = handle_request({
+        "schema_version": 1,
+        "op": "compile_verification_plan",
+        "payload": request.to_dict(),
+    })
+    steps = response["payload"]["steps"]
+    acquisitions = tuple(
+        step
+        for step in steps
+        if step["kind"] == VerificationPlanStepKind.ACQUIRE_EVIDENCE.value
+    )
+    verification = next(
+        step
+        for step in steps
+        if step["kind"] == VerificationPlanStepKind.VERIFY_ATOMIC_CLAIM.value
+    )
+
+    assert tuple(step["request_id"] for step in acquisitions) == (
+        "request-A",
+        "request-B",
+    )
+    assert verification["dependency_step_ids"] == [
+        step["step_id"] for step in acquisitions
+    ]
+    assert response["payload"] == compile_verification_plan(request).to_dict()
