@@ -88,8 +88,8 @@ The existing `put_evidence(id, payload)` path remains available and uses a separ
 
 ## Final validation
 
-- `python -m pytest -o addopts='' -q tests/test_verification_bundle.py`: `36 passed in 0.07s`.
-- `python -m pytest -o addopts='' -q tests/test_dependencies.py tests/test_ledger.py tests/test_verification_bundle.py`: `59 passed in 0.09s`.
+- `python -m pytest -o addopts='' -q tests/test_verification_bundle.py`: `36 passed in 0.08s`.
+- `python -m pytest -o addopts='' -q tests/test_dependencies.py tests/test_ledger.py tests/test_verification_bundle.py`: `59 passed in 0.10s`.
 - `python -m pytest -o addopts='' -q`: `151 passed in 0.23s`.
 - `python -m compileall -q src`: PASS.
 - `git diff --check`: PASS.
