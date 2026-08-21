@@ -58,6 +58,19 @@ _FORBIDDEN_ISSUE_FIELDS = frozenset({
     "sufficiency",
     "truth",
     "truth_value",
+    "unknown",
+    "verdict",
+})
+_FORBIDDEN_ISSUE_FIELD_TOKENS = frozenset({
+    "adequacy",
+    "fail",
+    "outcome",
+    "pass",
+    "result",
+    "status",
+    "sufficiency",
+    "sufficient",
+    "truth",
     "verdict",
 })
 
@@ -149,7 +162,11 @@ def _reject_forbidden_issue_fields(value: Any, *, path: str) -> None:
     if isinstance(value, Mapping):
         for key, nested in value.items():
             normalized = key.casefold().replace("-", "_")
-            if normalized in _FORBIDDEN_ISSUE_FIELDS:
+            tokens = frozenset(normalized.split("_"))
+            if (
+                normalized in _FORBIDDEN_ISSUE_FIELDS
+                or tokens & _FORBIDDEN_ISSUE_FIELD_TOKENS
+            ):
                 raise VerificationPlanningError(
                     f"planner issue details contain unsupported field {key!r} at {path}"
                 )
