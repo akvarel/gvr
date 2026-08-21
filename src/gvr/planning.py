@@ -634,7 +634,7 @@ class VerificationPlanStep:
     claim_kind: str | None = None
     claim_fingerprint: str | None = None
     operator: ClaimOperator | None = None
-    request_ids: tuple[str, ...] = ()
+    request_id: str | None = None
     request_fingerprint: str | None = None
     request_kind: str | None = None
     requested_evidence_kinds: tuple[str, ...] = ()
@@ -664,11 +664,6 @@ class VerificationPlanStep:
         )
         object.__setattr__(
             self,
-            "request_ids",
-            _string_tuple(self.request_ids, name="request_ids"),
-        )
-        object.__setattr__(
-            self,
             "requested_evidence_kinds",
             _string_tuple(
                 self.requested_evidence_kinds,
@@ -678,6 +673,7 @@ class VerificationPlanStep:
         for name in (
             "claim_id",
             "claim_kind",
+            "request_id",
             "request_kind",
             "provider_id",
             "provider_version",
@@ -712,7 +708,7 @@ class VerificationPlanStep:
     def _validate_shape(self) -> None:
         if self.kind is VerificationPlanStepKind.ACQUIRE_EVIDENCE:
             required = (
-                self.request_ids,
+                self.request_id,
                 self.request_fingerprint,
                 self.request_kind,
                 self.requested_evidence_kinds,
@@ -766,7 +762,7 @@ class VerificationPlanStep:
                     self.provider_version,
                     self.provider_capability_fingerprint,
                 )
-            ) or self.request_ids or self.requested_evidence_kinds:
+            ) or self.request_id is not None or self.requested_evidence_kinds:
                 raise VerificationPlanningError(
                     "VERIFY_ATOMIC_CLAIM step contains acquisition or composition fields"
                 )
@@ -792,7 +788,7 @@ class VerificationPlanStep:
                 self.verifier_version,
                 self.verifier_capability_fingerprint,
             )
-        ) or self.request_ids or self.requested_evidence_kinds:
+        ) or self.request_id is not None or self.requested_evidence_kinds:
             raise VerificationPlanningError(
                 "COMPOSE_CLAIM step contains acquisition or verifier fields"
             )
@@ -805,7 +801,7 @@ class VerificationPlanStep:
             "claim_kind": self.claim_kind,
             "claim_fingerprint": self.claim_fingerprint,
             "operator": None if self.operator is None else self.operator.value,
-            "request_ids": self.request_ids,
+            "request_id": self.request_id,
             "request_fingerprint": self.request_fingerprint,
             "request_kind": self.request_kind,
             "requested_evidence_kinds": self.requested_evidence_kinds,
@@ -1000,8 +996,8 @@ def _graph_depth(graph: ClaimGraph) -> int:
 
 
 def _consumption(request: VerificationPlanningRequest) -> VerificationPlanningConsumption:
-    unique_requests = {
-        evidence_request.fingerprint
+    exact_requests = {
+        (evidence_request.request_id, evidence_request.fingerprint)
         for binding in request.bindings
         for evidence_request in binding.evidence_requests
     }
@@ -1014,8 +1010,8 @@ def _consumption(request: VerificationPlanningRequest) -> VerificationPlanningCo
     return VerificationPlanningConsumption(
         atomic_claims=atomic_claims,
         composite_claims=composite_claims,
-        steps=len(unique_requests) + atomic_claims + composite_claims,
-        requests=len(unique_requests),
+        steps=len(exact_requests) + atomic_claims + composite_claims,
+        requests=len(exact_requests),
         dependency_edges=sum(
             len(claim.dependencies) for claim in request.claim_graph.nodes
         ),
@@ -1282,37 +1278,40 @@ def _budget_issues(
 def _build_steps(
     request: VerificationPlanningRequest,
 ) -> tuple[VerificationPlanStep, ...]:
-    requests_by_fingerprint: dict[str, list[EvidenceRequest]] = {}
+    requests_by_exact_key: dict[tuple[str, str], EvidenceRequest] = {}
     for binding in request.bindings:
         for evidence_request in binding.evidence_requests:
-            requests_by_fingerprint.setdefault(
-                evidence_request.fingerprint,
-                [],
-            ).append(evidence_request)
+            requests_by_exact_key.setdefault(
+                (evidence_request.request_id, evidence_request.fingerprint),
+                evidence_request,
+            )
 
-    acquisition_by_fingerprint: dict[str, VerificationPlanStep] = {}
+    acquisition_by_exact_key: dict[tuple[str, str], VerificationPlanStep] = {}
     steps: list[VerificationPlanStep] = []
-    for request_fingerprint in sorted(requests_by_fingerprint):
-        requests = requests_by_fingerprint[request_fingerprint]
-        representative = min(
-            requests,
-            key=lambda item: canonical_utf8_key(item.request_id, path="request_id"),
-        )
+    exact_keys = sorted(
+        requests_by_exact_key,
+        key=lambda item: (
+            canonical_utf8_key(item[1], path="request fingerprint"),
+            canonical_utf8_key(item[0], path="request_id"),
+        ),
+    )
+    for exact_key in exact_keys:
+        representative = requests_by_exact_key[exact_key]
         provider = request.evidence_provider_capability_registry.lookup(
             representative.provider_id,
             representative.provider_version,
         )
         step = VerificationPlanStep(
             kind=VerificationPlanStepKind.ACQUIRE_EVIDENCE,
-            request_ids=tuple(sorted({item.request_id for item in requests})),
-            request_fingerprint=request_fingerprint,
+            request_id=representative.request_id,
+            request_fingerprint=representative.fingerprint,
             request_kind=representative.request_kind,
             requested_evidence_kinds=representative.requested_evidence_kinds,
             provider_id=representative.provider_id,
             provider_version=representative.provider_version,
             provider_capability_fingerprint=provider.fingerprint,
         )
-        acquisition_by_fingerprint[request_fingerprint] = step
+        acquisition_by_exact_key[exact_key] = step
         steps.append(step)
 
     final_step_by_claim: dict[str, VerificationPlanStep] = {}
@@ -1329,7 +1328,9 @@ def _build_steps(
                 binding.verifier_version,
             )
             acquisition_dependencies = [
-                acquisition_by_fingerprint[item.fingerprint].step_id
+                acquisition_by_exact_key[
+                    (item.request_id, item.fingerprint)
+                ].step_id
                 for item in binding.evidence_requests
             ]
             step = VerificationPlanStep(

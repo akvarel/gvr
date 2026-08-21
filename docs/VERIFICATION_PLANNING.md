@@ -74,11 +74,11 @@ This step identifies:
 
 - the exact provider ID and version;
 - the exact provider capability fingerprint;
+- one exact correlation request ID;
 - one canonical request fingerprint;
-- its request kind and requested evidence kinds;
-- every correlation request ID that shares those exact request semantics.
+- its request kind and requested evidence kinds.
 
-Acquisition is shared only when the full canonical `EvidenceRequest.fingerprint` is identical. Similar requests are not merged.
+One acquisition step represents one executable key: `(request_id, request_fingerprint)`. Reusing that same exact key across claims shares the step. Requests with identical canonical semantics but different request IDs remain separate executions and produce separate step IDs.
 
 ### `VERIFY_ATOMIC_CLAIM`
 
@@ -169,7 +169,7 @@ A non-complete plan contains no executable steps. This prevents callers from acc
 - `max_requests_per_claim`;
 - `max_depth`.
 
-`max_requests` counts unique request fingerprints after exact sharing. `max_steps` counts unique acquisition steps plus all atomic and composite claim steps. `max_depth` counts claim nodes on the longest dependency path, so an independent claim has depth 1.
+`max_requests` counts unique executable `(request_id, request_fingerprint)` keys after exact sharing. Reusing the same exact request across claims consumes one request, while identical semantics under different request IDs consume separate requests. `max_steps` counts those acquisition executions plus all atomic and composite claim steps. `max_depth` counts claim nodes on the longest dependency path, so an independent claim has depth 1.
 
 `VerificationPlanningConsumption` is the immutable output record for the corresponding measured counts.
 
