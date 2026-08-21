@@ -1101,3 +1101,43 @@ def test_29_runtime_registry_fingerprints_are_revalidated() -> None:
             "fingerprint",
             original_provider_fingerprint,
         )
+
+
+def test_30_composition_limit_blocks_work_and_keeps_root_unknown() -> None:
+    capability = verifier_capability(
+        required_evidence_kinds=(),
+        accepted_evidence_kinds=(),
+    )
+    graph = ClaimGraph(nodes=(
+        atomic_claim("A"),
+        atomic_claim("B"),
+        CompositeClaim(
+            claim_id="ROOT",
+            operator=ClaimOperator.AND,
+            dependencies=("A", "B"),
+        ),
+    ))
+    fixture = execution_fixture(
+        graph=graph,
+        roots=("ROOT",),
+        requests_by_claim={"A": (), "B": ()},
+        verifier_cap=capability,
+        verifier=VerifierRuntime(capability, verdicts={
+            "A": VerificationVerdict.PASS,
+            "B": VerificationVerdict.PASS,
+        }),
+        limits=VerificationExecutionLimits(max_compositions=0),
+    )
+
+    result = execute_verification_plan(fixture.request)
+
+    assert result.termination is VerificationExecutionTermination.LIMIT_EXHAUSTED
+    assert result.consumption.compositions == 0
+    assert result.session.root_verdicts == {"ROOT": VerificationVerdict.UNKNOWN}
+    compose_step = next(
+        item
+        for item in result.steps
+        if item.kind is gvr.VerificationPlanStepKind.COMPOSE_CLAIM
+    )
+    assert compose_step.status is VerificationExecutionStepStatus.BLOCKED
+    assert compose_step.verdict is VerificationVerdict.UNKNOWN
