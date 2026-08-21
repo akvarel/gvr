@@ -1,19 +1,36 @@
 from __future__ import annotations
 
+import hashlib
+import json
+from copy import deepcopy
 from dataclasses import FrozenInstanceError, replace
 
 import pytest
 
 from gvr import (
     AtomicClaim,
-    DATA_FLOW_VERIFIER,
     COMPOSITE_CLAIM_VERIFIER,
+    DATA_FLOW_VERIFIER,
+    DataFlowClaim,
+    DataFlowClaimKind,
     VerifierCapability,
     VerifierCapabilityRegistry,
     VerifierCost,
     VerifierDeterminism,
     builtin_verifier_capability_registry,
     handle_request,
+    verify_data_flow_claim_bundle,
+)
+
+
+_COMPLETE_DATA_FLOW_COVERAGE = "COMPLETE_FOR_SUPPORTED_CONSTRUCT"
+_DATA_FLOW_RELATIONS = (
+    "FLOWS_TO",
+    "PASSED_AS_ARGUMENT",
+    "READ_FROM",
+    "RETURNED_AS",
+    "TRANSFORMED_BY",
+    "WRITTEN_TO",
 )
 
 
@@ -48,6 +65,179 @@ def _atomic(
         claim_kind=claim_kind,
         spec={"subject": "A"},
         verifier=verifier,
+    )
+
+
+def _data_flow_evidence_key(item: dict[str, object]) -> str:
+    fields = [
+        ("r", str(item.get("relation") or "")),
+        ("s", str(item.get("source") or "")),
+        ("t", str(item.get("target") or "")),
+        ("f", str(item.get("source_file") or "")),
+        ("l", str(item.get("source_location") or "")),
+        ("p", str(item.get("provenance") or "")),
+    ]
+    canonical = json.dumps(sorted(fields), sort_keys=True, separators=(",", ":"))
+    return "df:" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _data_flow_edge(source: str, target: str) -> dict[str, object]:
+    item: dict[str, object] = {
+        "relation": "FLOWS_TO",
+        "source": source,
+        "target": target,
+        "source_file": "src/Flow.java",
+        "source_location": f"{source}->{target}",
+        "provenance": "STATIC_AST",
+        "confidence_score": 1.0,
+        "argument_index": None,
+        "receiver_confidence": "PROVEN",
+        "analysis_completeness": _COMPLETE_DATA_FLOW_COVERAGE,
+    }
+    item["key"] = _data_flow_evidence_key(item)
+    return item
+
+
+def _data_flow_path(*items: dict[str, object]) -> dict[str, object]:
+    return {
+        "steps": [
+            {
+                "source": item["source"],
+                "target": item["target"],
+                "relation": item["relation"],
+                "evidence": deepcopy(item),
+            }
+            for item in items
+        ],
+        "supporting_evidence": [deepcopy(item) for item in items],
+        "path_identity": [item["key"] for item in items],
+        "path_exactness": "EXACT_FOR_RETURNED_PATH",
+        "path_receiver_confidence": "PROVEN",
+        "path_coverage": _COMPLETE_DATA_FLOW_COVERAGE,
+    }
+
+
+def _data_flow_result(
+    paths: list[dict[str, object]],
+    *,
+    start: str = "A",
+    target: str = "C",
+    complete_supported_search: bool = True,
+    search_coverage: str = _COMPLETE_DATA_FLOW_COVERAGE,
+    boundary_events: list[dict[str, object]] | None = None,
+    max_depth: int = 4,
+) -> dict[str, object]:
+    expanded_count = sum(len(path["steps"]) for path in paths)
+    return {
+        "paths": deepcopy(paths),
+        "start": start,
+        "target": target,
+        "direction": "FORWARD",
+        "visited_count": 1 + expanded_count,
+        "expanded_count": expanded_count,
+        "truncated": False,
+        "termination_reason": "COMPLETE",
+        "query_bounds": {
+            "direction": "FORWARD",
+            "max_depth": max_depth,
+            "max_paths": 50,
+            "max_expansions": 2000,
+            "requested_allowed_relations": list(_DATA_FLOW_RELATIONS),
+            "effective_allowed_relations": list(_DATA_FLOW_RELATIONS),
+            "rejected_relations": [],
+            "stop_nodes": [],
+        },
+        "boundary_events": deepcopy(boundary_events or []),
+        "search_coverage": search_coverage,
+        "complete_supported_search": complete_supported_search,
+        "start_node_found": True,
+        "target_node_found": True,
+        "query_validity": True,
+        "input_resolution": "RESOLVED",
+        "rejected_relations": [],
+        "encountered_partial_evidence": False,
+        "encountered_unknown_evidence": False,
+        "encountered_may_evidence": False,
+    }
+
+
+def _data_flow_claim(
+    kind: DataFlowClaimKind = DataFlowClaimKind.CAN_FLOW_TO,
+    *,
+    start: str = "A",
+    target: str = "C",
+) -> DataFlowClaim:
+    return DataFlowClaim(
+        kind=kind,
+        start=start,
+        target=target,
+        evidence_namespace="capability-tests",
+        source_context="rev1",
+    )
+
+
+def _direct_path_bundle():
+    edge = _data_flow_edge("A", "C")
+    return verify_data_flow_claim_bundle(
+        _data_flow_claim(),
+        _data_flow_result([_data_flow_path(edge)]),
+    )
+
+
+def _complete_absence_bundle():
+    return verify_data_flow_claim_bundle(
+        _data_flow_claim(DataFlowClaimKind.NO_SUPPORTED_PATH),
+        _data_flow_result([]),
+    )
+
+
+def _zero_step_identity_bundle():
+    return verify_data_flow_claim_bundle(
+        _data_flow_claim(start="A", target="A"),
+        _data_flow_result(
+            [_data_flow_path()],
+            start="A",
+            target="A",
+            max_depth=0,
+        ),
+    )
+
+
+def _blocking_boundary_bundle():
+    boundary = {
+        "type": "boundary_event",
+        "boundary_evidence_key": "bnd:ambiguous-call",
+        "diagnostic_evidence_key": "diag:42",
+        "resolution": "AMBIGUOUS",
+        "reason": "overload ambiguity",
+        "canonical_caller_file": "src/Flow.java",
+        "caller_location": "L42",
+    }
+    return verify_data_flow_claim_bundle(
+        _data_flow_claim(DataFlowClaimKind.NO_SUPPORTED_PATH),
+        _data_flow_result(
+            [],
+            complete_supported_search=False,
+            search_coverage="PARTIAL",
+            boundary_events=[boundary],
+        ),
+    )
+
+
+def _runtime_evidence_kinds(*bundles) -> frozenset[str]:
+    return frozenset(
+        evidence.kind
+        for bundle in bundles
+        for evidence in bundle.evidence
+    )
+
+
+def _runtime_evidence_kinds_missing_from_capability(
+    capability: VerifierCapability,
+    *bundles,
+) -> frozenset[str]:
+    return _runtime_evidence_kinds(*bundles) - frozenset(
+        capability.accepted_evidence_kinds
     )
 
 
@@ -266,30 +456,104 @@ def test_validate_atomic_claim_rejects_non_authoritative_capabilities(capability
         registry.validate_atomic_claim(_atomic(), version="1")
 
 
-def test_builtin_snapshot_matches_runtime_verifier_ids_and_honest_contracts():
+def test_builtin_snapshot_audits_all_runtime_verifier_contracts():
     registry = builtin_verifier_capability_registry()
     expected = {
-        "preconditions": VerifierDeterminism.D0,
-        "effect_support": VerifierDeterminism.D0,
-        "goal_satisfaction": VerifierDeterminism.D0,
-        "registry": VerifierDeterminism.D1,
-        "text_search": VerifierDeterminism.D0,
-        "functional_regression": VerifierDeterminism.D1,
-        DATA_FLOW_VERIFIER: VerifierDeterminism.O1,
-        COMPOSITE_CLAIM_VERIFIER: VerifierDeterminism.D1,
+        "preconditions": (VerifierDeterminism.D0, VerifierCost.LOW),
+        "effect_support": (VerifierDeterminism.D0, VerifierCost.LOW),
+        "goal_satisfaction": (VerifierDeterminism.D0, VerifierCost.LOW),
+        "registry": (VerifierDeterminism.D1, VerifierCost.MEDIUM),
+        "text_search": (VerifierDeterminism.D0, VerifierCost.LOW),
+        "functional_regression": (VerifierDeterminism.D1, VerifierCost.MEDIUM),
+        DATA_FLOW_VERIFIER: (VerifierDeterminism.O1, VerifierCost.EXTERNAL),
+        COMPOSITE_CLAIM_VERIFIER: (
+            VerifierDeterminism.D1,
+            VerifierCost.MEDIUM,
+        ),
     }
-    assert {item.verifier_id: item.determinism for item in registry.list()} == expected
+
+    assert len(registry.list()) == 8
+    assert {
+        item.verifier_id: (item.determinism, item.cost)
+        for item in registry.list()
+    } == expected
+    assert all(item.version == "1" for item in registry.list())
+    assert all(item.side_effect_free for item in registry.list())
+    assert all(item.authoritative for item in registry.list())
+    assert all(not item.required_evidence_kinds for item in registry.list())
+
     data_flow = registry.lookup(DATA_FLOW_VERIFIER, "1")
     assert data_flow.claim_kinds == ("CAN_FLOW_TO", "NO_SUPPORTED_PATH")
-    assert data_flow.accepted_evidence_kinds == (
-        "graphify.data_flow_boundary",
-        "graphify.data_flow_edge",
-    )
     assert all(
         not item.claim_kinds and not item.accepted_evidence_kinds
         for item in registry.list()
         if item.verifier_id != DATA_FLOW_VERIFIER
     )
+
+
+@pytest.mark.parametrize(
+    ("bundle_factory", "expected_kind"),
+    (
+        (_direct_path_bundle, "graphify.data_flow_edge"),
+        (_complete_absence_bundle, "graphify.data_flow_query_result"),
+        (_zero_step_identity_bundle, "graphify.data_flow_query_result"),
+        (_blocking_boundary_bundle, "graphify.data_flow_boundary"),
+    ),
+    ids=(
+        "direct-path-edge",
+        "complete-absence-query-result",
+        "zero-step-identity-query-result",
+        "blocking-boundary",
+    ),
+)
+def test_data_flow_runtime_cases_emit_their_conditional_evidence_kind(
+    bundle_factory,
+    expected_kind,
+):
+    bundle = bundle_factory()
+
+    assert _runtime_evidence_kinds(bundle) == frozenset({expected_kind})
+
+
+def test_data_flow_capability_accepts_exactly_the_runtime_evidence_union():
+    capability = builtin_verifier_capability_registry().lookup(
+        DATA_FLOW_VERIFIER,
+        "1",
+    )
+    bundles = (
+        _direct_path_bundle(),
+        _complete_absence_bundle(),
+        _zero_step_identity_bundle(),
+        _blocking_boundary_bundle(),
+    )
+    runtime_kinds = _runtime_evidence_kinds(*bundles)
+
+    assert _runtime_evidence_kinds_missing_from_capability(
+        capability,
+        *bundles,
+    ) == frozenset()
+    assert frozenset(capability.accepted_evidence_kinds) == runtime_kinds
+    assert capability.required_evidence_kinds == ()
+
+
+def test_runtime_evidence_audit_helper_detects_a_synthetic_omission():
+    capability = builtin_verifier_capability_registry().lookup(
+        DATA_FLOW_VERIFIER,
+        "1",
+    )
+    synthetic_omission = replace(
+        capability,
+        accepted_evidence_kinds=tuple(
+            kind
+            for kind in capability.accepted_evidence_kinds
+            if kind != "graphify.data_flow_edge"
+        ),
+    )
+
+    assert _runtime_evidence_kinds_missing_from_capability(
+        synthetic_omission,
+        _direct_path_bundle(),
+    ) == frozenset({"graphify.data_flow_edge"})
 
 
 def test_registry_fingerprint_changes_when_one_capability_changes_semantically():
