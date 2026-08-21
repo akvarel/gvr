@@ -211,6 +211,189 @@ def test_graph_and_session_fingerprints_ignore_input_and_dependency_order():
     assert first_session.to_dict() == second_session.to_dict()
 
 
+def _incremental_session(
+    *,
+    graph: ClaimGraph,
+    roots: tuple[str, ...],
+    order: tuple[str, ...],
+    bundles: dict[str, object],
+) -> VerificationSession:
+    session = VerificationSession(graph=graph, roots=roots)
+    for claim_id in order:
+        session.record_bundle(claim_id, bundles[claim_id])
+    session.recompute()
+    return session
+
+
+def _claim_versions(session: VerificationSession) -> dict[str, int]:
+    return {
+        item["claim_id"]: item["version"]
+        for item in session.to_dict()["claims"]
+    }
+
+
+def test_opposite_incremental_record_order_is_semantically_identical_for_composite_root():
+    graph = _graph_for(ClaimOperator.AND)
+    bundles = {
+        "A": _bundle("A", VerificationVerdict.PASS),
+        "B": _bundle("B", VerificationVerdict.PASS),
+    }
+    first = _incremental_session(
+        graph=graph,
+        roots=("ROOT",),
+        order=("A", "B"),
+        bundles=bundles,
+    )
+    second = _incremental_session(
+        graph=graph,
+        roots=("ROOT",),
+        order=("B", "A"),
+        bundles=bundles,
+    )
+
+    assert first.ledger.status("A").version != second.ledger.status("A").version
+    assert _claim_versions(first) == {"A": 1, "B": 1, "ROOT": 1}
+    assert first.claim_states == second.claim_states
+    assert first.fingerprint == second.fingerprint
+    assert first.to_dict() == second.to_dict()
+
+
+def test_opposite_incremental_record_order_is_semantically_identical_for_independent_roots():
+    graph = ClaimGraph(nodes=(_atomic("A"), _atomic("B")))
+    bundles = {
+        "A": _bundle("A", VerificationVerdict.PASS),
+        "B": _bundle("B", VerificationVerdict.FAIL),
+    }
+    first = _incremental_session(
+        graph=graph,
+        roots=("A", "B"),
+        order=("A", "B"),
+        bundles=bundles,
+    )
+    second = _incremental_session(
+        graph=graph,
+        roots=("B", "A"),
+        order=("B", "A"),
+        bundles=bundles,
+    )
+
+    assert first.ledger.status("A").version != second.ledger.status("A").version
+    assert _claim_versions(first) == {"A": 1, "B": 1}
+    assert first.claim_states == second.claim_states
+    assert first.fingerprint == second.fingerprint
+    assert first.to_dict() == second.to_dict()
+
+
+def test_opposite_semantic_noop_rerecord_order_preserves_session_identity():
+    graph = _graph_for(ClaimOperator.AND)
+    bundles = {
+        "A": _bundle("A", VerificationVerdict.PASS),
+        "B": _bundle("B", VerificationVerdict.PASS),
+    }
+    first = VerificationSession.compose(graph=graph, roots=("ROOT",), bundles=bundles)
+    second = VerificationSession.compose(graph=graph, roots=("ROOT",), bundles=bundles)
+
+    for claim_id in ("A", "B"):
+        first.record_bundle(claim_id, deepcopy(bundles[claim_id]))
+    for claim_id in ("B", "A"):
+        second.record_bundle(claim_id, deepcopy(bundles[claim_id]))
+
+    assert first.ledger.history("A")[-1].run_id != second.ledger.history("A")[-1].run_id
+    assert _claim_versions(first) == {"A": 1, "B": 1, "ROOT": 1}
+    assert first.claim_states == second.claim_states
+    assert first.fingerprint == second.fingerprint
+    assert first.to_dict() == second.to_dict()
+
+
+def test_opposite_changed_evidence_order_has_one_deterministic_semantic_identity():
+    graph = _graph_for(ClaimOperator.AND)
+    initial = {
+        "A": _bundle("A", VerificationVerdict.PASS),
+        "B": _bundle("B", VerificationVerdict.PASS),
+    }
+    changed = {
+        "A": _bundle("A", VerificationVerdict.PASS, source="revision-B"),
+        "B": _bundle("B", VerificationVerdict.PASS, source="revision-B"),
+    }
+    first = VerificationSession.compose(graph=graph, roots=("ROOT",), bundles=initial)
+    second = VerificationSession.compose(graph=graph, roots=("ROOT",), bundles=initial)
+
+    for claim_id in ("A", "B"):
+        first.record_bundle(claim_id, changed[claim_id])
+    for claim_id in ("B", "A"):
+        second.record_bundle(claim_id, changed[claim_id])
+    first.recompute()
+    second.recompute()
+
+    assert first.ledger.status("A").version != second.ledger.status("A").version
+    assert _claim_versions(first) == {"A": 2, "B": 2, "ROOT": 2}
+    assert first.claim_states == second.claim_states
+    assert first.fingerprint == second.fingerprint
+    assert first.to_dict() == second.to_dict()
+
+
+def test_opposite_stale_recompute_histories_have_deterministic_semantic_identity():
+    graph = _graph_for(ClaimOperator.AND)
+    initial = {
+        "A": _bundle("A", VerificationVerdict.PASS),
+        "B": _bundle("B", VerificationVerdict.PASS),
+    }
+    changed = {
+        "A": _bundle("A", VerificationVerdict.PASS, source="revision-B"),
+        "B": _bundle("B", VerificationVerdict.PASS, source="revision-B"),
+    }
+    first = VerificationSession.compose(graph=graph, roots=("ROOT",), bundles=initial)
+    second = VerificationSession.compose(graph=graph, roots=("ROOT",), bundles=initial)
+
+    for session, order in ((first, ("A", "B")), (second, ("B", "A"))):
+        for claim_id in order:
+            session.record_bundle(claim_id, changed[claim_id])
+            assert session.claim_state("ROOT").freshness is Freshness.STALE
+            session.recompute()
+
+    assert first.ledger.status("A").version != second.ledger.status("A").version
+    assert _claim_versions(first) == {"A": 2, "B": 2, "ROOT": 3}
+    assert first.claim_states == second.claim_states
+    assert first.fingerprint == second.fingerprint
+    assert first.to_dict() == second.to_dict()
+
+
+def test_existing_compose_order_contract_uses_deterministic_semantic_versions():
+    graph = _graph_for(ClaimOperator.AND)
+    first = VerificationSession.compose(
+        graph=graph,
+        roots=("ROOT",),
+        bundles={
+            "B": _bundle("B", VerificationVerdict.PASS),
+            "A": _bundle("A", VerificationVerdict.PASS),
+        },
+    )
+    second = VerificationSession.compose(
+        graph=graph,
+        roots=("ROOT",),
+        bundles={
+            "A": _bundle("A", VerificationVerdict.PASS),
+            "B": _bundle("B", VerificationVerdict.PASS),
+        },
+    )
+
+    assert _claim_versions(first) == {"A": 1, "B": 1, "ROOT": 1}
+    assert first.to_dict() == second.to_dict()
+
+
+def test_claim_graph_lookup_cache_and_exported_content_are_immutable():
+    graph = ClaimGraph(nodes=(_atomic("A", spec={"nested": {"value": 1}}),))
+    before = graph.to_dict()
+
+    with pytest.raises(TypeError):
+        graph._by_id["B"] = _atomic("B")
+
+    exported = graph.to_dict()
+    exported["nodes"][0]["spec"]["nested"]["value"] = 2
+    assert graph.to_dict() == before
+    assert graph.claim("A").spec["nested"]["value"] == 1
+
+
 def test_description_is_not_truth_bearing_graph_identity():
     first = ClaimGraph(nodes=(_atomic("A", description="human wording A"),))
     second = ClaimGraph(nodes=(_atomic("A", description="different wording"),))
