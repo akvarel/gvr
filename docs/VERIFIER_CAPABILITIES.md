@@ -52,7 +52,7 @@ Examples include the current exact text-search and goal/action checks.
 
 The verifier or composer evaluates immutable snapshots, bundles, or other fixed evidence artifacts deterministically.
 
-Examples include functional regression, goal/action report composition, and composite claim sessions.
+Examples include functional regression and composite claim sessions.
 
 ### `O1`: deterministic evaluation of a captured observation
 
@@ -129,13 +129,14 @@ Unknown verifier IDs, unknown versions, unsupported claim kinds, and ambiguous o
 | `preconditions` | `1` | `D0` | `LOW` | No stable `AtomicClaim` or `Evidence.kind` contract yet. |
 | `effect_support` | `1` | `D0` | `LOW` | No stable `AtomicClaim` or `Evidence.kind` contract yet. |
 | `goal_satisfaction` | `1` | `D0` | `LOW` | No stable `AtomicClaim` or `Evidence.kind` contract yet. |
-| `registry` | `1` | `D1` | `MEDIUM` | Combines the three goal/action reports. No atomic claim contract. |
 | `text_search` | `1` | `D0` | `LOW` | No stable `AtomicClaim` or `Evidence.kind` contract yet. |
 | `functional_regression` | `1` | `D1` | `MEDIUM` | Uses functional snapshots, but no stable `Evidence.kind` contract is emitted. |
 | `gvr.graphify.data_flow.v1` | `1` | `O1` | `EXTERNAL` | Claims: `CAN_FLOW_TO`, `NO_SUPPORTED_PATH`. Evidence may be an edge, a query result, or a blocking boundary. |
 | `gvr.claim_graph.composite.v1` | `1` | `D1` | `MEDIUM` | Operates on composite nodes and bundles, not `AtomicClaim.claim_kind`. |
 
 The snapshot uses the verifier IDs the runtime actually emits. It does not invent claim kinds, evidence kinds, or formal schemas for APIs that do not yet publish them.
+
+The runtime `VerifierRegistry` report ID is intentionally absent from this snapshot. A `VerifierRegistry` may contain any number of caller-supplied verifiers, including none, and those verifiers may have different determinism, cost, side-effect, bounds, and coverage properties. The stable report ID `registry` therefore does not identify one stable verifier capability contract. Individual executable verifiers must publish their own descriptors before a composed registry can be described honestly.
 
 The data-flow verifier publishes these evidence kinds:
 

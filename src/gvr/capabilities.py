@@ -15,7 +15,6 @@ from .core import (
     EffectSupportVerifier,
     GoalSatisfactionVerifier,
     PreconditionsVerifier,
-    VERIFIER_REGISTRY_NAME,
 )
 from .session import COMPOSITE_CLAIM_VERIFIER
 from .software import FUNCTIONAL_REGRESSION_VERIFIER
@@ -537,14 +536,6 @@ BUILTIN_VERIFIER_CAPABILITY_REGISTRY = VerifierCapabilityRegistry((
         bounds={"domain": "SUPPLIED_PROPOSAL_AND_CONTEXT", "scaling": "LINEAR_IN_ACTIONS_AND_GOALS"},
         coverage={"scope": "DECLARED_GOAL_PREDICATES"},
         description="Simulates declared actions and checks declared goal predicates.",
-    ),
-    _builtin(
-        VERIFIER_REGISTRY_NAME,
-        determinism=VerifierDeterminism.D1,
-        cost=VerifierCost.MEDIUM,
-        bounds={"domain": "REGISTERED_GOAL_ACTION_VERIFIERS", "member_count": 3},
-        coverage={"scope": "PRECONDITIONS_EFFECT_SUPPORT_AND_GOAL_SATISFACTION"},
-        description="Combines the built-in goal and action verifier reports.",
     ),
     _builtin(
         TEXT_SEARCH_VERIFIER,
