@@ -32,6 +32,8 @@ This was the intended compile-time RED signal because the required public planne
 
 ## GREEN evidence
 
+Commit: `041c469ba6031a001787102e145d56b037c20002` (`feat: implement deterministic verification planner`)
+
 Focused command:
 
 ```bash
@@ -50,11 +52,21 @@ Full command:
 python -m pytest
 ```
 
-Observed result before final packaging checks:
+Observed final result:
 
 ```text
 420 passed
 ```
+
+Additional validation:
+
+```bash
+python -m compileall -q src/gvr tests/test_verification_planner.py
+git diff --check 99dffe8065cfd7cb1eee5aa40608c224768cc15d..HEAD
+python -m pip wheel . --no-deps --no-build-isolation
+```
+
+All commands completed successfully. The generated `gvr-0.2.0-py3-none-any.whl` was installed into a fresh isolated virtual environment. An installed-package smoke test imported the public planning API, compiled a plan through that API, compiled the same request through schema-v1 `compile_verification_plan`, and confirmed matching plan fingerprints.
 
 ## Test specification
 
@@ -78,5 +90,3 @@ Observed result before final packaging checks:
 The focused file contains 33 named adversarial scenarios and 39 executed pytest cases because budget overflow is parameterized across seven independent limits.
 
 No provider, verifier, Graphify, network, or file-system execution path is part of the planner. Runtime acquisition and verification remain intentionally outside this task.
-
-Final wheel and isolated-install evidence is recorded in the completion report after packaging validation.
