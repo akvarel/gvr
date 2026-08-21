@@ -729,12 +729,19 @@ def _provider_capability_registry(
             "evidence provider capabilities must be an array",
         )
     try:
-        registry = EvidenceProviderCapabilityRegistry(tuple(
-            _evidence_provider_capability(
-                _require_mapping(item, "evidence provider capability")
+        capabilities = []
+        for item in items:
+            capability_data = _require_mapping(
+                item,
+                "evidence provider capability",
             )
-            for item in items
-        ))
+            if not isinstance(capability_data.get("fingerprint"), str):
+                raise ProtocolError(
+                    "INVALID_VERIFICATION_PLANNING_REQUEST",
+                    "evidence provider capability fingerprint is required",
+                )
+            capabilities.append(_evidence_provider_capability(capability_data))
+        registry = EvidenceProviderCapabilityRegistry(tuple(capabilities))
     except (EvidenceProviderError, ProtocolError) as exc:
         if isinstance(exc, ProtocolError):
             raise ProtocolError(
@@ -807,10 +814,15 @@ def _atomic_claim_binding(data: Mapping[str, Any]) -> AtomicClaimBinding:
             "evidence_requests must be an array",
         )
     try:
-        requests = tuple(
-            _evidence_provider_request(_require_mapping(item, "evidence request"))
-            for item in items
-        )
+        requests = []
+        for item in items:
+            request_data = _require_mapping(item, "evidence request")
+            if not isinstance(request_data.get("fingerprint"), str):
+                raise ProtocolError(
+                    "INVALID_VERIFICATION_PLANNING_REQUEST",
+                    "evidence request fingerprint is required",
+                )
+            requests.append(_evidence_provider_request(request_data))
         binding = AtomicClaimBinding(
             schema_version=data.get("schema_version"),
             kind=data.get("kind"),
@@ -821,7 +833,7 @@ def _atomic_claim_binding(data: Mapping[str, Any]) -> AtomicClaimBinding:
             verifier_capability_fingerprint=data.get(
                 "verifier_capability_fingerprint"
             ),
-            evidence_requests=requests,
+            evidence_requests=tuple(requests),
         )
     except ProtocolError as exc:
         raise ProtocolError(

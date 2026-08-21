@@ -254,7 +254,10 @@ def test_09_unknown_provider_capability_fails_closed() -> None:
     plan = compile_verification_plan(
         planning_request(bindings=(binding(requests=(request,)),))
     )
-    assert issue_codes(plan) == ("UNKNOWN_EVIDENCE_PROVIDER_CAPABILITY",)
+    assert issue_codes(plan) == (
+        "MISSING_REQUIRED_EVIDENCE_KIND",
+        "UNKNOWN_EVIDENCE_PROVIDER_CAPABILITY",
+    )
 
 
 def test_10_unknown_exact_provider_version_fails_closed() -> None:
@@ -262,7 +265,10 @@ def test_10_unknown_exact_provider_version_fails_closed() -> None:
     plan = compile_verification_plan(
         planning_request(bindings=(binding(requests=(request,)),))
     )
-    assert issue_codes(plan) == ("UNKNOWN_EVIDENCE_PROVIDER_CAPABILITY",)
+    assert issue_codes(plan) == (
+        "MISSING_REQUIRED_EVIDENCE_KIND",
+        "UNKNOWN_EVIDENCE_PROVIDER_CAPABILITY",
+    )
 
 
 def test_11_unsupported_provider_request_kind_fails_closed() -> None:
@@ -270,7 +276,10 @@ def test_11_unsupported_provider_request_kind_fails_closed() -> None:
     plan = compile_verification_plan(
         planning_request(bindings=(binding(requests=(request,)),))
     )
-    assert issue_codes(plan) == ("UNSUPPORTED_REQUEST_KIND",)
+    assert issue_codes(plan) == (
+        "MISSING_REQUIRED_EVIDENCE_KIND",
+        "UNSUPPORTED_REQUEST_KIND",
+    )
 
 
 def test_12_provider_must_produce_every_requested_evidence_kind() -> None:
@@ -278,7 +287,10 @@ def test_12_provider_must_produce_every_requested_evidence_kind() -> None:
     plan = compile_verification_plan(
         planning_request(bindings=(binding(requests=(request,)),))
     )
-    assert issue_codes(plan) == ("UNSUPPORTED_REQUESTED_EVIDENCE_KIND",)
+    assert issue_codes(plan) == (
+        "MISSING_REQUIRED_EVIDENCE_KIND",
+        "UNSUPPORTED_REQUESTED_EVIDENCE_KIND",
+    )
 
 
 def test_13_source_class_must_match_exact_provider_contract() -> None:
@@ -286,7 +298,10 @@ def test_13_source_class_must_match_exact_provider_contract() -> None:
     plan = compile_verification_plan(
         planning_request(bindings=(binding(requests=(request,)),))
     )
-    assert issue_codes(plan) == ("UNSUPPORTED_SOURCE_CLASS",)
+    assert issue_codes(plan) == (
+        "MISSING_REQUIRED_EVIDENCE_KIND",
+        "UNSUPPORTED_SOURCE_CLASS",
+    )
 
 
 def test_14_snapshot_class_must_match_exact_provider_contract() -> None:
@@ -294,7 +309,10 @@ def test_14_snapshot_class_must_match_exact_provider_contract() -> None:
     plan = compile_verification_plan(
         planning_request(bindings=(binding(requests=(request,)),))
     )
-    assert issue_codes(plan) == ("UNSUPPORTED_SNAPSHOT_CLASS",)
+    assert issue_codes(plan) == (
+        "MISSING_REQUIRED_EVIDENCE_KIND",
+        "UNSUPPORTED_SNAPSHOT_CLASS",
+    )
 
 
 def test_15_provider_and_verifier_require_a_structural_evidence_intersection() -> None:

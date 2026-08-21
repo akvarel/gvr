@@ -14,9 +14,11 @@ from .canonical import (
 )
 from .capabilities import (
     UnknownVerifierCapabilityError,
+    VerifierCapability,
     VerifierCapabilityRegistry,
 )
 from .evidence_providers import (
+    EvidenceProviderCapability,
     EvidenceProviderCapabilityRegistry,
     EvidenceRequest,
     UnknownEvidenceProviderError,
@@ -304,7 +306,7 @@ class AtomicClaimBinding:
             raise VerificationPlanningError(
                 "evidence_requests must be iterable"
             ) from exc
-        if any(not isinstance(item, EvidenceRequest) for item in requests):
+        if any(type(item) is not EvidenceRequest for item in requests):
             raise VerificationPlanningError(
                 "evidence_requests must contain exact EvidenceRequest records"
             )
@@ -396,23 +398,41 @@ class VerificationPlanningRequest:
             raise VerificationPlanningError(
                 "unsupported verification planning request fingerprint format"
             )
-        if not isinstance(self.claim_graph, ClaimGraph):
+        if type(self.claim_graph) is not ClaimGraph:
             raise VerificationPlanningError("claim_graph must be an exact ClaimGraph")
-        if not isinstance(
-            self.verifier_capability_registry,
-            VerifierCapabilityRegistry,
+        if any(
+            type(node) not in (AtomicClaim, CompositeClaim)
+            for node in self.claim_graph.nodes
         ):
+            raise VerificationPlanningError(
+                "claim_graph must contain exact AtomicClaim or CompositeClaim records"
+            )
+        if type(self.verifier_capability_registry) is not VerifierCapabilityRegistry:
             raise VerificationPlanningError(
                 "verifier_capability_registry must be an exact VerifierCapabilityRegistry"
             )
-        if not isinstance(
-            self.evidence_provider_capability_registry,
-            EvidenceProviderCapabilityRegistry,
+        if any(
+            type(capability) is not VerifierCapability
+            for capability in self.verifier_capability_registry.capabilities
+        ):
+            raise VerificationPlanningError(
+                "verifier_capability_registry must contain exact VerifierCapability descriptors"
+            )
+        if (
+            type(self.evidence_provider_capability_registry)
+            is not EvidenceProviderCapabilityRegistry
         ):
             raise VerificationPlanningError(
                 "evidence_provider_capability_registry must be an exact EvidenceProviderCapabilityRegistry"
             )
-        if not isinstance(self.budget, VerificationPlanningBudget):
+        if any(
+            type(capability) is not EvidenceProviderCapability
+            for capability in self.evidence_provider_capability_registry.capabilities
+        ):
+            raise VerificationPlanningError(
+                "evidence_provider_capability_registry must contain exact EvidenceProviderCapability descriptors"
+            )
+        if type(self.budget) is not VerificationPlanningBudget:
             raise VerificationPlanningError(
                 "budget must be an exact VerificationPlanningBudget"
             )
@@ -450,7 +470,7 @@ class VerificationPlanningRequest:
             bindings = tuple(self.bindings)
         except TypeError as exc:
             raise VerificationPlanningError("bindings must be iterable") from exc
-        if any(not isinstance(item, AtomicClaimBinding) for item in bindings):
+        if any(type(item) is not AtomicClaimBinding for item in bindings):
             raise VerificationPlanningError(
                 "bindings must contain exact AtomicClaimBinding records"
             )
@@ -816,9 +836,9 @@ class VerificationPlan:
             "evidence_provider_capability_registry_fingerprint",
         ):
             object.__setattr__(self, name, _sha256(getattr(self, name), name=name))
-        if not isinstance(self.budget, VerificationPlanningBudget):
+        if type(self.budget) is not VerificationPlanningBudget:
             raise VerificationPlanningError("plan budget has the wrong type")
-        if not isinstance(self.consumption, VerificationPlanningConsumption):
+        if type(self.consumption) is not VerificationPlanningConsumption:
             raise VerificationPlanningError("plan consumption has the wrong type")
         try:
             termination = (
@@ -831,11 +851,11 @@ class VerificationPlan:
         object.__setattr__(self, "termination", termination)
         steps = tuple(self.steps)
         issues = tuple(self.issues)
-        if any(not isinstance(item, VerificationPlanStep) for item in steps):
+        if any(type(item) is not VerificationPlanStep for item in steps):
             raise VerificationPlanningError(
                 "steps must contain exact VerificationPlanStep records"
             )
-        if any(not isinstance(item, VerificationPlannerIssue) for item in issues):
+        if any(type(item) is not VerificationPlannerIssue for item in issues):
             raise VerificationPlanningError(
                 "issues must contain exact VerificationPlannerIssue records"
             )
@@ -1087,7 +1107,6 @@ def _compatibility_issues(
             continue
 
         requested_for_verifier: set[str] = set()
-        invalid_request = False
         for evidence_request in binding.evidence_requests:
             try:
                 provider = request.evidence_provider_capability_registry.lookup(
@@ -1106,7 +1125,6 @@ def _compatibility_issues(
                         },
                     )
                 )
-                invalid_request = True
                 continue
             if evidence_request.request_kind not in provider.request_kinds:
                 issues.append(
@@ -1117,7 +1135,6 @@ def _compatibility_issues(
                         details={"request_kind": evidence_request.request_kind},
                     )
                 )
-                invalid_request = True
                 continue
             unsupported_kinds = tuple(
                 sorted(
@@ -1134,7 +1151,6 @@ def _compatibility_issues(
                         details={"evidence_kinds": unsupported_kinds},
                     )
                 )
-                invalid_request = True
                 continue
             if (
                 (provider.source_classes and (
@@ -1151,7 +1167,6 @@ def _compatibility_issues(
                         details={"source_class": evidence_request.source_class},
                     )
                 )
-                invalid_request = True
                 continue
             if (
                 (provider.snapshot_classes and (
@@ -1171,7 +1186,6 @@ def _compatibility_issues(
                         details={"snapshot_class": evidence_request.snapshot_class},
                     )
                 )
-                invalid_request = True
                 continue
             intersection = set(evidence_request.requested_evidence_kinds) & set(
                 verifier.accepted_evidence_kinds
@@ -1191,24 +1205,22 @@ def _compatibility_issues(
                         },
                     )
                 )
-                invalid_request = True
                 continue
             requested_for_verifier.update(intersection)
 
-        if not invalid_request:
-            missing = tuple(
-                sorted(
-                    set(verifier.required_evidence_kinds) - requested_for_verifier
+        missing = tuple(
+            sorted(
+                set(verifier.required_evidence_kinds) - requested_for_verifier
+            )
+        )
+        if missing:
+            issues.append(
+                VerificationPlannerIssue(
+                    code="MISSING_REQUIRED_EVIDENCE_KIND",
+                    claim_id=claim.claim_id,
+                    details={"evidence_kinds": missing},
                 )
             )
-            if missing:
-                issues.append(
-                    VerificationPlannerIssue(
-                        code="MISSING_REQUIRED_EVIDENCE_KIND",
-                        claim_id=claim.claim_id,
-                        details={"evidence_kinds": missing},
-                    )
-                )
     return tuple(sorted(issues, key=_issue_key))
 
 
@@ -1327,7 +1339,7 @@ def compile_verification_plan(
 ) -> VerificationPlan:
     """Compile an exact deterministic plan without invoking any provider or verifier."""
 
-    if not isinstance(request, VerificationPlanningRequest):
+    if type(request) is not VerificationPlanningRequest:
         raise VerificationPlanningError(
             "request must be an exact VerificationPlanningRequest"
         )
