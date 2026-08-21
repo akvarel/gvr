@@ -89,6 +89,8 @@ git diff --check f107742575ef86ca9816e79cde0dd5965226b10b..HEAD
 
 Additional probes exercised 16 simultaneous graph, binding, request, verifier-registry, and provider-registry reorder combinations; exact-type substitution attempts; protocol fingerprint omissions, mismatches, and unknown fields; and mocked provider, verifier, Graphify, network, and file-system execution entry points. All probes passed, and no execution entry point was called.
 
+The final HEAD was also built as a wheel, installed without dependencies into a fresh isolated virtual environment, and exercised from outside the repository with `PYTHONPATH` cleared. The installed package passed the complete API/protocol fingerprint equivalence flow, strict immutability, missing-required-evidence reporting, registry-substitution rejection, nested fingerprint omission rejection, normalized metadata-alias rejection, and mocked no-execution checks.
+
 ## Test specification
 
 | # | Guarantee | Test target | Type | Result |
