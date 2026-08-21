@@ -249,14 +249,14 @@ def test_runtime_uses_public_registry_validation_and_never_calls_class_incompati
 
 def test_provider_issue_exports_only_stable_code_optional_category_and_evidence_ids() -> None:
     issue = ep.EvidenceProviderIssue(
-        code="PROVIDER_EXECUTION_FAILED",
+        code="PROVIDER_EXECUTION_ERROR",
         category=ep.EvidenceProviderIssueCategory.TIMEOUT,
         evidence_ids=("ev-2", "ev-1"),
     )
 
     assert gvr.EvidenceProviderIssueCategory is ep.EvidenceProviderIssueCategory
     assert issue.to_dict() == {
-        "code": "PROVIDER_EXECUTION_FAILED",
+        "code": "PROVIDER_EXECUTION_ERROR",
         "category": "TIMEOUT",
         "evidence_ids": ["ev-1", "ev-2"],
     }
@@ -271,6 +271,8 @@ def test_provider_issue_exports_only_stable_code_optional_category_and_evidence_
     [
         ("code", "PASS"),
         ("code", "SOURCE_FAIL"),
+        ("code", "SOURCE_FAILED"),
+        ("code", "PROVIDER_PASSED"),
         ("code", "UNKNOWN"),
         ("code", "CLAIM_VERDICT_NOTE"),
         ("code", "VERIFIED_SOURCE"),
@@ -330,11 +332,11 @@ def test_fail_closed_maps_execution_failures_to_safe_stable_categories(
 
     assert closed.issues == (
         ep.EvidenceProviderIssue(
-            code="PROVIDER_EXECUTION_FAILED",
+            code="PROVIDER_EXECUTION_ERROR",
             category=category,
         ),
     )
-    assert closed.coverage.termination_reason == "PROVIDER_EXECUTION_FAILED"
+    assert closed.coverage.termination_reason == "PROVIDER_EXECUTION_ERROR"
     assert closed.coverage.termination == {
         "category": category,
         "phase": "provider_execution",

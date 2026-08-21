@@ -27,6 +27,8 @@ def request(**overrides: Any) -> ep.EvidenceRequest:
         "subject": {"start": "src", "target": "sink"},
         "spec": {"claim_kind": CLAIM_KIND},
         "semantic_scope": {"direction": "FORWARD"},
+        "source_class": SOURCE_CLASS,
+        "snapshot_class": SNAPSHOT_CLASS,
         "source_context": {"repository": "example/repo"},
         "snapshot_context": {"revision": "abc123"},
         "bounds": {"max_depth": 3},
@@ -195,11 +197,14 @@ def test_fail_closed_only_converts_provider_execution_exceptions() -> None:
     closed = runtime_registry(execution_failure).acquire(request(), fail_closed=True)
 
     assert closed.status is ep.EvidenceAcquisitionStatus.UNAVAILABLE
-    assert closed.coverage.termination == {"outcome": "exception", "phase": "provider_execution"}
+    assert closed.coverage.termination == {
+        "category": "PROVIDER_EXCEPTION",
+        "phase": "provider_execution",
+    }
     assert closed.issues == (
         ep.EvidenceProviderIssue(
-            "PROVIDER_EXECUTION_EXCEPTION",
-            "evidence provider execution raised an exception",
+            "PROVIDER_EXECUTION_ERROR",
+            ep.EvidenceProviderIssueCategory.PROVIDER_EXCEPTION,
         ),
     )
     assert "super-secret" not in repr(closed.to_dict())
@@ -216,11 +221,12 @@ def test_fail_closed_only_converts_provider_execution_exceptions() -> None:
 
 
 def test_provider_issue_has_no_verdict_and_protocol_rejects_verdict() -> None:
-    issue = ep.EvidenceProviderIssue("SOURCE_UNAVAILABLE", "source unavailable", ("ev-query",))
+    issue = ep.EvidenceProviderIssue("SOURCE_UNAVAILABLE", evidence_ids=("ev-query",))
     assert not hasattr(issue, "verdict")
+    assert not hasattr(issue, "message")
     assert issue.to_dict() == {
         "code": "SOURCE_UNAVAILABLE",
-        "message": "source unavailable",
+        "category": None,
         "evidence_ids": ["ev-query"],
     }
     with pytest.raises(ep.EvidenceProviderError, match="EvidenceProviderIssue"):

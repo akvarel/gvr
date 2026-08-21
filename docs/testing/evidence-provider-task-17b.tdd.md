@@ -30,8 +30,8 @@ Drive Task 17b was implemented on `feature/gvr-evidence-provider-protocol-v1`. T
 | Invalid request type, request kind, or requested evidence kind is rejected before provider execution. | `test_runtime_validates_request_contract_before_invoking_provider` |
 | Mutable runtime provider ID, version, and capability are rechecked before every call. | `test_runtime_rechecks_mutable_provider_identity_and_capability_before_each_call` |
 | `fail_closed` converts only exceptions raised by provider execution. Invalid returned results remain contract errors. | `test_fail_closed_only_converts_provider_execution_exceptions` |
-| Execution diagnostics are deterministic and contain neither raw exception messages nor exception class names. | `test_fail_closed_only_converts_provider_execution_exceptions` |
-| `EvidenceProviderIssue` has no verdict, and the JSON protocol rejects a provider issue `verdict` field. | `test_provider_issue_has_no_verdict_and_protocol_rejects_verdict` |
+| Execution diagnostics are deterministic, categorized, and contain neither raw exception messages nor exception class names. | `test_fail_closed_only_converts_provider_execution_exceptions` |
+| `EvidenceProviderIssue` has no free-text message or verdict, and the JSON protocol rejects obsolete issue fields. | `test_provider_issue_has_no_verdict_and_protocol_rejects_verdict` |
 | Provider `request_kind` and verifier `claim_kind` are required and evaluated independently. | `test_request_kind_and_verifier_claim_kind_are_distinct_compatibility_inputs` |
 | Verifier adaptation exposes emitted, present-required, and missing-required evidence kinds without `sufficient` or truth-upgrade fields. | `test_verifier_input_exposes_structural_compatibility_facts_not_sufficiency` |
 | `source_classes` and `snapshot_classes` are explicit capability fields, affect fingerprints, and cross the strict protocol. | `test_capability_source_and_snapshot_classes_are_fingerprinted_and_in_protocol` |

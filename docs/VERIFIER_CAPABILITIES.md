@@ -208,7 +208,7 @@ Provider results can be validated over the schema-v1 protocol:
 }
 ```
 
-The operation parses serialized request, capability, and result objects, checks exact provider identity, version, capability fingerprint, produced and accepted evidence kinds, and required coverage, then returns a canonical `evidence_provider_result`. Invalid inputs return a `protocol_error` with codes such as `INVALID_EVIDENCE_PROVIDER_REQUEST`, `INVALID_EVIDENCE_PROVIDER_CAPABILITY`, or `INVALID_EVIDENCE_PROVIDER_RESULT`.
+The operation parses serialized request, capability, and result objects, checks exact provider identity, version, capability fingerprint, produced and accepted evidence kinds, required coverage, and fail-closed source/snapshot class compatibility, then returns a canonical `evidence_provider_result`. Provider issues carry only stable codes, optional allowlisted categories, and evidence IDs; obsolete free-text `message` and `verdict` fields are rejected. Invalid inputs return a `protocol_error` with codes such as `INVALID_EVIDENCE_PROVIDER_REQUEST`, `INVALID_EVIDENCE_PROVIDER_CAPABILITY`, or `INVALID_EVIDENCE_PROVIDER_RESULT`.
 
 ## Current limits
 

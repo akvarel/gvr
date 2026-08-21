@@ -26,6 +26,7 @@ from gvr.evidence_providers import (
     EvidenceProviderCapability,
     EvidenceProviderCapabilityRegistry,
     EvidenceProviderError,
+    EvidenceProviderIssueCategory,
 
     EvidenceProviderResult,
     EvidenceProviderRuntimeRegistry,
@@ -47,6 +48,8 @@ def request(**overrides: Any) -> EvidenceRequest:
         "subject": {"target": "x"},
         "spec": {},
         "semantic_scope": {"scope": ["a", "b"]},
+        "source_class": "git.repository",
+        "snapshot_class": "git.commit",
         "source_context": {},
         "snapshot_context": {},
         "bounds": {"max_depth": 3},
@@ -258,8 +261,8 @@ def test_runtime_registry_invokes_exact_provider_without_fallback_and_fails_clos
     closed = failing.acquire(request(), fail_closed=True)
     assert closed.status is EvidenceAcquisitionStatus.UNAVAILABLE
     assert closed.evidence == ()
-    assert closed.issues[0].code == "PROVIDER_EXECUTION_EXCEPTION"
-    assert closed.issues[0].message == "evidence provider execution raised an exception"
+    assert closed.issues[0].code == "PROVIDER_EXECUTION_ERROR"
+    assert closed.issues[0].category is EvidenceProviderIssueCategory.PROVIDER_EXCEPTION
 
 
 def test_validate_result_catches_request_provider_capability_and_kind_mismatches() -> None:

@@ -11,12 +11,13 @@ Evidence providers are acquisition contracts. They collect immutable `Evidence` 
 - `schema_version`, stable `kind`, `fingerprint_format`, and deterministic `fingerprint`;
 - non-semantic correlation `request_id`;
 - `request_kind` and `requested_evidence_kinds`;
+- optional explicit `source_class` and `snapshot_class` selectors;
 - structured `subject` and `spec`;
 - `semantic_scope`;
 - `source_context` and `snapshot_context`;
 - explicit `bounds`.
 
-The request fingerprint excludes `request_id`, so retry or transport correlation can change without changing request semantics. It includes every other request field. A provider result must reference the exact request fingerprint, which prevents replay against a semantically different request that happens to reuse the same `request_id`.
+The request fingerprint excludes `request_id`, so retry or transport correlation can change without changing request semantics. It includes every other request field, including `source_class` and `snapshot_class` even when either value is null. A provider result must reference the exact request fingerprint, which prevents replay against a semantically different request that happens to reuse the same `request_id`.
 
 ### `EvidenceCoverage`
 
@@ -45,13 +46,13 @@ Coverage is deeply snapshotted, immutable, versioned, and independently fingerpr
 - provider-specific `EvidenceProviderIssue` diagnostics with no verdict field;
 - the exact provider capability fingerprint.
 
-`EvidenceProviderIssue` is a separate acquisition diagnostic contract with only `code`, `message`, and `evidence_ids`. It cannot carry a verifier verdict. Evidence payloads are recursively detached and frozen. `Evidence.source` and the producer-supplied `Evidence.fingerprint` remain part of the result semantics. Evidence order does not affect the result fingerprint. Identical duplicate evidence IDs are deterministically deduplicated. Duplicate IDs with conflicting kind, payload, source, or producer fingerprint are rejected.
+`EvidenceProviderIssue` is a separate acquisition diagnostic contract with only a stable uppercase `code`, an optional allowlisted `category`, and `evidence_ids`. It has no free-text message and cannot carry a verifier verdict. Codes and categories reject direct or tokenized truth-like terms such as `PASS`, `FAIL`, `UNKNOWN`, `VERDICT`, `VERIFIED`, `SUFFICIENT`, and `TRUTH`. The exported failure categories are `TIMEOUT`, `ACCESS_DENIED`, `CONNECTION`, `IO`, `CANCELLED`, and `PROVIDER_EXCEPTION`. Evidence payloads are recursively detached and frozen. `Evidence.source` and the producer-supplied `Evidence.fingerprint` remain part of the result semantics. Evidence order does not affect the result fingerprint. Identical duplicate evidence IDs are deterministically deduplicated. Duplicate IDs with conflicting kind, payload, source, or producer fingerprint are rejected.
 
 `EvidenceAcquisitionStatus` is `COMPLETE`, `PARTIAL`, `UNAVAILABLE`, or `UNSUPPORTED`. Unavailable and unsupported results contain no evidence and use unknown coverage. Provider results never contain a claim verdict.
 
 ### Provider capability and runtime protocol
 
-`EvidenceProviderCapability` describes one exact provider implementation. Its fingerprint includes `request_kinds`, `produced_evidence_kinds`, and explicit `source_classes` and `snapshot_classes`, as well as schemas, bounds, coverage, determinism, side-effect, and cost metadata.
+`EvidenceProviderCapability` describes one exact provider implementation. Its fingerprint includes `request_kinds`, `produced_evidence_kinds`, and explicit `source_classes` and `snapshot_classes`, as well as schemas, bounds, coverage, determinism, side-effect, and cost metadata. Either class list may be empty, which explicitly means that the capability accepts no asserted class in that dimension.
 
 The runtime `EvidenceProvider` protocol declares:
 
@@ -60,11 +61,11 @@ The runtime `EvidenceProvider` protocol declares:
 - exact `capability`;
 - `acquire(request)`.
 
-`EvidenceProviderCapabilityRegistry` is a pure, immutable, fingerprinted descriptor registry. It never stores or executes runtime provider objects. `EvidenceProviderRuntimeRegistry` separately binds exact `(provider_id, version)` keys to runtime providers and references one capability registry. Registration and every dispatch recheck the runtime provider ID, version, exact capability identity, and callable protocol. There is no fallback to another provider or version.
+`EvidenceProviderCapabilityRegistry` is a pure, immutable, fingerprinted descriptor registry. It never stores or executes runtime provider objects. Its public `validate_request(request)` method resolves the exact capability and applies the complete request compatibility contract. `EvidenceProviderRuntimeRegistry` separately binds exact `(provider_id, version)` keys to runtime providers and references one capability registry. Registration and every dispatch recheck the runtime provider ID, version, exact capability identity, and callable protocol. Runtime dispatch calls the public registry validator before invocation. There is no fallback to another provider or version.
 
 ## Validation
 
-`validate_evidence_provider_request(request, capability)` runs before invocation and checks exact request type, provider identity and version, supported `request_kind`, and requested evidence kinds. `validate_evidence_provider_result(result, request, capability)` then checks:
+`validate_evidence_provider_request(request, capability)` runs before invocation and checks exact request type, provider identity and version, supported `request_kind`, requested evidence kinds, and source/snapshot class compatibility. Class compatibility is exact and fail-closed in each dimension: a non-empty capability list requires a request class from that list; missing or wrong classes fail; an empty capability list accepts only a missing request class. `validate_evidence_provider_result(result, request, capability)` then checks:
 
 - exact request ID and request fingerprint;
 - exact provider identity and version across request, result, and capability;
@@ -81,7 +82,7 @@ These checks prevent cross-request replay, including replay where the attacker p
 
 ## Fail-closed behavior
 
-`EvidenceProviderRuntimeRegistry.acquire(request, fail_closed=True)` converts only exceptions raised by `provider.acquire(request)` into an `UNAVAILABLE` result. Pre-invocation validation failures and post-result contract violations still raise. The unavailable result contains no evidence, uses unknown coverage, and emits deterministic diagnostics (`PROVIDER_EXECUTION_EXCEPTION`) with no exception class, message, stack, or other raw exception text. This preserves safety without leaking credentials or making malformed provider output look like ordinary unavailability.
+`EvidenceProviderRuntimeRegistry.acquire(request, fail_closed=True)` converts only exceptions raised by `provider.acquire(request)` into an `UNAVAILABLE` result. Pre-invocation validation failures and post-result contract violations still raise. The unavailable result contains no evidence, uses unknown coverage, and emits the stable code `PROVIDER_EXECUTION_ERROR` plus one safe category: `TIMEOUT`, `ACCESS_DENIED`, `CONNECTION`, `IO`, `CANCELLED`, or `PROVIDER_EXCEPTION`. Raw exception text, exception class names, stack data, and arbitrary representations are excluded. Failures in the same category therefore have the same semantic identity regardless of raw message, while meaningfully different categories have different identities.
 
 ## Compatibility with verifiers
 

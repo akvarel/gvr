@@ -164,7 +164,8 @@ def _evidence_provider_request(data: Mapping[str, Any]) -> EvidenceRequest:
             "schema_version", "kind", "fingerprint_format", "fingerprint",
             "request_id", "provider_id", "provider_version", "request_kind",
             "requested_evidence_kinds", "subject", "spec", "semantic_scope",
-            "source_context", "snapshot_context", "bounds",
+            "source_class", "snapshot_class", "source_context",
+            "snapshot_context", "bounds",
         },
         code="INVALID_EVIDENCE_PROVIDER_REQUEST",
         noun="evidence provider request",
@@ -179,6 +180,8 @@ def _evidence_provider_request(data: Mapping[str, Any]) -> EvidenceRequest:
             provider_version=str(data.get("provider_version") or ""),
             request_kind=str(data.get("request_kind") or ""),
             requested_evidence_kinds=_string_array(data.get("requested_evidence_kinds", ()), "requested_evidence_kinds"),
+            source_class=data.get("source_class"),
+            snapshot_class=data.get("snapshot_class"),
             subject=decode_markers(dict(_require_mapping(data.get("subject", {}), "subject"))),
             spec=decode_markers(dict(_require_mapping(data.get("spec", {}), "spec"))),
             semantic_scope=decode_markers(dict(_require_mapping(data.get("semantic_scope", {}), "semantic_scope"))),
@@ -331,13 +334,13 @@ def _evidence_provider_evidence_record(record: Mapping[str, Any]) -> Evidence:
 def _evidence_provider_issue(issue: Mapping[str, Any]) -> EvidenceProviderIssue:
     _reject_unexpected_fields(
         issue,
-        {"code", "message", "evidence_ids"},
+        {"code", "category", "evidence_ids"},
         code="INVALID_EVIDENCE_PROVIDER_RESULT",
         noun="provider issue",
     )
     return EvidenceProviderIssue(
         code=issue.get("code"),
-        message=issue.get("message"),
+        category=issue.get("category"),
         evidence_ids=_string_array(issue.get("evidence_ids", ()), "issue evidence_ids"),
     )
 

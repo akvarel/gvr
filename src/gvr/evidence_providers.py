@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import asyncio
+from concurrent.futures import CancelledError as FuturesCancelledError
 from dataclasses import dataclass, field
 from enum import Enum
+import re
 from types import MappingProxyType
 from typing import Any, Callable, Iterable, Mapping, Protocol, runtime_checkable
 
@@ -47,6 +50,17 @@ class EvidenceCompleteness(str, Enum):
     UNKNOWN = "UNKNOWN"
 
 
+class EvidenceProviderIssueCategory(str, Enum):
+    """Safe stable categories for provider acquisition failures."""
+
+    TIMEOUT = "TIMEOUT"
+    ACCESS_DENIED = "ACCESS_DENIED"
+    CONNECTION = "CONNECTION"
+    IO = "IO"
+    CANCELLED = "CANCELLED"
+    PROVIDER_EXCEPTION = "PROVIDER_EXCEPTION"
+
+
 _TRUTH_LIKE_PROVIDER_FIELDS = frozenset({
     "claim_verdict",
     "fail",
@@ -70,6 +84,20 @@ _TRUTH_LIKE_PROVIDER_TOKENS = frozenset({
     "verified",
 })
 
+_TRUTH_LIKE_ISSUE_TOKENS = frozenset({
+    "fail",
+    "failed",
+    "pass",
+    "passed",
+    "sufficient",
+    "truth",
+    "unknown",
+    "verdict",
+    "verified",
+})
+
+_STABLE_ISSUE_CODE = re.compile(r"^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)*$")
+
 
 def _strict_identifier(value: Any, *, name: str) -> str:
     if not isinstance(value, str) or not value:
@@ -83,6 +111,16 @@ def _strict_identifier(value: Any, *, name: str) -> str:
     except CanonicalizationError as exc:
         raise EvidenceProviderError(str(exc)) from exc
     return value
+
+
+def _stable_issue_identifier(value: Any, *, name: str) -> str:
+    identifier = _strict_identifier(value, name=name)
+    tokens = frozenset(re.findall(r"[A-Za-z0-9]+", identifier.casefold()))
+    if identifier.casefold() in _TRUTH_LIKE_ISSUE_TOKENS or tokens & _TRUTH_LIKE_ISSUE_TOKENS:
+        raise EvidenceProviderError(f"{name} must not contain truth-like terms")
+    if _STABLE_ISSUE_CODE.fullmatch(identifier) is None:
+        raise EvidenceProviderError(f"{name} must be a stable uppercase identifier")
+    return identifier
 
 
 def _strict_sha256_fingerprint(value: Any, *, name: str) -> str:
@@ -206,6 +244,8 @@ class EvidenceRequest:
     source_context: Mapping[str, Any]
     snapshot_context: Mapping[str, Any]
     bounds: Mapping[str, Any]
+    source_class: str | None = None
+    snapshot_class: str | None = None
     schema_version: int = EVIDENCE_REQUEST_SCHEMA_VERSION
     kind: str = EVIDENCE_REQUEST_KIND
     fingerprint_format: str = EVIDENCE_REQUEST_FINGERPRINT_FORMAT
@@ -228,6 +268,10 @@ class EvidenceRequest:
         object.__setattr__(self, "requested_evidence_kinds", _string_tuple(self.requested_evidence_kinds, name="requested_evidence_kinds"))
         if not self.requested_evidence_kinds:
             raise EvidenceProviderError("requested_evidence_kinds must not be empty")
+        for name in ("source_class", "snapshot_class"):
+            value = getattr(self, name)
+            if value is not None:
+                object.__setattr__(self, name, _strict_identifier(value, name=name))
         for name in ("subject", "spec", "semantic_scope", "source_context", "snapshot_context", "bounds"):
             object.__setattr__(self, name, _strict_mapping(getattr(self, name), name=name))
         object.__setattr__(self, "fingerprint", _fingerprint(self.semantic_definition(), fingerprint_format=self.fingerprint_format))
@@ -240,6 +284,8 @@ class EvidenceRequest:
             "provider_version": self.provider_version,
             "request_kind": self.request_kind,
             "requested_evidence_kinds": self.requested_evidence_kinds,
+            "source_class": self.source_class,
+            "snapshot_class": self.snapshot_class,
             "subject": self.subject,
             "spec": self.spec,
             "semantic_scope": self.semantic_scope,
@@ -356,17 +402,28 @@ def _evidence_definition(record: Evidence) -> dict[str, Any]:
 @dataclass(frozen=True)
 class EvidenceProviderIssue:
     code: str
-    message: str
+    category: EvidenceProviderIssueCategory | None = None
     evidence_ids: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "code", _strict_identifier(self.code, name="issue code"))
-        if not isinstance(self.message, str):
-            raise EvidenceProviderError("issue message must be a string")
-        try:
-            canonical_utf8_key(self.message, path="issue message")
-        except CanonicalizationError as exc:
-            raise EvidenceProviderError(str(exc)) from exc
+        object.__setattr__(self, "code", _stable_issue_identifier(self.code, name="issue code"))
+        if self.category is not None:
+            raw_category = (
+                self.category.value
+                if isinstance(self.category, EvidenceProviderIssueCategory)
+                else self.category
+            )
+            stable_category = _stable_issue_identifier(
+                raw_category,
+                name="issue category",
+            )
+            try:
+                category = EvidenceProviderIssueCategory(stable_category)
+            except ValueError as exc:
+                raise EvidenceProviderError(
+                    f"unsupported issue category {stable_category!r}"
+                ) from exc
+            object.__setattr__(self, "category", category)
         object.__setattr__(
             self,
             "evidence_ids",
@@ -383,13 +440,13 @@ class EvidenceProviderIssue:
 def _normalize_issue(issue: EvidenceProviderIssue) -> EvidenceProviderIssue:
     if not isinstance(issue, EvidenceProviderIssue):
         raise EvidenceProviderError("issues must contain EvidenceProviderIssue records")
-    return EvidenceProviderIssue(issue.code, issue.message, issue.evidence_ids)
+    return EvidenceProviderIssue(issue.code, issue.category, issue.evidence_ids)
 
 
 def _issue_definition(issue: EvidenceProviderIssue) -> dict[str, Any]:
     return {
         "code": issue.code,
-        "message": issue.message,
+        "category": None if issue.category is None else issue.category.value,
         "evidence_ids": issue.evidence_ids,
     }
 
@@ -525,10 +582,6 @@ class EvidenceProviderCapability:
             raise EvidenceProviderError("request_kinds must not be empty")
         if not self.produced_evidence_kinds:
             raise EvidenceProviderError("produced_evidence_kinds must not be empty")
-        if not self.source_classes:
-            raise EvidenceProviderError("source_classes must not be empty")
-        if not self.snapshot_classes:
-            raise EvidenceProviderError("snapshot_classes must not be empty")
         object.__setattr__(self, "input_schema", _strict_mapping(self.input_schema, name="input_schema"))
         object.__setattr__(self, "output_schema", _strict_mapping(self.output_schema, name="output_schema"))
         object.__setattr__(self, "determinism", _enum_value(self.determinism, VerifierDeterminism, name="determinism"))
@@ -680,7 +733,38 @@ def validate_evidence_provider_request(
         raise EvidenceProviderError("request kind is not supported by provider capability")
     if not set(request.requested_evidence_kinds) <= set(capability.produced_evidence_kinds):
         raise EvidenceProviderError("requested evidence kinds are not all produced by provider capability")
+    _validate_request_class(
+        request.source_class,
+        capability.source_classes,
+        name="source class",
+    )
+    _validate_request_class(
+        request.snapshot_class,
+        capability.snapshot_classes,
+        name="snapshot class",
+    )
     return request
+
+
+def _validate_request_class(
+    requested_class: str | None,
+    supported_classes: tuple[str, ...],
+    *,
+    name: str,
+) -> None:
+    if supported_classes:
+        if requested_class is None:
+            raise EvidenceProviderError(
+                f"request {name} is required by provider capability"
+            )
+        if requested_class not in supported_classes:
+            raise EvidenceProviderError(
+                f"request {name} is not supported by provider capability"
+            )
+    elif requested_class is not None:
+        raise EvidenceProviderError(
+            f"request asserts a {name} against an unclassified provider capability"
+        )
 
 
 def validate_evidence_provider_result(result: EvidenceProviderResult, request: EvidenceRequest, capability: EvidenceProviderCapability) -> EvidenceProviderResult:
@@ -783,6 +867,15 @@ class EvidenceProviderCapabilityRegistry:
         except KeyError as exc:
             raise UnknownEvidenceProviderError(f"unknown evidence provider capability {key[0]} version {key[1]}") from exc
 
+    def validate_request(self, request: EvidenceRequest) -> EvidenceProviderCapability:
+        """Validate a request against its exact registered capability."""
+
+        if not isinstance(request, EvidenceRequest):
+            raise EvidenceProviderError("request must be EvidenceRequest")
+        capability = self.lookup(request.provider_id, request.provider_version)
+        validate_evidence_provider_request(request, capability)
+        return capability
+
     def query(self, *, request_kind: str | None = None, evidence_kind: str | None = None) -> tuple[EvidenceProviderCapability, ...]:
         if request_kind is not None:
             request_kind = _strict_identifier(request_kind, name="request_kind")
@@ -839,6 +932,7 @@ def _validate_runtime_provider(
 def _execution_exception_result(
     request: EvidenceRequest,
     capability: EvidenceProviderCapability,
+    category: EvidenceProviderIssueCategory,
 ) -> EvidenceProviderResult:
     return EvidenceProviderResult(
         request_id=request.request_id,
@@ -854,21 +948,35 @@ def _execution_exception_result(
             declared_bounds=request.bounds,
             consumed={},
             termination={
-                "outcome": "exception",
+                "category": category.value,
                 "phase": "provider_execution",
             },
             truncated=False,
-            termination_reason="PROVIDER_EXECUTION_EXCEPTION",
+            termination_reason="PROVIDER_EXECUTION_ERROR",
             source_identity=request.source_context,
             snapshot_identity=request.snapshot_context,
         ),
         evidence=(),
         issues=(EvidenceProviderIssue(
-            "PROVIDER_EXECUTION_EXCEPTION",
-            "evidence provider execution raised an exception",
+            "PROVIDER_EXECUTION_ERROR",
+            category,
         ),),
         capability_fingerprint=capability.fingerprint,
     )
+
+
+def _execution_failure_category(error: BaseException) -> EvidenceProviderIssueCategory:
+    if isinstance(error, (asyncio.CancelledError, FuturesCancelledError)):
+        return EvidenceProviderIssueCategory.CANCELLED
+    if isinstance(error, TimeoutError):
+        return EvidenceProviderIssueCategory.TIMEOUT
+    if isinstance(error, PermissionError):
+        return EvidenceProviderIssueCategory.ACCESS_DENIED
+    if isinstance(error, ConnectionError):
+        return EvidenceProviderIssueCategory.CONNECTION
+    if isinstance(error, OSError):
+        return EvidenceProviderIssueCategory.IO
+    return EvidenceProviderIssueCategory.PROVIDER_EXCEPTION
 
 
 @dataclass(frozen=True)
@@ -913,13 +1021,7 @@ class EvidenceProviderRuntimeRegistry:
         *,
         fail_closed: bool = False,
     ) -> EvidenceProviderResult:
-        if not isinstance(request, EvidenceRequest):
-            raise EvidenceProviderError("request must be EvidenceRequest")
-        capability = self.capability_registry.lookup(
-            request.provider_id,
-            request.provider_version,
-        )
-        validate_evidence_provider_request(request, capability)
+        capability = self.capability_registry.validate_request(request)
         key = (request.provider_id, request.provider_version)
         try:
             provider = self._runtime_by_key[key]
@@ -933,10 +1035,22 @@ class EvidenceProviderRuntimeRegistry:
         acquire = _validate_runtime_provider(provider, key, capability)
         try:
             result = acquire(request)
-        except Exception:
+        except asyncio.CancelledError as exc:
             if not fail_closed:
                 raise
-            return _execution_exception_result(request, capability)
+            return _execution_exception_result(
+                request,
+                capability,
+                _execution_failure_category(exc),
+            )
+        except Exception as exc:
+            if not fail_closed:
+                raise
+            return _execution_exception_result(
+                request,
+                capability,
+                _execution_failure_category(exc),
+            )
 
         # Contract validation is deliberately outside the exception conversion.
         # A provider that executes but returns an invalid result is a protocol bug,
