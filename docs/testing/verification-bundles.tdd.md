@@ -2,9 +2,13 @@
 
 ## Source task
 
-Google Drive taskbus document `11-gvr-verification-bundle-evidence-manifest`.
+Google Drive taskbus documents:
+
+- `11-gvr-verification-bundle-evidence-manifest`;
+- `12-gvr-verification-bundle-ledger-evidence-remediation`.
 
 Approved base: `d578e8f4c4f1820a1630bf4819dd4176d0480daf`.
+Task 12 reviewed base: `dc8f08f699325ac9547d75bb6cf7dde941d52e48`.
 
 ## User journeys
 
@@ -14,6 +18,8 @@ Approved base: `d578e8f4c4f1820a1630bf4819dd4176d0480daf`.
 4. As a ClaimLedger caller, I can record a complete bundle atomically without repeating evidence plumbing or risking partial mutation.
 5. As a schema-v1 wire consumer, I can request a versioned bundle while the existing report operation remains compatible.
 6. As a reviewer, I can rely on missing, extra, conflicting, mutable, or otherwise malformed bundle content to fail closed.
+7. As a ClaimLedger caller, changing any semantic Evidence field invalidates the exact claims that depended on the previous record.
+8. As a legacy caller, I can keep using payload-only evidence with explicit default semantics and deterministic no-op behavior.
 
 ## RED and GREEN checkpoints
 
@@ -25,6 +31,11 @@ Approved base: `d578e8f4c4f1820a1630bf4819dd4176d0480daf`.
 | Graphify conflict adversarial RED | working tree after GREEN | `test_data_flow_bundle_rejects_conflicting_boundary_records_with_one_id` | Adapter deduplication hid two different boundary records sharing one ID. |
 | Wire fail-closed adversarial RED | working tree after GREEN | `test_safe_bundle_wire_operation_fails_closed_on_ambiguous_evidence` | `BundleValidationError` escaped the safe schema-v1 protocol boundary. |
 | Hardened GREEN | working tree after fixes | `python -m pytest -o addopts='' -q tests/test_verification_bundle.py` | All 29 focused bundle tests passed. |
+| Ledger semantics RED | `a5c7beb42ac648dd124c22e7e976f2af327cb28c` | `python -m pytest -o addopts='' -q tests/test_verification_bundle.py` | Six tests reproduced missing typed evidence APIs, lost kind/source/producer fingerprint fields, and unchanged upstream claim versions. |
+| Ledger semantics GREEN | `717800458c00db43f1b85f86213c20fabc71c489` | focused remediation suite, then full suite | `54 passed`; full repository suite `146 passed`. |
+| Storage isolation adversarial RED | working tree after remediation GREEN | typed evidence snapshot test | Mutable nested input, returned records, and evidence views could alter stored payload without a version change. |
+| Fingerprint-domain adversarial RED | working tree after remediation GREEN | typed-to-legacy alias test | A crafted legacy payload could equal the typed semantic envelope and suppress an explicit semantic transition. |
+| Final remediation GREEN | working tree after fixes | required focused and full commands | `36`, `57`, and `149` tests passed. |
 
 ## Test specification
 
@@ -46,6 +57,13 @@ Approved base: `d578e8f4c4f1820a1630bf4819dd4176d0480daf`.
 | 14 | Existing `verify_data_flow_claim` remains unchanged while `verify_data_flow_claim_bundle` returns a complete deterministic bundle envelope. | Wire compatibility and deterministic output tests | Protocol integration | PASS |
 | 15 | Ambiguous bundle evidence becomes `INVALID_VERIFICATION_BUNDLE` at the safe wire boundary rather than escaping as an exception. | Safe wire failure test | Adversarial protocol | PASS |
 | 16 | A real Graphify `dataclasses.asdict(...)` traversal produces a PASS bundle with exactly two direct evidence records. | Manual cross-repository probe | Cross-repository integration | PASS |
+| 17 | Payload, kind, source, and producer-fingerprint-only changes each create a new typed evidence version and stale dependents. | Full semantic evidence change tests | Adversarial ledger | PASS |
+| 18 | `record_bundle()` retains the exact Evidence ID, kind, payload, source, and producer fingerprint. | Exact stored record test | Ledger integration | PASS |
+| 19 | Changed bundle evidence semantics update the upstream claim version and stale downstream claim dependencies even when verdict and IDs are unchanged. | Upstream/downstream false-freshness test | Adversarial integration | PASS |
+| 20 | Mapping-key reordering and semantically identical bundle rerecording do not create evidence or claim versions and do not stale downstream claims. | Semantic no-op tests | Determinism | PASS |
+| 21 | Legacy payload-only evidence remains compatible with explicit `None` kind/source/producer fingerprint defaults. | Legacy compatibility tests | Regression | PASS |
+| 22 | Typed and legacy evidence fingerprint domains cannot alias, and moving an ID between modes is an explicit semantic change. | Domain-separation tests | Adversarial unit | PASS |
+| 23 | Stored nested payloads, returned records, and public evidence views are defensive snapshots that cannot mutate internal versioned state. | Storage isolation test | Adversarial unit | PASS |
 
 ## Canonical fingerprint contract
 
@@ -59,11 +77,17 @@ The bundle SHA-256 fingerprint covers:
 
 Mapping keys are sorted recursively. Evidence, issue, report dependency, and claim-dependency sets are normalized into deterministic order. Lists and tuples inside semantic payloads preserve their sequence. Unsupported object types and non-finite floats are rejected rather than converted through unstable runtime representations. The bundle adds no timestamps, UUIDs, object IDs, or checkout-root values.
 
+## Exact ledger evidence semantics
+
+`EvidenceRecord` retains the producer semantic fields `kind`, `payload`, `source`, and `producer_fingerprint` in addition to its ID, internal semantic fingerprint, version, and state. `ClaimDependencyGraph.put_evidence_record()` fingerprints a domain-separated `gvr.evidence_record.v1` envelope containing all five Evidence fields. `ClaimLedger.record_bundle()` uses this typed path.
+
+The existing `put_evidence(id, payload)` path remains available and uses a separate `gvr.legacy_payload_evidence.v1` fingerprint domain with explicit `None` defaults for the typed fields. Identical records in either domain are no-ops. A transition between domains is always semantic. Evidence payloads are deep snapshots, and returned/public EvidenceRecord values are defensive copies.
+
 ## Final validation
 
-- `python -m pytest -o addopts='' -q tests/test_verification_bundle.py`: `29 passed in 0.07s`.
-- `python -m pytest -o addopts='' -q tests/test_verification_bundle.py tests/test_graphify_adapter.py tests/test_data_flow_verifier.py tests/test_ledger.py tests/test_protocol.py tests/test_wire.py`: `97 passed in 0.20s`.
-- `python -m pytest -o addopts='' -q`: `137 passed in 0.22s`.
+- `python -m pytest -o addopts='' -q tests/test_verification_bundle.py`: `36 passed in 0.07s`.
+- `python -m pytest -o addopts='' -q tests/test_dependencies.py tests/test_ledger.py tests/test_verification_bundle.py`: `57 passed in 0.08s`.
+- `python -m pytest -o addopts='' -q`: `149 passed in 0.22s`.
 - `python -m compileall -q src`: PASS.
 - `git diff --check`: PASS.
 - Real Graphify bundle probe: `PASS`, two selected direct evidence records, deterministic fingerprint `24abb0649b1a3a43f8fdaf6b38c52c552d97a66881c86b47a2ba16d98e1e00b7`.

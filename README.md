@@ -66,8 +66,18 @@ blocking boundaries. Conflicting Graphify records sharing one ID are rejected.
 `ClaimLedger.record_bundle()` validates and records the complete package on a
 transactional copy before publishing any evidence or verdict state. Failed
 validation, verifier mismatch, missing claim dependencies, or dependency-cycle
-errors therefore cannot partially mutate the ledger. Existing evidence-version
-and stale-propagation behavior remains unchanged.
+errors therefore cannot partially mutate the ledger. Bundle recording uses the
+typed `put_evidence_record()` path, which retains and versions the exact evidence
+ID, kind, payload, source, and producer fingerprint. A change to any of those
+fields updates the evidence version, reverification updates the upstream claim
+version, and downstream claim dependencies become stale. Semantically identical
+records, including reordered mapping keys, remain no-ops.
+
+The legacy `put_evidence(id, payload)` API remains payload-only and stores
+explicit `None` defaults for kind, source, and producer fingerprint. Moving an ID
+between typed and legacy evidence is therefore an explicit semantic change rather
+than a silent equivalence. Stored payloads and evidence views are deep snapshots,
+so caller mutation cannot bypass evidence versioning.
 
 Schema version 1 additionally exposes `verify_data_flow_claim_bundle`. Its
 `verification_bundle` envelope preserves the bundle version, kind, verifier,

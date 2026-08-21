@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass, field
 import hashlib
 import json
@@ -17,11 +18,14 @@ def evidence_semantic_fingerprint(evidence: Evidence) -> str:
     """Fingerprint every producer-defined field that gives Evidence its meaning."""
 
     return stable_fingerprint({
-        "id": evidence.id,
-        "kind": evidence.kind,
-        "payload": evidence.payload,
-        "source": evidence.source,
-        "fingerprint": evidence.fingerprint,
+        "schema": "gvr.evidence_record.v1",
+        "evidence": {
+            "id": evidence.id,
+            "kind": evidence.kind,
+            "payload": evidence.payload,
+            "source": evidence.source,
+            "fingerprint": evidence.fingerprint,
+        },
     })
 
 
@@ -72,7 +76,7 @@ class ClaimDependencyGraph:
 
     @property
     def evidence(self) -> Mapping[str, EvidenceRecord]:
-        return dict(self._evidence)
+        return deepcopy(self._evidence)
 
     @property
     def claims(self) -> Mapping[str, ClaimRecord]:
@@ -87,7 +91,10 @@ class ClaimDependencyGraph:
         return self._put_evidence_record(
             evidence_id=evidence_id,
             payload=payload,
-            semantic_fingerprint=stable_fingerprint(payload),
+            semantic_fingerprint=stable_fingerprint({
+                "schema": "gvr.legacy_payload_evidence.v1",
+                "payload": payload,
+            }),
             kind=None,
             source=None,
             producer_fingerprint=None,
@@ -123,11 +130,11 @@ class ClaimDependencyGraph:
             and current.state is EvidenceState.ACTIVE
             and current.fingerprint == semantic_fingerprint
         ):
-            return current
+            return deepcopy(current)
         self._clock += 1
         rec = EvidenceRecord(
             evidence_id,
-            dict(payload),
+            deepcopy(dict(payload)),
             semantic_fingerprint,
             self._clock,
             EvidenceState.ACTIVE,
@@ -138,14 +145,14 @@ class ClaimDependencyGraph:
         self._evidence[evidence_id] = rec
         if current is not None:
             self._invalidate_dependents(evidence_id)
-        return rec
+        return deepcopy(rec)
 
     def remove_evidence(self, evidence_id: str) -> EvidenceRecord:
         current = self._evidence.get(evidence_id)
         self._clock += 1
         rec = EvidenceRecord(
             evidence_id,
-            {} if current is None else current.payload,
+            {} if current is None else deepcopy(current.payload),
             "" if current is None else current.fingerprint,
             self._clock,
             EvidenceState.REMOVED,
@@ -155,7 +162,7 @@ class ClaimDependencyGraph:
         )
         self._evidence[evidence_id] = rec
         self._invalidate_dependents(evidence_id)
-        return rec
+        return deepcopy(rec)
 
     def put_claim(self, claim_id: str, verdict: VerificationVerdict) -> ClaimRecord:
         rec = self._claims.get(claim_id)

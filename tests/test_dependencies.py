@@ -79,6 +79,70 @@ def test_legacy_payload_only_evidence_keeps_explicit_default_semantics():
     assert second.producer_fingerprint is None
 
 
+def test_typed_evidence_storage_snapshots_nested_payload_content():
+    g = ClaimDependencyGraph()
+    payload = {"nested": {"value": 1}}
+    stored = g.put_evidence_record(Evidence(
+        "E1",
+        "provider.v1",
+        payload,
+        "revision-A",
+        "producer-A",
+    ))
+    fingerprint = stored.fingerprint
+
+    payload["nested"]["value"] = 2
+    stored.payload["nested"]["value"] = 3
+    exposed = g.evidence["E1"]
+    exposed.payload["nested"]["value"] = 4
+
+    current = g.evidence["E1"]
+    assert current.payload["nested"]["value"] == 1
+    assert current.fingerprint == fingerprint
+
+
+def test_typed_to_legacy_transition_is_an_explicit_semantic_change():
+    g = ClaimDependencyGraph()
+    typed = g.put_evidence_record(Evidence(
+        "E1",
+        "provider.v1",
+        {"value": 1},
+        "revision-A",
+        "producer-A",
+    ))
+
+    legacy = g.put_evidence("E1", {"value": 1})
+
+    assert legacy.version != typed.version
+    assert legacy.kind is None
+    assert legacy.source is None
+    assert legacy.producer_fingerprint is None
+
+
+def test_typed_and_legacy_fingerprint_domains_cannot_alias():
+    g = ClaimDependencyGraph()
+    typed = g.put_evidence_record(Evidence(
+        "E1",
+        "provider.v1",
+        {"value": 1},
+        "revision-A",
+        "producer-A",
+    ))
+    legacy_payload = {
+        "id": "E1",
+        "kind": "provider.v1",
+        "payload": {"value": 1},
+        "source": "revision-A",
+        "fingerprint": "producer-A",
+    }
+
+    legacy = g.put_evidence("E1", legacy_payload)
+
+    assert legacy.version != typed.version
+    assert legacy.kind is None
+    assert legacy.payload == legacy_payload
+
+
 def test_removed_evidence_stales_claim_and_prevents_freshening():
     g = ClaimDependencyGraph()
     g.put_evidence("E1", {"value": 1})
