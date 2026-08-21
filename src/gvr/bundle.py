@@ -2,11 +2,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-import hashlib
 import json
 import math
 from typing import Any, Iterable, Mapping
 
+from .canonical import (
+    BUNDLE_FINGERPRINT_FORMAT,
+    CanonicalizationError,
+    canonical_transport_fingerprint,
+)
 from .model import (
     INDETERMINATE,
     MISSING,
@@ -19,6 +23,7 @@ from .model import (
 
 VERIFICATION_BUNDLE_SCHEMA_VERSION = 1
 VERIFICATION_BUNDLE_KIND = "gvr.verification_bundle"
+VERIFICATION_BUNDLE_FINGERPRINT_FORMAT = BUNDLE_FINGERPRINT_FORMAT
 
 
 class BundleValidationError(ValueError):
@@ -231,6 +236,7 @@ def _bundle_content(bundle: VerificationBundle) -> dict[str, Any]:
     return {
         "schema_version": bundle.schema_version,
         "kind": bundle.kind,
+        "fingerprint_format": bundle.fingerprint_format,
         "verifier": bundle.verifier,
         "report": _canonical_report(bundle.report),
         "evidence": [_canonical_evidence(item) for item in bundle.evidence],
@@ -244,6 +250,7 @@ class VerificationBundle:
 
     schema_version: int = VERIFICATION_BUNDLE_SCHEMA_VERSION
     kind: str = VERIFICATION_BUNDLE_KIND
+    fingerprint_format: str = VERIFICATION_BUNDLE_FINGERPRINT_FORMAT
     verifier: str = field(init=False)
     report: VerificationReport
     evidence: tuple[Evidence, ...] = ()
@@ -257,6 +264,10 @@ class VerificationBundle:
             )
         if self.kind != VERIFICATION_BUNDLE_KIND:
             raise BundleValidationError(f"unsupported bundle kind {self.kind}")
+        if self.fingerprint_format != VERIFICATION_BUNDLE_FINGERPRINT_FORMAT:
+            raise BundleValidationError(
+                f"unsupported bundle fingerprint format {self.fingerprint_format}"
+            )
 
         report = _normalize_report(self.report)
         evidence = _normalize_evidence(self.evidence)
@@ -283,12 +294,11 @@ class VerificationBundle:
         object.__setattr__(self, "report", report)
         object.__setattr__(self, "evidence", evidence)
         object.__setattr__(self, "claim_dependency_ids", claim_dependency_ids)
-        canonical = _canonical_json(_bundle_content(self))
-        object.__setattr__(
-            self,
-            "fingerprint",
-            hashlib.sha256(canonical.encode("utf-8")).hexdigest(),
-        )
+        try:
+            fingerprint = canonical_transport_fingerprint(_bundle_content(self))
+        except CanonicalizationError as exc:
+            raise BundleValidationError(str(exc)) from exc
+        object.__setattr__(self, "fingerprint", fingerprint)
 
 
 def build_verification_bundle(
@@ -314,6 +324,7 @@ def validate_verification_bundle(bundle: VerificationBundle) -> None:
     expected = VerificationBundle(
         schema_version=bundle.schema_version,
         kind=bundle.kind,
+        fingerprint_format=bundle.fingerprint_format,
         report=bundle.report,
         evidence=bundle.evidence,
         claim_dependency_ids=bundle.claim_dependency_ids,
