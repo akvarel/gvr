@@ -1,87 +1,231 @@
 # GVR — General Verification Runtime
 
-GVR is a deterministic verification core for evidence-backed agent decisions.
+GVR is an open-source runtime for checking claims with evidence.
 
-Core rule:
+It is built around one simple rule:
 
-> Propose freely. Propagate only verified state.
+> **An AI can propose. Evidence and verifier rules decide what is proven.**
 
-The runtime separates proposal generation from verification. It models goals,
-actions, state transitions, evidence, claims, dependencies, and conservative
-`PASS / FAIL / UNKNOWN` outcomes.
+GVR is not another AI judge. When a check can be done with clear deterministic rules, GVR uses those rules instead of model confidence.
 
-Current modules:
+## Why GVR exists
 
-- deterministic goal/postcondition verification;
-- explicit MISSING vs NULL vs INDETERMINATE state;
-- independently grounded literal text-search verifier;
-- Claim Dependency Graph with evidence invalidation and transitive STALE propagation;
-- Graphify traversal evidence adapter and deterministic `CAN_FLOW_TO` /
-  `NO_SUPPORTED_PATH` claim verifier;
-- deterministic `VerificationBundle` transport packages with exact evidence manifests;
-- versioned wire envelope for future CLI / hooks / MCP / standalone runtime.
+AI systems can make small mistakes that later become big mistakes.
 
-The repository intentionally does not contain BugZero product policy. Product
-policy belongs in the private BugZero Verify service.
+Examples:
 
-## Graphify data-flow claims
+- counting a character incorrectly;
+- checking the wrong code revision;
+- saying "no path exists" after only a partial search;
+- using an old PASS after its evidence changed;
+- treating missing information as if it proved something.
 
-`verify_data_flow_claim()` consumes the public Graphify bounded traversal-result
-mapping. It does not parse source code or build a second graph. A positive flow
-claim passes only for an individually exact `PROVEN` path with complete coverage
-and valid deterministic `df:...` dependencies. Absence is accepted only when
-Graphify reports a complete supported search with no path and no MAY evidence,
-and the traversal relation/direction/stop-node scope exactly matches the
-immutable `DataFlowQueryScope` carried by the claim. Malformed, contradictory,
-truncated, unresolved, partial, ambiguous, scope-mismatched, or unsupported
-evidence fails closed to `UNKNOWN`.
+GVR tries to catch these problems early.
 
-Empty-search and zero-step identity verdicts depend on deterministic `gvrq:...`
-query-result evidence rather than fabricated direct edges. The evidence ID names
-the semantic query slot; its normalized payload carries the current result and
-optional `source_context`, so replacing or removing it makes recorded
-`ClaimLedger` verdicts stale. Callers can use `evidence_namespace` to isolate
-query slots and `build_query_result_evidence()` to construct the record.
+## The three verdicts
 
-Schema version 1 also exposes the `verify_data_flow_claim` wire operation. Its
-report preserves the claim kind and endpoints, exact evidence IDs, issue codes,
-and Graphify termination, bounds, boundary, and search-coverage metadata.
+Every GVR verifier uses the same basic truth model:
 
-## Verification bundles
+- `PASS` — the claim is proven by the evidence accepted by that verifier.
+- `FAIL` — the claim is disproven by the evidence accepted by that verifier.
+- `UNKNOWN` — GVR cannot safely prove or disprove the claim.
 
-`build_verification_bundle()` packages a `VerificationReport` with exactly the
-`Evidence` records named by `report.evidence_ids`, optional claim dependencies,
-and a deterministic SHA-256 fingerprint of canonical semantic content. Bundle
-construction rejects missing dependencies, conflicting duplicate IDs, unrelated
-extra evidence, unsupported semantic values, and issue evidence outside the
-report dependency set. Evidence order and mapping key order do not affect the
-fingerprint. Report metadata and evidence payloads are snapshotted into immutable
-canonical structures so later caller mutation cannot invalidate bundle identity.
+`UNKNOWN` is a normal and useful result.
 
-`verify_data_flow_claim_bundle()` is the first producer integration. It includes
-only the selected direct `df:...` records for a proven path, the stable `gvrq:...`
-record for complete absence or zero-step identity, and exact `bnd:...` records for
-blocking boundaries. Conflicting Graphify records sharing one ID are rejected.
+It means:
 
-`ClaimLedger.record_bundle()` validates and records the complete package on a
-transactional copy before publishing any evidence or verdict state. Failed
-validation, verifier mismatch, missing claim dependencies, or dependency-cycle
-errors therefore cannot partially mutate the ledger. Bundle recording uses the
-typed `put_evidence_record()` path, which retains and versions the exact evidence
-ID, kind, payload, source, and producer fingerprint. A change to any of those
-fields updates the evidence version, reverification updates the upstream claim
-version, and downstream claim dependencies become stale. Semantically identical
-records, including reordered mapping keys, remain no-ops.
+> **Do not pretend we know.**
 
-The legacy `put_evidence(id, payload)` API remains payload-only and stores
-explicit `None` defaults for kind, source, and producer fingerprint. Moving an ID
-between typed and legacy evidence is therefore an explicit semantic change rather
-than a silent equivalence. Stored payloads and evidence views are deep snapshots,
-so caller mutation cannot bypass evidence versioning. Returned claim records,
-verification snapshots, and history views are defensive copies and cannot rewrite
-internal freshness or audit history.
+## The basic flow
 
-Schema version 1 additionally exposes `verify_data_flow_claim_bundle`. Its
-`verification_bundle` envelope preserves the bundle version, kind, verifier,
-fingerprint, report, claim dependencies, and deterministically ordered evidence
-records with IDs, kinds, payloads, sources, and producer fingerprints.
+```text
+claim
+  |
+  v
+evidence
+  |
+  v
+verifier
+  |
+  v
+PASS / FAIL / UNKNOWN
+  |
+  v
+VerificationBundle
+  |
+  v
+ClaimLedger
+```
+
+A `VerificationBundle` keeps a report together with the exact evidence used by that report.
+
+The `ClaimLedger` remembers dependencies. If evidence changes, old dependent results become stale and must not be treated as current truth.
+
+## A tiny example
+
+Suppose someone claims:
+
+> "Every word in this list contains the letter `e`."
+
+Given:
+
+```text
+apple
+pear
+plum
+```
+
+A deterministic text verifier can check every word exactly.
+
+`plum` does not contain `e`, so the claim is:
+
+```text
+FAIL
+```
+
+No confidence score is needed.
+
+## Current GVR building blocks
+
+GVR currently includes:
+
+- deterministic goal, precondition, effect, and postcondition checks;
+- explicit `MISSING`, `NULL`, and `INDETERMINATE` state handling;
+- exact text-search verification with explicit Unicode normalization and reverse mode;
+- functional snapshot comparison and conservative functional-regression verification;
+- evidence records and deterministic evidence versioning;
+- `ClaimLedger` with transitive stale propagation;
+- Graphify traversal evidence adapter;
+- deterministic `CAN_FLOW_TO` and `NO_SUPPORTED_PATH` data-flow claim verification;
+- `VerificationBundle` transport with exact evidence manifests;
+- language-neutral bundle fingerprint format for trusted cross-language transport;
+- schema-v1 JSON protocol and CLI.
+
+GVR is under active development. Multi-claim sessions, verifier/provider registries, planning, and other runtime layers are being built separately and should not be assumed to exist until they are merged into the integration branch.
+
+## Five-minute start
+
+Clone the repository and install the development package:
+
+```bash
+python -m pip install -e '.[dev]'
+```
+
+Run tests:
+
+```bash
+python -m pytest
+```
+
+Run a JSON request through the CLI:
+
+```bash
+python -m gvr --pretty --request '{
+  "schema_version": 1,
+  "op": "verify_text_search",
+  "payload": {
+    "corpus": ["apple", "pear", "plum"],
+    "needle": "e",
+    "claimed_matches": ["apple", "pear"]
+  }
+}'
+```
+
+The CLI also accepts JSON from standard input:
+
+```bash
+python -m gvr < request.json
+```
+
+## Documentation
+
+Start with [the documentation index](docs/README.md).
+
+Recommended reading order:
+
+1. [What is GVR?](docs/WHAT_IS_GVR.md)
+2. [Core concepts](docs/CORE_CONCEPTS.md)
+3. [How GVR works](docs/HOW_GVR_WORKS.md)
+4. [Examples](docs/EXAMPLES.md)
+5. [CLI and JSON protocol](docs/CLI_AND_PROTOCOL.md)
+6. [Design rules](docs/DESIGN_RULES.md)
+
+The docs intentionally use plain English and short examples.
+
+## One important rule about negative claims
+
+Finding one valid example can prove that something exists.
+
+Not finding an example does **not** prove absence unless the search was complete.
+
+For example:
+
+```text
+one valid A -> B path
+```
+
+can prove:
+
+```text
+CAN_FLOW_TO = PASS
+```
+
+But:
+
+```text
+no path found before the search stopped
+```
+
+must not prove:
+
+```text
+NO_SUPPORTED_PATH = PASS
+```
+
+unless the supported search was complete.
+
+When search completeness is not proven, GVR returns `UNKNOWN`.
+
+## GVR and Graphify
+
+GVR does not parse source code to build its own second code graph.
+
+For data-flow verification, Graphify produces source-derived traversal evidence and GVR checks claims against that evidence.
+
+```text
+source code
+    |
+    v
+Graphify
+    |
+    v
+structured graph evidence
+    |
+    v
+GVR verifier
+```
+
+This keeps source analysis and verification as separate jobs.
+
+## GVR and product policy
+
+GVR answers questions like:
+
+> "Is this claim proven by the current evidence?"
+
+It does **not** decide product authorization such as:
+
+- deploy to production;
+- delete data;
+- make a purchase;
+- allow an external side effect.
+
+A product can use GVR results, but product policy belongs outside the generic GVR truth layer.
+
+## Safety model in one sentence
+
+> **If GVR cannot prove that a definitive result is safe, it stays UNKNOWN or rejects malformed input.**
+
+## License
+
+GVR is released under the MIT License.
