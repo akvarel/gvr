@@ -1060,3 +1060,15 @@ def test_28_capability_descriptions_are_nonsemantic_for_execution_identity() -> 
         execute_verification_plan(first.request).fingerprint
         == execute_verification_plan(second.request).fingerprint
     )
+    wire_result = handle_request(
+        {
+            "schema_version": 1,
+            "op": "execute_verification_plan",
+            "payload": first.request.to_dict(),
+        },
+        verifier_runtime_registry=second.request.verifier_runtime_registry,
+        evidence_provider_runtime_registry=(
+            second.request.evidence_provider_runtime_registry
+        ),
+    )
+    assert wire_result["kind"] == "verification_execution_result"
