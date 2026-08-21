@@ -47,11 +47,17 @@ COMPOSITE_CLAIM_FINGERPRINT_FORMAT = "gvr.composite_claim.ieee754-json.v1"
 _STABLE_ISSUE_CODE = re.compile(r"^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)*$")
 _FORBIDDEN_ISSUE_FIELDS = frozenset({
     "claim_verdict",
+    "evidence_adequacy",
+    "is_sufficient",
     "message",
     "metadata",
+    "outcome",
+    "result",
+    "status",
     "sufficient",
     "sufficiency",
     "truth",
+    "truth_value",
     "verdict",
 })
 
