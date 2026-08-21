@@ -42,6 +42,12 @@ This page shows how the current GVR pieces fit together.
                    |
                    v
              ClaimLedger
+                   |
+                   v
+              ClaimGraph
+                   |
+                   v
+         VerificationSession
 ```
 
 The important idea is separation.
@@ -73,7 +79,7 @@ The protocol layer:
 
 - checks request shape;
 - converts JSON into GVR data models;
-- calls the correct verifier;
+- calls the correct verifier or session composer;
 - returns a machine-readable response;
 - returns a protocol error for malformed input.
 
@@ -184,6 +190,50 @@ If another claim depends on C, that dependent claim also becomes stale.
 
 This is how GVR prevents old results from silently surviving source changes.
 
+## ClaimGraph
+
+`ClaimGraph` describes how several claims depend on each other.
+
+It supports:
+
+- atomic claims checked by verifiers;
+- composite claims using exact `AND`, `OR`, and `NOT` logic.
+
+Example:
+
+```text
+A -----+
+       |
+B -----+--> ROOT = AND(A, B)
+```
+
+The graph rejects cycles, unknown dependencies, malformed operators, and conflicting duplicate claim IDs.
+
+## VerificationSession
+
+`VerificationSession` combines current bundle-backed claim states into one deterministic multi-claim state.
+
+A session contains things such as:
+
+- the claim graph;
+- selected root claims;
+- bundle fingerprints for atomic claims;
+- stored and effective verdicts;
+- freshness;
+- deterministic budgets and consumption;
+- termination reason;
+- session fingerprint.
+
+If a needed claim is stale or missing, a dependent root stays `UNKNOWN`.
+
+A budget cutoff also leaves affected roots `UNKNOWN` instead of creating a false final PASS or FAIL.
+
+Independent bundle arrival order does not change semantic session identity when the final semantic state is the same.
+
+The raw ClaimLedger mutation clock is audit data and is not used as session semantic identity.
+
+See [Verification sessions](VERIFICATION_SESSIONS.md) for a simpler walkthrough.
+
 ## Historical verdict vs current verdict
 
 GVR separates stored history from current effective truth.
@@ -208,6 +258,8 @@ UNKNOWN
 
 until C is verified again.
 
+The same rule continues through a ClaimGraph: a dependent composite claim becomes effectively UNKNOWN when its support is stale.
+
 ## What is outside the GVR core
 
 The generic GVR core should not contain private product decisions such as:
@@ -224,13 +276,12 @@ A product can use GVR truth, but product policy is a separate layer.
 
 GVR is under active development.
 
-The next runtime layers include ideas such as:
+Planned runtime layers include ideas such as:
 
-- multi-claim verification sessions;
-- claim graphs;
 - verifier capability registry;
 - evidence provider protocol;
 - deterministic verification planning;
+- automatic evidence acquisition;
 - counterexample and falsification support.
 
 These should be treated as available only after they are merged into the integration branch and documented as current behavior.
