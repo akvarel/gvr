@@ -13,6 +13,9 @@ from .model import (
 )
 
 
+VERIFIER_REGISTRY_NAME = "registry"
+
+
 @dataclass(frozen=True)
 class Predicate:
     slot: str
@@ -200,7 +203,7 @@ class VerifierRegistry:
         if not self.verifiers:
             return VerificationReport(
                 verdict=VerificationVerdict.UNKNOWN,
-                verifier="registry",
+                verifier=VERIFIER_REGISTRY_NAME,
                 issues=(VerificationIssue(
                     code="NO_VERIFIERS",
                     message="No verifier is registered.",
@@ -211,7 +214,7 @@ class VerifierRegistry:
         verdict = combine_verdicts(*(r.verdict for r in reports))
         return VerificationReport(
             verdict=verdict,
-            verifier="registry",
+            verifier=VERIFIER_REGISTRY_NAME,
             issues=tuple(issue for r in reports for issue in r.issues),
             evidence_ids=tuple(dict.fromkeys(eid for r in reports for eid in r.evidence_ids)),
             metadata={

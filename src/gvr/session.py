@@ -6,7 +6,7 @@ from enum import Enum
 import hashlib
 import heapq
 from types import MappingProxyType
-from typing import Any, Iterable, Mapping
+from typing import TYPE_CHECKING, Any, Iterable, Mapping
 
 from .bundle import (
     BundleValidationError,
@@ -19,6 +19,9 @@ from .bundle import (
 )
 from .ledger import ClaimDefinition, ClaimLedger, VerificationSnapshot
 from .model import Freshness, VerificationReport, VerificationVerdict
+
+if TYPE_CHECKING:
+    from .capabilities import VerifierCapability, VerifierCapabilityRegistry
 
 
 CLAIM_GRAPH_SCHEMA_VERSION = 1
@@ -130,6 +133,16 @@ class AtomicClaim:
             "scope": _canonical_value(self.scope, path=f"claim[{self.claim_id}].scope"),
             "dependencies": list(self.dependencies),
         }
+
+    def validate_capability(
+        self,
+        registry: VerifierCapabilityRegistry,
+        *,
+        version: str | None = None,
+    ) -> VerifierCapability:
+        """Validate this exact verifier binding without selecting a substitute."""
+
+        return registry.validate_atomic_claim(self, version=version)
 
 
 @dataclass(frozen=True, kw_only=True)

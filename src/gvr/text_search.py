@@ -6,6 +6,9 @@ import unicodedata
 from .model import VerificationIssue, VerificationReport, VerificationVerdict
 
 
+TEXT_SEARCH_VERIFIER = "text_search"
+
+
 @dataclass(frozen=True)
 class TextSearchAssertion:
     corpus: tuple[str, ...]
@@ -48,7 +51,7 @@ def evaluate_text_search(assertion: TextSearchAssertion) -> tuple[TextSearchResu
         )
         return result, VerificationReport(
             verdict=VerificationVerdict.UNKNOWN,
-            verifier="text_search",
+            verifier=TEXT_SEARCH_VERIFIER,
             issues=(VerificationIssue(
                 code="MISSING_SPEC_GROUNDING",
                 message="The executed literal is not independently grounded to the requested literal.",
@@ -89,4 +92,8 @@ def evaluate_text_search(assertion: TextSearchAssertion) -> tuple[TextSearchResu
         claimed_matches=assertion.claimed_matches,
         verdict=verdict,
     )
-    return result, VerificationReport(verdict=verdict, verifier="text_search", issues=tuple(issues))
+    return result, VerificationReport(
+        verdict=verdict,
+        verifier=TEXT_SEARCH_VERIFIER,
+        issues=tuple(issues),
+    )

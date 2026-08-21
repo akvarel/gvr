@@ -3,6 +3,11 @@ from __future__ import annotations
 from typing import Any, Mapping
 
 from .bundle import BundleValidationError, VerificationBundle
+from .capabilities import (
+    VerifierCapabilityError,
+    VerifierCapabilityRegistry,
+    builtin_verifier_capability_registry,
+)
 from .core import Action, Goal, Predicate, Proposal, StateEffect, VerificationContext, default_registry
 from .model import Evidence, VerificationIssue, VerificationReport, VerificationVerdict
 from .session import (
@@ -330,6 +335,32 @@ def handle_request(request: Mapping[str, Any]) -> dict[str, Any]:
         )
     op = str(request.get("op") or "")
     payload = _require_mapping(request.get("payload", {}), "payload")
+
+    if op == "describe_verifier_capabilities":
+        unexpected = set(payload) - {"claim_kind", "authoritative_only"}
+        if unexpected:
+            raise ProtocolError(
+                "INVALID_PAYLOAD",
+                "unsupported capability query fields: " + ", ".join(sorted(unexpected)),
+            )
+        claim_kind = payload.get("claim_kind")
+        if claim_kind is not None and not isinstance(claim_kind, str):
+            raise ProtocolError("INVALID_PAYLOAD", "claim_kind must be a string")
+        authoritative_only = payload.get("authoritative_only", False)
+        if not isinstance(authoritative_only, bool):
+            raise ProtocolError(
+                "INVALID_PAYLOAD",
+                "authoritative_only must be a boolean",
+            )
+        try:
+            capabilities = builtin_verifier_capability_registry().query(
+                claim_kind=claim_kind,
+                authoritative_only=authoritative_only,
+            )
+            registry = VerifierCapabilityRegistry(capabilities)
+        except VerifierCapabilityError as exc:
+            raise ProtocolError("INVALID_PAYLOAD", str(exc)) from exc
+        return envelope("verifier_capability_registry", registry.to_dict())
 
     if op == "verify_goal":
         state = decode_markers(dict(_require_mapping(payload.get("initial_state", {}), "initial_state")))

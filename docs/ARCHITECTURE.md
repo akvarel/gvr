@@ -260,6 +260,27 @@ until C is verified again.
 
 The same rule continues through a ClaimGraph: a dependent composite claim becomes effectively UNKNOWN when its support is stale.
 
+## Verifier capability registry
+
+`VerifierCapabilityRegistry` is a descriptive layer beside the executable verifier layer.
+
+It contains immutable `VerifierCapability` records keyed by exact verifier ID and version. A record declares:
+
+- published claim and evidence kinds;
+- input and output schemas when those schemas are actually defined;
+- D0, D1, O1, or M1 determinism semantics;
+- side-effect, cost, bounds, coverage, and authority properties.
+
+The capability registry is intentionally not `VerifierRegistry`. It does not execute verifier objects, rank candidates, acquire evidence, or select a substitute for an `AtomicClaim`.
+
+Descriptor and registry fingerprints use the strict language-neutral canonical layer with their own domain formats. Contract list order and mapping key order are normalized. Human descriptions do not affect semantic identity.
+
+The built-in snapshot uses exact IDs emitted by current runtime reports. Where GVR does not yet publish a stable `AtomicClaim.claim_kind`, `Evidence.kind`, or formal schema, the descriptor stays empty instead of inventing one.
+
+The schema-v1 `describe_verifier_capabilities` operation exposes this snapshot and supports deterministic claim-kind and authoritative-only filters.
+
+See [Verifier capabilities](VERIFIER_CAPABILITIES.md) for the full contract.
+
 ## What is outside the GVR core
 
 The generic GVR core should not contain private product decisions such as:
@@ -278,7 +299,6 @@ GVR is under active development.
 
 Planned runtime layers include ideas such as:
 
-- verifier capability registry;
 - evidence provider protocol;
 - deterministic verification planning;
 - automatic evidence acquisition;

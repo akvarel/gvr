@@ -157,6 +157,22 @@ This area contains functional snapshot and regression verification.
 
 It compares baseline and candidate behavior and keeps incomplete analysis from becoming a false clean regression result.
 
+## `src/gvr/capabilities.py`
+
+This contains the immutable verifier-description layer:
+
+- `VerifierCapability`;
+- `VerifierCapabilityRegistry`;
+- D0, D1, O1, and M1 determinism classes;
+- stable qualitative cost classes;
+- exact lookup and deterministic claim-kind queries;
+- exact `AtomicClaim` validation;
+- the honest built-in capability snapshot.
+
+This registry is separate from the executable `VerifierRegistry` in `core.py`. It describes contracts but does not run or rank verifiers.
+
+Read [Verifier capabilities](VERIFIER_CAPABILITIES.md) before adding or changing a descriptor.
+
 ## `src/gvr/protocol.py`
 
 This is the schema-v1 request dispatcher.
@@ -171,7 +187,8 @@ Current operations include:
 - `verify_text_search`;
 - `verify_data_flow_claim`;
 - `verify_data_flow_claim_bundle`;
-- `compose_verification_session`.
+- `compose_verification_session`;
+- `describe_verifier_capabilities`.
 
 The session wire path also validates the explicit bundle fingerprint format before accepting a materialized bundle.
 

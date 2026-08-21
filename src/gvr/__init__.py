@@ -8,10 +8,30 @@ from .core import (
     Proposal,
     StateEffect,
     VerificationContext,
+    VERIFIER_REGISTRY_NAME,
     VerifierRegistry,
     default_registry,
     evaluate_predicate,
     simulate,
+)
+from .canonical import canonical_fingerprint, canonical_json
+from .capabilities import (
+    BUILTIN_VERIFIER_CAPABILITY_REGISTRY,
+    VERIFIER_CAPABILITY_FINGERPRINT_FORMAT,
+    VERIFIER_CAPABILITY_KIND,
+    VERIFIER_CAPABILITY_REGISTRY_FINGERPRINT_FORMAT,
+    VERIFIER_CAPABILITY_REGISTRY_KIND,
+    VERIFIER_CAPABILITY_REGISTRY_SCHEMA_VERSION,
+    VERIFIER_CAPABILITY_SCHEMA_VERSION,
+    CostClass,
+    DeterminismClass,
+    UnknownVerifierCapabilityError,
+    VerifierCapability,
+    VerifierCapabilityError,
+    VerifierCapabilityRegistry,
+    VerifierCost,
+    VerifierDeterminism,
+    builtin_verifier_capability_registry,
 )
 from .dependencies import (
     ClaimDependencyGraph,
@@ -64,7 +84,12 @@ from .model import (
 )
 from .adapters.graphify import GraphifyTraversalEvidence, ingest_traversal_result
 from .protocol import ProtocolError, handle_request, safe_handle_request
-from .text_search import TextSearchAssertion, TextSearchResult, evaluate_text_search
+from .text_search import (
+    TEXT_SEARCH_VERIFIER,
+    TextSearchAssertion,
+    TextSearchResult,
+    evaluate_text_search,
+)
 from .verifiers.data_flow import (
     BLOCKING_RESOLUTIONS,
     COMPLETE_COVERAGE,
@@ -103,6 +128,17 @@ __all__ = [
     "CompositeClaim", "SessionBudget", "SessionClaimState",
     "SessionConsumption", "SessionTermination", "VerificationSession",
     "VerificationSessionError", "compose_claim_verdict",
+    "VERIFIER_REGISTRY_NAME", "TEXT_SEARCH_VERIFIER", "canonical_fingerprint",
+    "canonical_json", "VERIFIER_CAPABILITY_SCHEMA_VERSION",
+    "VERIFIER_CAPABILITY_KIND", "VERIFIER_CAPABILITY_FINGERPRINT_FORMAT",
+    "VERIFIER_CAPABILITY_REGISTRY_SCHEMA_VERSION",
+    "VERIFIER_CAPABILITY_REGISTRY_KIND",
+    "VERIFIER_CAPABILITY_REGISTRY_FINGERPRINT_FORMAT",
+    "VerifierDeterminism", "VerifierCost", "VerifierCapability",
+    "DeterminismClass", "CostClass",
+    "VerifierCapabilityRegistry", "VerifierCapabilityError",
+    "UnknownVerifierCapabilityError", "BUILTIN_VERIFIER_CAPABILITY_REGISTRY",
+    "builtin_verifier_capability_registry",
 ]
 
 from .software import Coverage, DeltaKind, FunctionalDeltaItem, FunctionalDeltaResult, FunctionalSnapshot, Observable, RevisionRef, compare_functionality, FUNCTIONAL_REGRESSION_VERIFIER, verify_functional_regression

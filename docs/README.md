@@ -11,10 +11,11 @@ You do not need to know AI research terms to read it. You do not need to know gr
 3. [How GVR works](HOW_GVR_WORKS.md) — what happens from a claim to a final result.
 4. [Examples](EXAMPLES.md) — small examples with text, program behavior, and data flow.
 5. [Verification sessions](VERIFICATION_SESSIONS.md) — how several claims are combined safely.
-6. [Architecture](ARCHITECTURE.md) — how the current GVR pieces fit together.
-7. [CLI and JSON protocol](CLI_AND_PROTOCOL.md) — how another program can call GVR.
-8. [Code map](CODE_MAP.md) — where the main pieces live in the repository.
-9. [Design rules](DESIGN_RULES.md) — the safety rules GVR follows and why they exist.
+6. [Verifier capabilities](VERIFIER_CAPABILITIES.md) — how exact verifier contracts are described and discovered.
+7. [Architecture](ARCHITECTURE.md) — how the current GVR pieces fit together.
+8. [CLI and JSON protocol](CLI_AND_PROTOCOL.md) — how another program can call GVR.
+9. [Code map](CODE_MAP.md) — where the main pieces live in the repository.
+10. [Design rules](DESIGN_RULES.md) — the safety rules GVR follows and why they exist.
 
 ## The shortest explanation
 
@@ -63,6 +64,8 @@ The bundle keeps the result together with the evidence used for that result.
 The ledger remembers which result depends on which evidence. If the evidence changes, the old result becomes stale and must not be treated as current truth.
 
 A verification session can combine several current claims with exact `AND`, `OR`, and `NOT` rules. Missing or stale required claims stay `UNKNOWN`.
+
+A verifier capability registry describes the exact IDs and contracts GVR currently publishes. It can answer which verifiers support a known claim kind, but it never silently ranks or substitutes them.
 
 ## If you want to contribute
 

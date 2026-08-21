@@ -230,9 +230,11 @@ def test_authoritative_query_excludes_m1_and_non_authoritative_capabilities():
 def test_validate_atomic_claim_uses_exact_verifier_and_version_without_substitution():
     capability = _cap()
     registry = VerifierCapabilityRegistry((capability,))
-    assert registry.validate_atomic_claim(_atomic(), version="1") == capability
+    claim = _atomic()
+    assert registry.validate_atomic_claim(claim, version="1") == capability
+    assert claim.validate_capability(registry, version="1") == capability
     with pytest.raises(LookupError):
-        registry.validate_atomic_claim(_atomic(), version="2")
+        registry.validate_atomic_claim(claim, version="2")
 
 
 def test_validate_atomic_claim_rejects_unknown_verifier():
@@ -287,7 +289,11 @@ def test_describe_verifier_capabilities_protocol_is_schema_v1_and_deterministic(
         "payload": {"claim_kind": "CAN_FLOW_TO", "authoritative_only": True},
     }
     first = handle_request(request)
-    second = handle_request({"payload": dict(reversed(tuple(request["payload"].items()))), "op": request["op"], "schema_version": 1})
+    second = handle_request({
+        "payload": dict(reversed(tuple(request["payload"].items()))),
+        "op": request["op"],
+        "schema_version": 1,
+    })
     assert first == second
     assert first["schema_version"] == 1
     assert first["kind"] == "verifier_capability_registry"

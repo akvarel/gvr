@@ -83,10 +83,13 @@ def canonical_transport_value(value: Any, *, path: str = "value") -> Any:
     )
 
 
-def canonical_transport_json(value: Any) -> str:
+def canonical_json(value: Any, *, fingerprint_format: str) -> str:
+    if not isinstance(fingerprint_format, str) or not fingerprint_format:
+        raise CanonicalizationError("fingerprint_format must be a non-empty string")
+    canonical_utf8_key(fingerprint_format, path="fingerprint_format")
     envelope = {
         "content": canonical_transport_value(value),
-        "format": BUNDLE_FINGERPRINT_FORMAT,
+        "format": fingerprint_format,
     }
     return json.dumps(
         envelope,
@@ -96,11 +99,22 @@ def canonical_transport_json(value: Any) -> str:
     )
 
 
-def canonical_transport_fingerprint(value: Any) -> str:
+def canonical_fingerprint(value: Any, *, fingerprint_format: str) -> str:
     try:
-        encoded = canonical_transport_json(value).encode("utf-8", errors="strict")
+        encoded = canonical_json(
+            value,
+            fingerprint_format=fingerprint_format,
+        ).encode("utf-8", errors="strict")
     except UnicodeEncodeError as exc:
         raise CanonicalizationError(
             "canonical content contains an invalid Unicode surrogate"
         ) from exc
     return hashlib.sha256(encoded).hexdigest()
+
+
+def canonical_transport_json(value: Any) -> str:
+    return canonical_json(value, fingerprint_format=BUNDLE_FINGERPRINT_FORMAT)
+
+
+def canonical_transport_fingerprint(value: Any) -> str:
+    return canonical_fingerprint(value, fingerprint_format=BUNDLE_FINGERPRINT_FORMAT)

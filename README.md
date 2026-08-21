@@ -106,9 +106,11 @@ GVR currently includes:
 - language-neutral bundle fingerprint format for trusted cross-language transport;
 - `ClaimGraph` with atomic and composite claims;
 - `VerificationSession` with exact tri-state composition, freshness, budgets, termination state, and deterministic session identity;
-- schema-v1 JSON protocol and CLI, including `compose_verification_session`.
+- immutable `VerifierCapability` descriptors and a distinct deterministic `VerifierCapabilityRegistry`;
+- an honest built-in capability snapshot with exact verifier IDs, bounds, coverage, cost, and D0/D1/O1/M1 semantics;
+- schema-v1 JSON protocol and CLI, including `compose_verification_session` and `describe_verifier_capabilities`.
 
-GVR is under active development. Verifier/provider registries, deterministic planning, automatic evidence acquisition, and falsification layers are not part of the current integration branch yet.
+GVR is under active development. Provider registries, deterministic planning, automatic evidence acquisition, and falsification layers are not part of the current integration branch yet. The capability registry is descriptive: it does not load, rank, or execute verifiers.
 
 ## Five-minute start
 
@@ -155,8 +157,9 @@ Recommended reading order:
 3. [How GVR works](docs/HOW_GVR_WORKS.md)
 4. [Examples](docs/EXAMPLES.md)
 5. [Verification sessions](docs/VERIFICATION_SESSIONS.md)
-6. [CLI and JSON protocol](docs/CLI_AND_PROTOCOL.md)
-7. [Design rules](docs/DESIGN_RULES.md)
+6. [Verifier capabilities](docs/VERIFIER_CAPABILITIES.md)
+7. [CLI and JSON protocol](docs/CLI_AND_PROTOCOL.md)
+8. [Design rules](docs/DESIGN_RULES.md)
 
 The docs intentionally use plain English and short examples.
 

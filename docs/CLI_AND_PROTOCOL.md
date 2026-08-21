@@ -81,6 +81,42 @@ python -m gvr --request '{"schema_version":1,"op":"verify_text_search","payload"
 
 ## Supported schema-v1 operations
 
+### `describe_verifier_capabilities`
+
+Returns the immutable built-in verifier capability snapshot.
+
+An empty payload lists every published capability:
+
+```json
+{
+  "schema_version": 1,
+  "op": "describe_verifier_capabilities",
+  "payload": {}
+}
+```
+
+The optional filters are:
+
+- `claim_kind` — one exact published claim kind;
+- `authoritative_only` — when `true`, omit advisory and M1 proposal-only entries.
+
+Example:
+
+```json
+{
+  "schema_version": 1,
+  "op": "describe_verifier_capabilities",
+  "payload": {
+    "claim_kind": "CAN_FLOW_TO",
+    "authoritative_only": true
+  }
+}
+```
+
+The response kind is `verifier_capability_registry`. Capabilities are ordered by exact UTF-8 verifier ID and version. The result is not ranked and does not select a preferred verifier.
+
+See [Verifier capabilities](VERIFIER_CAPABILITIES.md) for field and fingerprint semantics.
+
 ### `verify_goal`
 
 Checks a proposed action sequence against an initial state and goal predicates.
