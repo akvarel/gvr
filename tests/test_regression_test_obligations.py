@@ -406,6 +406,12 @@ def test_10_partial_positive_local_grounding_derives_obligations_but_plan_remain
         else item
         for item in coverages
     ]
+    coverages.append(rto.FactClassCoverage(
+        fact_class=outcome_class,
+        completeness=rto.FactCoverageCompleteness.COMPLETE,
+        evidence_ids=("outcome-accepted",),
+        scope={},
+    ))
     plan = rto.derive_regression_test_obligations(inventory(records, tuple(coverages)))
     assert len(plan.obligations) == 9
     assert any(bundle.report.verdict is VerificationVerdict.UNKNOWN for bundle in plan.bundles)
@@ -510,6 +516,54 @@ def test_20_missing_execution_safety_is_unknown_not_ready() -> None:
     assert plan.readiness is rto.RegressionObligationReadiness.UNKNOWN
 
 
+def test_20a_missing_navigation_is_reported_without_deriving_a_journey() -> None:
+    records = tuple(
+        fact(record.id, record.kind, **{
+            key: value for key, value in record.payload.items() if key != "navigation"
+        })
+        if record.id == "surface-checkout"
+        else record
+        for record in complete_journey()
+    )
+    plan = rto.derive_regression_test_obligations(inventory(records, coverage_for_records(records)))
+    assert rto.RegressionObligationGapCode.MISSING_NAVIGATION in codes(plan)
+    assert plan.obligations == ()
+
+
+def test_20b_missing_precondition_is_reported_without_deriving_a_journey() -> None:
+    records = tuple(
+        fact(record.id, record.kind, **{
+            key: value for key, value in record.payload.items() if key != "precondition"
+        })
+        if record.id == "action-submit"
+        else record
+        for record in complete_journey()
+    )
+    plan = rto.derive_regression_test_obligations(inventory(records, coverage_for_records(records)))
+    assert rto.RegressionObligationGapCode.MISSING_PRECONDITION in codes(plan)
+    assert plan.obligations == ()
+
+
+def test_20c_missing_oracle_is_reported_without_deriving_a_journey() -> None:
+    records = tuple(
+        record for record in complete_journey()
+        if record.id != "outcome-accepted"
+    )
+    plan = rto.derive_regression_test_obligations(inventory(records, coverage_for_records(records)))
+    assert rto.RegressionObligationGapCode.MISSING_ORACLE in codes(plan)
+    assert plan.obligations == ()
+
+
+def test_20d_missing_constraint_is_reported_for_an_exact_linked_field() -> None:
+    records = tuple(
+        record for record in complete_journey()
+        if record.kind not in {"gvr.test.constraint", "gvr.test.data_partition"}
+    )
+    plan = rto.derive_regression_test_obligations(inventory(records, coverage_for_records(records)))
+    assert rto.RegressionObligationGapCode.MISSING_CONSTRAINT in codes(plan)
+    assert rto.TestObligationKind.REQUIRED_FIELD not in kinds(plan)
+
+
 def test_21_contradictory_oracles_are_reported_and_never_ready() -> None:
     records = complete_journey() + (
         fact(
@@ -535,6 +589,10 @@ def test_22_grounding_rechecks_exact_payload_links_not_only_kind_membership() ->
     report = rto.verify_test_obligation_grounding(happy, inventory(changed, coverage_for_records(changed)))
     assert report.verdict is VerificationVerdict.UNKNOWN
     assert "OBLIGATION_LINK_MISMATCH" in {issue.code for issue in report.issues}
+    relabeled = replace(happy, expected_behavior="a different oracle")
+    relabeled_report = rto.verify_test_obligation_grounding(relabeled, inventory())
+    assert relabeled_report.verdict is VerificationVerdict.UNKNOWN
+    assert "OBLIGATION_LINK_MISMATCH" in {issue.code for issue in relabeled_report.issues}
 
 
 def test_23_grounding_bundle_and_claim_ledger_staleness_are_preserved() -> None:

@@ -37,19 +37,19 @@ class RegressionObligationError(ValueError):
 
 
 class BehaviorEvidenceKind(str, Enum):
-    BEHAVIOR_CONTRACT = "gvr.test.behavior_contract"
-    BEHAVIOR_CHANGE = "gvr.test.behavior_change"
-    INPUT_PARTITION = "gvr.test.input_partition"
-    OUTPUT_OBSERVATION = "gvr.test.output_observation"
-    BRANCH_CONDITION = "gvr.test.branch_condition"
-    EXCEPTION_BEHAVIOR = "gvr.test.exception_behavior"
+    SURFACE = "gvr.test.surface"
+    ACTOR_ROLE = "gvr.test.actor_role"
+    ACTION = "gvr.test.action"
+    FIELD = "gvr.test.field"
+    CONSTRAINT = "gvr.test.constraint"
+    DATA_PARTITION = "gvr.test.data_partition"
+    OBSERVABLE_OUTCOME = "gvr.test.observable_outcome"
     STATE_TRANSITION = "gvr.test.state_transition"
-    SIDE_EFFECT = "gvr.test.side_effect"
-    COLLABORATOR_INTERACTION = "gvr.test.collaborator_interaction"
-    DATA_FLOW = "gvr.test.data_flow"
-    CONCURRENCY_BEHAVIOR = "gvr.test.concurrency_behavior"
-    EXISTING_TEST = "gvr.test.existing_test"
-    COVERAGE_OBSERVATION = "gvr.test.coverage_observation"
+    PERSISTENCE_RELATION = "gvr.test.persistence_relation"
+    PERMISSION_RELATION = "gvr.test.permission_relation"
+    DEPENDENCY = "gvr.test.dependency"
+    ERROR_RECOVERY = "gvr.test.error_recovery"
+    EXECUTION_SAFETY = "gvr.test.execution_safety"
 
 
 # This is a closed schema-v1 vocabulary. New source evidence kinds require a
@@ -59,19 +59,19 @@ BEHAVIOR_EVIDENCE_KIND_SET = frozenset(BEHAVIOR_EVIDENCE_KINDS)
 
 
 class BehaviorFactClass(str, Enum):
-    CONTRACT = "CONTRACT"
-    CHANGE = "CHANGE"
-    INPUT = "INPUT"
-    OUTPUT = "OUTPUT"
-    BRANCH = "BRANCH"
-    EXCEPTION = "EXCEPTION"
-    STATE = "STATE"
-    SIDE_EFFECT = "SIDE_EFFECT"
-    INTERACTION = "INTERACTION"
-    DATA_FLOW = "DATA_FLOW"
-    CONCURRENCY = "CONCURRENCY"
-    EXISTING_TEST = "EXISTING_TEST"
-    COVERAGE = "COVERAGE"
+    SURFACE = "SURFACE"
+    ACTOR_ROLE = "ACTOR_ROLE"
+    ACTION = "ACTION"
+    FIELD = "FIELD"
+    CONSTRAINT = "CONSTRAINT"
+    DATA_PARTITION = "DATA_PARTITION"
+    OBSERVABLE_OUTCOME = "OBSERVABLE_OUTCOME"
+    STATE_TRANSITION = "STATE_TRANSITION"
+    PERSISTENCE_RELATION = "PERSISTENCE_RELATION"
+    PERMISSION_RELATION = "PERMISSION_RELATION"
+    DEPENDENCY = "DEPENDENCY"
+    ERROR_RECOVERY = "ERROR_RECOVERY"
+    EXECUTION_SAFETY = "EXECUTION_SAFETY"
 
 
 class FactCoverageCompleteness(str, Enum):
@@ -81,21 +81,15 @@ class FactCoverageCompleteness(str, Enum):
 
 
 class TestObligationKind(str, Enum):
-    CHARACTERIZATION = "CHARACTERIZATION"
-    REGRESSION = "REGRESSION"
-    BOUNDARY = "BOUNDARY"
-    OUTPUT = "OUTPUT"
-    BRANCH = "BRANCH"
-    EXCEPTION = "EXCEPTION"
+    HAPPY_PATH = "HAPPY_PATH"
+    REQUIRED_FIELD = "REQUIRED_FIELD"
+    INVALID_FORMAT = "INVALID_FORMAT"
+    BOUNDARY_VALUE = "BOUNDARY_VALUE"
     STATE_TRANSITION = "STATE_TRANSITION"
-    SIDE_EFFECT = "SIDE_EFFECT"
-    INTERACTION = "INTERACTION"
-
-    # Stable source-level aliases. Aliases do not expand the schema-v1 rule set.
-    HAPPY_PATH = "CHARACTERIZATION"
-    NEGATIVE = "BOUNDARY"
-    ERROR_PATH = "EXCEPTION"
-    INTEGRATION = "INTERACTION"
+    ROLE_PERMISSION = "ROLE_PERMISSION"
+    PERSISTENCE_READ_BACK = "PERSISTENCE_READ_BACK"
+    ERROR_RECOVERY = "ERROR_RECOVERY"
+    DEPENDENCY = "DEPENDENCY"
 
 
 class TestLevel(str, Enum):
@@ -105,13 +99,21 @@ class TestLevel(str, Enum):
 
 
 class RegressionObligationGapCode(str, Enum):
-    PARTIAL_FACT_COVERAGE = "PARTIAL_FACT_COVERAGE"
-    UNKNOWN_FACT_COVERAGE = "UNKNOWN_FACT_COVERAGE"
-    MISSING_REQUIRED_FIELD = "MISSING_REQUIRED_FIELD"
-    NO_DERIVATION_RULE = "NO_DERIVATION_RULE"
-    UNGROUNDED_OBLIGATION = "UNGROUNDED_OBLIGATION"
+    MISSING_NAVIGATION = "MISSING_NAVIGATION"
+    MISSING_PRECONDITION = "MISSING_PRECONDITION"
+    MISSING_ACTION = "MISSING_ACTION"
+    MISSING_ORACLE = "MISSING_ORACLE"
+    MISSING_CONSTRAINT = "MISSING_CONSTRAINT"
+    MISSING_TEST_DATA_PARTITION = "MISSING_TEST_DATA_PARTITION"
+    MISSING_ROLE_EVIDENCE = "MISSING_ROLE_EVIDENCE"
+    MISSING_PERSISTENCE_READ_BACK = "MISSING_PERSISTENCE_READ_BACK"
+    AUTHENTICATION_UNPROVEN = "AUTHENTICATION_UNPROVEN"
+    EXECUTION_SAFETY_UNKNOWN = "EXECUTION_SAFETY_UNKNOWN"
+    COVERAGE_PARTIAL = "COVERAGE_PARTIAL"
+    COVERAGE_UNKNOWN = "COVERAGE_UNKNOWN"
+    CONTRADICTORY_EVIDENCE = "CONTRADICTORY_EVIDENCE"
+    UNSUPPORTED_INTERACTION = "UNSUPPORTED_INTERACTION"
     BUDGET_EXHAUSTED = "BUDGET_EXHAUSTED"
-    CONFLICTING_FACTS = "CONFLICTING_FACTS"
 
 
 class RegressionObligationReadiness(str, Enum):
@@ -126,19 +128,19 @@ class RegressionObligationTermination(str, Enum):
 
 
 EVIDENCE_FACT_CLASS: Mapping[str, BehaviorFactClass] = MappingProxyType({
-    "gvr.test.behavior_contract": BehaviorFactClass.CONTRACT,
-    "gvr.test.behavior_change": BehaviorFactClass.CHANGE,
-    "gvr.test.input_partition": BehaviorFactClass.INPUT,
-    "gvr.test.output_observation": BehaviorFactClass.OUTPUT,
-    "gvr.test.branch_condition": BehaviorFactClass.BRANCH,
-    "gvr.test.exception_behavior": BehaviorFactClass.EXCEPTION,
-    "gvr.test.state_transition": BehaviorFactClass.STATE,
-    "gvr.test.side_effect": BehaviorFactClass.SIDE_EFFECT,
-    "gvr.test.collaborator_interaction": BehaviorFactClass.INTERACTION,
-    "gvr.test.data_flow": BehaviorFactClass.DATA_FLOW,
-    "gvr.test.concurrency_behavior": BehaviorFactClass.CONCURRENCY,
-    "gvr.test.existing_test": BehaviorFactClass.EXISTING_TEST,
-    "gvr.test.coverage_observation": BehaviorFactClass.COVERAGE,
+    "gvr.test.surface": BehaviorFactClass.SURFACE,
+    "gvr.test.actor_role": BehaviorFactClass.ACTOR_ROLE,
+    "gvr.test.action": BehaviorFactClass.ACTION,
+    "gvr.test.field": BehaviorFactClass.FIELD,
+    "gvr.test.constraint": BehaviorFactClass.CONSTRAINT,
+    "gvr.test.data_partition": BehaviorFactClass.DATA_PARTITION,
+    "gvr.test.observable_outcome": BehaviorFactClass.OBSERVABLE_OUTCOME,
+    "gvr.test.state_transition": BehaviorFactClass.STATE_TRANSITION,
+    "gvr.test.persistence_relation": BehaviorFactClass.PERSISTENCE_RELATION,
+    "gvr.test.permission_relation": BehaviorFactClass.PERMISSION_RELATION,
+    "gvr.test.dependency": BehaviorFactClass.DEPENDENCY,
+    "gvr.test.error_recovery": BehaviorFactClass.ERROR_RECOVERY,
+    "gvr.test.execution_safety": BehaviorFactClass.EXECUTION_SAFETY,
 })
 EVIDENCE_KIND_BY_FACT_CLASS: Mapping[BehaviorFactClass, tuple[str, ...]] = MappingProxyType({
     fact_class: tuple(
@@ -377,10 +379,6 @@ class FactClassCoverage:
             raise RegressionObligationError(
                 "unknown coverage cannot cite positive evidence_ids"
             )
-        if self.completeness is not FactCoverageCompleteness.UNKNOWN and not self.evidence_ids:
-            raise RegressionObligationError(
-                "complete or partial coverage must cite evidence_ids"
-            )
 
     def semantic_definition(self) -> dict[str, Any]:
         return {
@@ -435,21 +433,26 @@ class BehaviorEvidenceInventory:
             for evidence_id in sorted(by_id, key=lambda item: _utf8_key(item, path="evidence id"))
         )
 
-        coverage_by_class: dict[BehaviorFactClass, FactClassCoverage] = {}
+        coverage_by_key: dict[tuple[BehaviorFactClass, str], FactClassCoverage] = {}
         for supplied in self.coverage:
             if not isinstance(supplied, FactClassCoverage):
                 raise RegressionObligationError(
                     "inventory coverage must contain FactClassCoverage records"
                 )
-            current = coverage_by_class.get(supplied.fact_class)
+            scope_fingerprint = _fingerprint(
+                supplied.scope,
+                fingerprint_format="gvr.fact_class_coverage_scope.ieee754-json.v1",
+            )
+            key = (supplied.fact_class, scope_fingerprint)
+            current = coverage_by_key.get(key)
             if current is None:
-                coverage_by_class[supplied.fact_class] = supplied
+                coverage_by_key[key] = supplied
                 continue
-            if current.completeness is not supplied.completeness or current.scope != supplied.scope:
+            if current.completeness is not supplied.completeness:
                 raise RegressionObligationError(
-                    f"conflicting coverage records for fact class {supplied.fact_class.value}"
+                    f"conflicting coverage records for fact class {supplied.fact_class.value} and scope"
                 )
-            coverage_by_class[supplied.fact_class] = FactClassCoverage(
+            coverage_by_key[key] = FactClassCoverage(
                 fact_class=supplied.fact_class,
                 completeness=supplied.completeness,
                 evidence_ids=current.evidence_ids + supplied.evidence_ids,
@@ -457,7 +460,7 @@ class BehaviorEvidenceInventory:
             )
 
         evidence_index = {record.id: record for record in normalized_evidence}
-        for item in coverage_by_class.values():
+        for item in coverage_by_key.values():
             for evidence_id in item.evidence_ids:
                 record = evidence_index.get(evidence_id)
                 if record is None:
@@ -469,11 +472,16 @@ class BehaviorEvidenceInventory:
                         f"evidence {evidence_id} does not support fact class {item.fact_class.value}"
                     )
 
-        normalized_coverage = tuple(
-            coverage_by_class[fact_class]
-            for fact_class in BehaviorFactClass
-            if fact_class in coverage_by_class
-        )
+        normalized_coverage = tuple(sorted(
+            coverage_by_key.values(),
+            key=lambda item: (
+                list(BehaviorFactClass).index(item.fact_class),
+                _fingerprint(
+                    item.scope,
+                    fingerprint_format="gvr.fact_class_coverage_scope.ieee754-json.v1",
+                ),
+            ),
+        ))
         object.__setattr__(self, "evidence", normalized_evidence)
         object.__setattr__(self, "coverage", normalized_coverage)
         object.__setattr__(self, "fingerprint", _fingerprint(
@@ -494,14 +502,61 @@ class BehaviorEvidenceInventory:
 
     def coverage_for(self, fact_class: BehaviorFactClass) -> FactClassCoverage:
         normalized = _enum(fact_class, BehaviorFactClass, name="fact_class")
-        for item in self.coverage:
-            if item.fact_class is normalized:
+        candidates = tuple(item for item in self.coverage if item.fact_class is normalized)
+        for item in candidates:
+            if not item.scope:
                 return item
+        if len(candidates) == 1:
+            return candidates[0]
         return FactClassCoverage(
             fact_class=normalized,
             completeness=FactCoverageCompleteness.UNKNOWN,
             evidence_ids=(),
             scope={},
+        )
+
+    def coverage_for_scope(
+        self,
+        fact_class: BehaviorFactClass,
+        *,
+        subject: str,
+        surface: str,
+        action: str,
+    ) -> FactClassCoverage:
+        normalized = _enum(fact_class, BehaviorFactClass, name="fact_class")
+        semantics = {"subject": subject, "surface": surface, "action": action}
+        matches: list[tuple[int, FactClassCoverage]] = []
+        for item in self.coverage:
+            if item.fact_class is normalized:
+                scoped = {
+                    key: value for key, value in item.scope.items()
+                    if key in semantics
+                }
+                if all(semantics[key] == value for key, value in scoped.items()):
+                    matches.append((len(scoped), item))
+        if not matches:
+            return FactClassCoverage(
+                fact_class=normalized,
+                completeness=FactCoverageCompleteness.UNKNOWN,
+                evidence_ids=(),
+                scope=semantics,
+            )
+        max_specificity = max(specificity for specificity, _item in matches)
+        chosen = [item for specificity, item in matches if specificity == max_specificity]
+        completeness = (
+            FactCoverageCompleteness.UNKNOWN
+            if any(item.completeness is FactCoverageCompleteness.UNKNOWN for item in chosen)
+            else FactCoverageCompleteness.PARTIAL
+            if any(item.completeness is FactCoverageCompleteness.PARTIAL for item in chosen)
+            else FactCoverageCompleteness.COMPLETE
+        )
+        return FactClassCoverage(
+            fact_class=normalized,
+            completeness=completeness,
+            evidence_ids=tuple(
+                evidence_id for item in chosen for evidence_id in item.evidence_ids
+            ),
+            scope=semantics,
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -535,69 +590,110 @@ class ObligationRule:
 
 
 OBLIGATION_RULES: Mapping[TestObligationKind, ObligationRule] = MappingProxyType({
-    TestObligationKind.CHARACTERIZATION: ObligationRule(
-        kind=TestObligationKind.CHARACTERIZATION,
-        fact_classes=(BehaviorFactClass.CONTRACT,),
-        test_level=TestLevel.UNIT,
-        rationale="Capture the observable contract before later changes can erase it.",
+    TestObligationKind.HAPPY_PATH: ObligationRule(
+        kind=TestObligationKind.HAPPY_PATH,
+        fact_classes=(
+            BehaviorFactClass.SURFACE,
+            BehaviorFactClass.ACTION,
+            BehaviorFactClass.OBSERVABLE_OUTCOME,
+        ),
+        test_level=TestLevel.SYSTEM,
+        rationale="Navigate to the surface, perform the linked action, and assert its oracle.",
     ),
-    TestObligationKind.REGRESSION: ObligationRule(
-        kind=TestObligationKind.REGRESSION,
-        fact_classes=(BehaviorFactClass.CHANGE,),
-        test_level=TestLevel.UNIT,
-        rationale="Lock the changed behavior to prevent recurrence of the prior semantics.",
+    TestObligationKind.REQUIRED_FIELD: ObligationRule(
+        kind=TestObligationKind.REQUIRED_FIELD,
+        fact_classes=(
+            BehaviorFactClass.SURFACE,
+            BehaviorFactClass.ACTION,
+            BehaviorFactClass.FIELD,
+            BehaviorFactClass.CONSTRAINT,
+            BehaviorFactClass.OBSERVABLE_OUTCOME,
+        ),
+        test_level=TestLevel.SYSTEM,
+        rationale="Omit the linked required field and assert the observable validation behavior.",
     ),
-    TestObligationKind.BOUNDARY: ObligationRule(
-        kind=TestObligationKind.BOUNDARY,
-        fact_classes=(BehaviorFactClass.INPUT,),
-        test_level=TestLevel.UNIT,
-        rationale="Exercise the identified input partition or boundary.",
+    TestObligationKind.INVALID_FORMAT: ObligationRule(
+        kind=TestObligationKind.INVALID_FORMAT,
+        fact_classes=(
+            BehaviorFactClass.SURFACE,
+            BehaviorFactClass.ACTION,
+            BehaviorFactClass.FIELD,
+            BehaviorFactClass.CONSTRAINT,
+            BehaviorFactClass.DATA_PARTITION,
+            BehaviorFactClass.OBSERVABLE_OUTCOME,
+        ),
+        test_level=TestLevel.SYSTEM,
+        rationale="Exercise the bounded invalid-format partition and assert the linked oracle.",
     ),
-    TestObligationKind.OUTPUT: ObligationRule(
-        kind=TestObligationKind.OUTPUT,
-        fact_classes=(BehaviorFactClass.OUTPUT,),
-        test_level=TestLevel.UNIT,
-        rationale="Assert the externally observable output.",
-    ),
-    TestObligationKind.BRANCH: ObligationRule(
-        kind=TestObligationKind.BRANCH,
-        fact_classes=(BehaviorFactClass.BRANCH,),
-        test_level=TestLevel.UNIT,
-        rationale="Exercise the identified decision outcome.",
-    ),
-    TestObligationKind.EXCEPTION: ObligationRule(
-        kind=TestObligationKind.EXCEPTION,
-        fact_classes=(BehaviorFactClass.EXCEPTION,),
-        test_level=TestLevel.UNIT,
-        rationale="Assert the identified error or exception behavior.",
+    TestObligationKind.BOUNDARY_VALUE: ObligationRule(
+        kind=TestObligationKind.BOUNDARY_VALUE,
+        fact_classes=(
+            BehaviorFactClass.SURFACE,
+            BehaviorFactClass.ACTION,
+            BehaviorFactClass.FIELD,
+            BehaviorFactClass.CONSTRAINT,
+            BehaviorFactClass.DATA_PARTITION,
+            BehaviorFactClass.OBSERVABLE_OUTCOME,
+        ),
+        test_level=TestLevel.SYSTEM,
+        rationale="Exercise the bounded boundary-value partition and assert the linked oracle.",
     ),
     TestObligationKind.STATE_TRANSITION: ObligationRule(
         kind=TestObligationKind.STATE_TRANSITION,
-        fact_classes=(BehaviorFactClass.STATE,),
-        test_level=TestLevel.UNIT,
-        rationale="Assert both the pre-state and resulting state transition.",
-    ),
-    TestObligationKind.SIDE_EFFECT: ObligationRule(
-        kind=TestObligationKind.SIDE_EFFECT,
-        fact_classes=(BehaviorFactClass.SIDE_EFFECT,),
-        test_level=TestLevel.INTEGRATION,
-        rationale="Observe the identified side effect at its boundary.",
-    ),
-    TestObligationKind.INTERACTION: ObligationRule(
-        kind=TestObligationKind.INTERACTION,
         fact_classes=(
-            BehaviorFactClass.INTERACTION,
-            BehaviorFactClass.DATA_FLOW,
-            BehaviorFactClass.CONCURRENCY,
+            BehaviorFactClass.SURFACE,
+            BehaviorFactClass.ACTION,
+            BehaviorFactClass.OBSERVABLE_OUTCOME,
+            BehaviorFactClass.STATE_TRANSITION,
+        ),
+        test_level=TestLevel.SYSTEM,
+        rationale="Perform the linked action and assert both its oracle and state transition.",
+    ),
+    TestObligationKind.ROLE_PERMISSION: ObligationRule(
+        kind=TestObligationKind.ROLE_PERMISSION,
+        fact_classes=(
+            BehaviorFactClass.SURFACE,
+            BehaviorFactClass.ACTOR_ROLE,
+            BehaviorFactClass.ACTION,
+            BehaviorFactClass.OBSERVABLE_OUTCOME,
+            BehaviorFactClass.PERMISSION_RELATION,
+        ),
+        test_level=TestLevel.SYSTEM,
+        rationale="Authenticate as the linked role and verify its exact permission relation.",
+    ),
+    TestObligationKind.PERSISTENCE_READ_BACK: ObligationRule(
+        kind=TestObligationKind.PERSISTENCE_READ_BACK,
+        fact_classes=(
+            BehaviorFactClass.SURFACE,
+            BehaviorFactClass.ACTION,
+            BehaviorFactClass.OBSERVABLE_OUTCOME,
+            BehaviorFactClass.PERSISTENCE_RELATION,
         ),
         test_level=TestLevel.INTEGRATION,
-        rationale="Exercise the identified collaborator, flow, or concurrency interaction.",
+        rationale="Write through the action and independently read the persisted result back.",
     ),
-})
-_RULE_BY_FACT_CLASS: Mapping[BehaviorFactClass, ObligationRule] = MappingProxyType({
-    fact_class: rule
-    for rule in OBLIGATION_RULES.values()
-    for fact_class in rule.fact_classes
+    TestObligationKind.ERROR_RECOVERY: ObligationRule(
+        kind=TestObligationKind.ERROR_RECOVERY,
+        fact_classes=(
+            BehaviorFactClass.SURFACE,
+            BehaviorFactClass.ACTION,
+            BehaviorFactClass.OBSERVABLE_OUTCOME,
+            BehaviorFactClass.ERROR_RECOVERY,
+        ),
+        test_level=TestLevel.INTEGRATION,
+        rationale="Trigger the linked error and assert the specified recovery and oracle.",
+    ),
+    TestObligationKind.DEPENDENCY: ObligationRule(
+        kind=TestObligationKind.DEPENDENCY,
+        fact_classes=(
+            BehaviorFactClass.SURFACE,
+            BehaviorFactClass.ACTION,
+            BehaviorFactClass.OBSERVABLE_OUTCOME,
+            BehaviorFactClass.DEPENDENCY,
+        ),
+        test_level=TestLevel.INTEGRATION,
+        rationale="Exercise the supported dependency interaction and assert the linked oracle.",
+    ),
 })
 
 
@@ -648,10 +744,10 @@ class TestObligation:
             self.metadata, name="metadata", reject_truth=True
         ))
         rule = OBLIGATION_RULES[self.kind]
-        if not set(self.fact_classes) <= set(rule.fact_classes):
+        if self.fact_classes != rule.fact_classes:
             raise RegressionObligationError(
-                f"obligation kind {self.kind.value} does not accept fact_classes "
-                + ", ".join(item.value for item in self.fact_classes)
+                f"obligation kind {self.kind.value} requires exact fact_classes "
+                + ", ".join(item.value for item in rule.fact_classes)
             )
         if self.test_level is not rule.test_level:
             raise RegressionObligationError(
@@ -690,11 +786,154 @@ class TestObligation:
         return value
 
 
+def _payload_text(record: Evidence, key: str) -> str | None:
+    value = record.payload.get(key)
+    return value.strip() if isinstance(value, str) and value.strip() else None
+
+
+def _records_form_exact_obligation(
+    kind: TestObligationKind,
+    records: tuple[Evidence, ...],
+    *,
+    subject: str,
+    surface: str,
+    action: str,
+    expected_behavior: str | None = None,
+) -> bool:
+    by_class: dict[BehaviorFactClass, list[Evidence]] = {}
+    for record in records:
+        by_class.setdefault(EVIDENCE_FACT_CLASS[record.kind], []).append(record)
+    rule = OBLIGATION_RULES[kind]
+    if set(by_class) != set(rule.fact_classes):
+        return False
+    if any(len(by_class[fact_class]) != 1 for fact_class in rule.fact_classes):
+        return False
+
+    surface_record = by_class[BehaviorFactClass.SURFACE][0]
+    action_record = by_class[BehaviorFactClass.ACTION][0]
+    outcome_record = by_class[BehaviorFactClass.OBSERVABLE_OUTCOME][0]
+    if not (
+        _payload_text(surface_record, "subject") == subject
+        and _payload_text(surface_record, "surface") == surface
+        and _payload_text(surface_record, "navigation") is not None
+        and _payload_text(action_record, "subject") == subject
+        and _payload_text(action_record, "surface") == surface
+        and _payload_text(action_record, "action") == action
+        and action_record.payload.get("surface_id") == surface_record.id
+        and _payload_text(action_record, "precondition") is not None
+        and _payload_text(outcome_record, "subject") == subject
+        and _payload_text(outcome_record, "surface") == surface
+        and _payload_text(outcome_record, "action") == action
+        and outcome_record.payload.get("surface_id") == surface_record.id
+        and outcome_record.payload.get("action_id") == action_record.id
+        and _payload_text(outcome_record, "oracle") is not None
+        and (
+            expected_behavior is None
+            or _payload_text(outcome_record, "oracle") == expected_behavior
+        )
+    ):
+        return False
+
+    def exact_context(record: Evidence) -> bool:
+        return (
+            _payload_text(record, "subject") == subject
+            and _payload_text(record, "surface") == surface
+            and _payload_text(record, "action") == action
+            and record.payload.get("surface_id") == surface_record.id
+            and record.payload.get("action_id") == action_record.id
+        )
+
+    if kind in {
+        TestObligationKind.REQUIRED_FIELD,
+        TestObligationKind.INVALID_FORMAT,
+        TestObligationKind.BOUNDARY_VALUE,
+    }:
+        field_record = by_class[BehaviorFactClass.FIELD][0]
+        constraint_record = by_class[BehaviorFactClass.CONSTRAINT][0]
+        if not exact_context(field_record) or not exact_context(constraint_record):
+            return False
+        if constraint_record.payload.get("field_id") != field_record.id:
+            return False
+        constraint = _payload_text(constraint_record, "constraint")
+        expected_constraint = {
+            TestObligationKind.REQUIRED_FIELD: "required",
+            TestObligationKind.INVALID_FORMAT: "format",
+            TestObligationKind.BOUNDARY_VALUE: "boundary",
+        }[kind]
+        if constraint != expected_constraint:
+            return False
+        if kind is not TestObligationKind.REQUIRED_FIELD:
+            partition = by_class[BehaviorFactClass.DATA_PARTITION][0]
+            expected_partition = (
+                "invalid_format" if kind is TestObligationKind.INVALID_FORMAT
+                else "boundary_value"
+            )
+            if not exact_context(partition):
+                return False
+            if (
+                partition.payload.get("field_id") != field_record.id
+                or partition.payload.get("constraint_id") != constraint_record.id
+                or _payload_text(partition, "partition") != expected_partition
+            ):
+                return False
+    elif kind is TestObligationKind.STATE_TRANSITION:
+        transition = by_class[BehaviorFactClass.STATE_TRANSITION][0]
+        if not exact_context(transition) or transition.payload.get("outcome_id") != outcome_record.id:
+            return False
+        if not _payload_text(transition, "from_state") or not _payload_text(transition, "to_state"):
+            return False
+    elif kind is TestObligationKind.ROLE_PERMISSION:
+        role = by_class[BehaviorFactClass.ACTOR_ROLE][0]
+        permission = by_class[BehaviorFactClass.PERMISSION_RELATION][0]
+        if not (
+            _payload_text(role, "subject") == subject
+            and _payload_text(role, "surface") == surface
+            and role.payload.get("surface_id") == surface_record.id
+            and _payload_text(role, "role") is not None
+            and exact_context(permission)
+            and permission.payload.get("role_id") == role.id
+            and permission.payload.get("outcome_id") == outcome_record.id
+            and permission.payload.get("authenticated") is True
+            and _payload_text(permission, "permission") in {"allow", "deny"}
+        ):
+            return False
+    elif kind is TestObligationKind.PERSISTENCE_READ_BACK:
+        relation = by_class[BehaviorFactClass.PERSISTENCE_RELATION][0]
+        if not (
+            exact_context(relation)
+            and relation.payload.get("outcome_id") == outcome_record.id
+            and _payload_text(relation, "relation") == "read_back"
+            and _payload_text(relation, "read_surface") is not None
+            and _payload_text(relation, "read_action") is not None
+        ):
+            return False
+    elif kind is TestObligationKind.ERROR_RECOVERY:
+        recovery = by_class[BehaviorFactClass.ERROR_RECOVERY][0]
+        if not (
+            exact_context(recovery)
+            and recovery.payload.get("outcome_id") == outcome_record.id
+            and _payload_text(recovery, "error") is not None
+            and _payload_text(recovery, "recovery") is not None
+        ):
+            return False
+    elif kind is TestObligationKind.DEPENDENCY:
+        dependency = by_class[BehaviorFactClass.DEPENDENCY][0]
+        if not (
+            exact_context(dependency)
+            and dependency.payload.get("outcome_id") == outcome_record.id
+            and dependency.payload.get("supported") is True
+            and _payload_text(dependency, "dependency") is not None
+            and _payload_text(dependency, "interaction") is not None
+        ):
+            return False
+    return True
+
+
 def verify_test_obligation_grounding(
     obligation: TestObligation,
     inventory: BehaviorEvidenceInventory,
 ) -> VerificationReport:
-    """Verify that one obligation is derived only from compatible current facts."""
+    """Verify exact payload-ID and semantic linkage against current scoped coverage."""
 
     if not isinstance(obligation, TestObligation):
         raise RegressionObligationError("obligation must be a TestObligation")
@@ -704,8 +943,7 @@ def verify_test_obligation_grounding(
     index = {record.id: record for record in inventory.evidence}
     issues: list[VerificationIssue] = []
     dependency_ids: set[str] = set()
-    compatible_classes: set[BehaviorFactClass] = set()
-
+    records: list[Evidence] = []
     for evidence_id in obligation.evidence_ids:
         record = index.get(evidence_id)
         if record is None:
@@ -716,58 +954,49 @@ def verify_test_obligation_grounding(
             ))
             continue
         dependency_ids.add(evidence_id)
-        fact_class = EVIDENCE_FACT_CLASS[record.kind]
-        if fact_class not in obligation.fact_classes:
-            issues.append(VerificationIssue(
-                code="OBLIGATION_EVIDENCE_INCOMPATIBLE",
-                message=(
-                    f"Evidence {evidence_id} is {fact_class.value}, not one of the "
-                    "obligation's declared fact classes."
-                ),
-                verdict=VerificationVerdict.UNKNOWN,
-                evidence_ids=(evidence_id,),
-            ))
-            continue
-        compatible_classes.add(fact_class)
-        subject = record.payload.get("subject")
-        if subject != obligation.subject:
-            issues.append(VerificationIssue(
-                code="OBLIGATION_SUBJECT_MISMATCH",
-                message=f"Evidence {evidence_id} concerns a different subject.",
-                verdict=VerificationVerdict.UNKNOWN,
-                evidence_ids=(evidence_id,),
-            ))
-        behavior = record.payload.get("behavior")
-        if behavior != obligation.expected_behavior:
-            issues.append(VerificationIssue(
-                code="OBLIGATION_BEHAVIOR_MISMATCH",
-                message=f"Evidence {evidence_id} does not state the required behavior.",
-                verdict=VerificationVerdict.UNKNOWN,
-                evidence_ids=(evidence_id,),
-            ))
+        records.append(record)
 
+    surface = obligation.metadata.get("surface")
+    action = obligation.metadata.get("action")
+    if not isinstance(surface, str) or not isinstance(action, str) or not _records_form_exact_obligation(
+        obligation.kind,
+        tuple(records),
+        subject=obligation.subject,
+        surface=surface if isinstance(surface, str) else "",
+        action=action if isinstance(action, str) else "",
+        expected_behavior=obligation.expected_behavior,
+    ):
+        issues.append(VerificationIssue(
+            code="OBLIGATION_LINK_MISMATCH",
+            message="The cited facts do not form the exact payload-ID and subject/action/surface chain required by the obligation rule.",
+            verdict=VerificationVerdict.UNKNOWN,
+            evidence_ids=tuple(record.id for record in records),
+        ))
+
+    ids_by_class: dict[BehaviorFactClass, set[str]] = {}
+    for record in records:
+        ids_by_class.setdefault(EVIDENCE_FACT_CLASS[record.kind], set()).add(record.id)
     for fact_class in obligation.fact_classes:
-        if fact_class not in compatible_classes:
-            continue
-        fact_coverage = inventory.coverage_for(fact_class)
+        fact_coverage = inventory.coverage_for_scope(
+            fact_class,
+            subject=obligation.subject,
+            surface=surface if isinstance(surface, str) else "",
+            action=action if isinstance(action, str) else "",
+        )
         dependency_ids.update(fact_coverage.evidence_ids)
-        if fact_coverage.completeness is not FactCoverageCompleteness.COMPLETE:
+        required_ids = ids_by_class.get(fact_class, set())
+        if (
+            fact_coverage.completeness is not FactCoverageCompleteness.COMPLETE
+            or not required_ids <= set(fact_coverage.evidence_ids)
+        ):
             issues.append(VerificationIssue(
                 code="OBLIGATION_COVERAGE_INCOMPLETE",
                 message=(
-                    f"{fact_class.value} coverage is {fact_coverage.completeness.value}; "
-                    "grounding PASS requires COMPLETE coverage."
+                    f"{fact_class.value} lacks COMPLETE local coverage containing the exact obligation facts."
                 ),
                 verdict=VerificationVerdict.UNKNOWN,
                 evidence_ids=fact_coverage.evidence_ids,
             ))
-
-    if not compatible_classes and not issues:
-        issues.append(VerificationIssue(
-            code="OBLIGATION_EVIDENCE_MISSING",
-            message="No compatible behavior evidence grounds this obligation.",
-            verdict=VerificationVerdict.UNKNOWN,
-        ))
 
     issues.sort(key=lambda issue: (
         _utf8_key(issue.code, path="issue code"),
@@ -1004,13 +1233,17 @@ class RegressionObligationPlan:
         ))
         if obligations != expected_obligation_order:
             raise RegressionObligationError("plan obligations are not in canonical order")
-        if coverage != tuple(
-            item for fact_class in BehaviorFactClass
-            for item in coverage if item.fact_class is fact_class
-        ):
+        if coverage != tuple(sorted(
+            coverage,
+            key=lambda item: (
+                list(BehaviorFactClass).index(item.fact_class),
+                _fingerprint(
+                    item.scope,
+                    fingerprint_format="gvr.fact_class_coverage_scope.ieee754-json.v1",
+                ),
+            ),
+        )):
             raise RegressionObligationError("plan coverage is not in canonical fact-class order")
-        if len({item.fact_class for item in coverage}) != len(coverage):
-            raise RegressionObligationError("plan coverage contains duplicate fact classes")
         if gaps != tuple(sorted(gaps, key=_gap_sort_key)):
             raise RegressionObligationError("plan gaps are not in canonical order")
         if self.consumption.obligations != len(obligations):
@@ -1085,20 +1318,34 @@ class RegressionObligationPlan:
 class _Candidate:
     rule: ObligationRule
     subject: str
+    surface: str
+    action: str
     expected_behavior: str
     evidence_ids: set[str]
-    fact_classes: set[BehaviorFactClass]
+    discriminator: str
 
 
 def _obligation_identity(
     rule: ObligationRule,
     subject: str,
     expected_behavior: str,
-) -> tuple[str, str, str, str]:
-    return (rule.kind.value, subject, expected_behavior, rule.test_level.value)
+    *,
+    surface: str,
+    action: str,
+    discriminator: str,
+) -> tuple[str, ...]:
+    return (
+        rule.kind.value,
+        subject,
+        surface,
+        action,
+        expected_behavior,
+        discriminator,
+        rule.test_level.value,
+    )
 
 
-def _obligation_id(identity: tuple[str, str, str, str]) -> str:
+def _obligation_id(identity: tuple[str, ...]) -> str:
     fingerprint = _fingerprint(
         {"identity": identity},
         fingerprint_format="gvr.test_obligation_identity.ieee754-json.v1",
@@ -1125,25 +1372,28 @@ def _readiness(
     if termination is RegressionObligationTermination.BUDGET_EXHAUSTED:
         return RegressionObligationReadiness.BLOCKED
     gap_codes = {gap.code for gap in gaps}
-    if (
-        RegressionObligationGapCode.UNKNOWN_FACT_COVERAGE in gap_codes
-        and gap_codes <= {
-            RegressionObligationGapCode.UNKNOWN_FACT_COVERAGE,
-            RegressionObligationGapCode.UNGROUNDED_OBLIGATION,
-        }
-    ):
-        return RegressionObligationReadiness.UNKNOWN
     blocking = {
-        RegressionObligationGapCode.PARTIAL_FACT_COVERAGE,
-        RegressionObligationGapCode.MISSING_REQUIRED_FIELD,
-        RegressionObligationGapCode.NO_DERIVATION_RULE,
-        RegressionObligationGapCode.UNGROUNDED_OBLIGATION,
+        RegressionObligationGapCode.MISSING_NAVIGATION,
+        RegressionObligationGapCode.MISSING_PRECONDITION,
+        RegressionObligationGapCode.MISSING_ACTION,
+        RegressionObligationGapCode.MISSING_ORACLE,
+        RegressionObligationGapCode.MISSING_CONSTRAINT,
+        RegressionObligationGapCode.MISSING_TEST_DATA_PARTITION,
+        RegressionObligationGapCode.MISSING_ROLE_EVIDENCE,
+        RegressionObligationGapCode.MISSING_PERSISTENCE_READ_BACK,
+        RegressionObligationGapCode.COVERAGE_PARTIAL,
+        RegressionObligationGapCode.CONTRADICTORY_EVIDENCE,
+        RegressionObligationGapCode.UNSUPPORTED_INTERACTION,
         RegressionObligationGapCode.BUDGET_EXHAUSTED,
-        RegressionObligationGapCode.CONFLICTING_FACTS,
     }
     if any(gap.code in blocking for gap in gaps):
         return RegressionObligationReadiness.BLOCKED
-    if RegressionObligationGapCode.UNKNOWN_FACT_COVERAGE in gap_codes:
+    unknown = {
+        RegressionObligationGapCode.AUTHENTICATION_UNPROVEN,
+        RegressionObligationGapCode.EXECUTION_SAFETY_UNKNOWN,
+        RegressionObligationGapCode.COVERAGE_UNKNOWN,
+    }
+    if gap_codes & unknown:
         return RegressionObligationReadiness.UNKNOWN
     if not obligations:
         return RegressionObligationReadiness.UNKNOWN
@@ -1157,11 +1407,7 @@ def derive_regression_test_obligations(
     *,
     budget: RegressionObligationBudget | None = None,
 ) -> RegressionObligationPlan:
-    """Deterministically derive a bounded, evidence-grounded test obligation plan.
-
-    This pure operation does not discover evidence, invoke providers, call a model,
-    execute code, generate tests, browse, or authorize merge/deploy actions.
-    """
+    """Derive finite obligations only from exact linked behavior fact chains."""
 
     if not isinstance(inventory, BehaviorEvidenceInventory):
         raise RegressionObligationError("inventory must be a BehaviorEvidenceInventory")
@@ -1169,130 +1415,469 @@ def derive_regression_test_obligations(
     if not isinstance(actual_budget, RegressionObligationBudget):
         raise RegressionObligationError("budget must be a RegressionObligationBudget")
 
-    evidence_records = 0
-    candidate_count = 0
-    steps = 0
-    deduplicated = 0
-    exhausted = False
+    max_records = min(actual_budget.max_evidence_records, actual_budget.max_steps)
+    available = inventory.evidence[:max_records]
+    evidence_records = len(available)
+    steps = evidence_records
+    exhausted = len(available) < len(inventory.evidence)
+    by_class: dict[BehaviorFactClass, list[Evidence]] = {
+        fact_class: [] for fact_class in BehaviorFactClass
+    }
+    for record in available:
+        by_class[EVIDENCE_FACT_CLASS[record.kind]].append(record)
+
     gaps: list[RegressionObligationGap] = []
-    candidates: dict[tuple[str, str, str, str], _Candidate] = {}
-    conflicting_fact_keys: set[tuple[BehaviorFactClass, str, str]] = set()
-    fact_values: dict[tuple[BehaviorFactClass, str, str], str] = {}
+    gap_keys: set[tuple[Any, ...]] = set()
 
-    coverage_by_class = {item.fact_class: item for item in inventory.coverage}
-    evidenced_classes = {EVIDENCE_FACT_CLASS[item.kind] for item in inventory.evidence}
-    for fact_class in BehaviorFactClass:
-        if fact_class not in evidenced_classes:
-            continue
-        supplied = coverage_by_class.get(fact_class)
-        completeness = (
-            FactCoverageCompleteness.UNKNOWN
-            if supplied is None else supplied.completeness
+    def add_gap(
+        code: RegressionObligationGapCode,
+        message: str,
+        *,
+        fact_class: BehaviorFactClass | None = None,
+        evidence_ids: tuple[str, ...] = (),
+        details: Mapping[str, Any] | None = None,
+    ) -> None:
+        normalized_ids = tuple(sorted(set(evidence_ids), key=lambda value: _utf8_key(value, path="gap evidence id")))
+        normalized_details = {} if details is None else details
+        key = (
+            code,
+            fact_class,
+            normalized_ids,
+            _fingerprint(normalized_details, fingerprint_format="gvr.regression_gap_details.ieee754-json.v1"),
         )
-        if completeness is FactCoverageCompleteness.PARTIAL:
-            gaps.append(RegressionObligationGap(
-                code=RegressionObligationGapCode.PARTIAL_FACT_COVERAGE,
-                message=f"{fact_class.value} facts have only PARTIAL coverage.",
-                fact_class=fact_class,
-                evidence_ids=() if supplied is None else supplied.evidence_ids,
-            ))
-        elif completeness is FactCoverageCompleteness.UNKNOWN:
-            gaps.append(RegressionObligationGap(
-                code=RegressionObligationGapCode.UNKNOWN_FACT_COVERAGE,
-                message=f"{fact_class.value} fact coverage is UNKNOWN.",
-                fact_class=fact_class,
-            ))
+        if key in gap_keys:
+            return
+        gap_keys.add(key)
+        gaps.append(RegressionObligationGap(
+            code=code,
+            message=message,
+            fact_class=fact_class,
+            evidence_ids=normalized_ids,
+            details=normalized_details,
+        ))
 
-    for record in inventory.evidence:
-        if evidence_records >= actual_budget.max_evidence_records or steps >= actual_budget.max_steps:
+    def local_coverage(
+        fact_class: BehaviorFactClass,
+        subject: str,
+        surface: str,
+        action: str,
+    ) -> FactClassCoverage:
+        return inventory.coverage_for_scope(
+            fact_class,
+            subject=subject,
+            surface=surface,
+            action=action,
+        )
+
+    candidates: dict[tuple[str, ...], _Candidate] = {}
+    candidate_count = 0
+    deduplicated = 0
+
+    def add_candidate(
+        kind: TestObligationKind,
+        records: tuple[Evidence, ...],
+        *,
+        subject: str,
+        surface: str,
+        action: str,
+        oracle: str,
+        discriminator: str,
+    ) -> None:
+        nonlocal candidate_count, deduplicated, exhausted, steps
+        rule = OBLIGATION_RULES[kind]
+        if steps >= actual_budget.max_steps:
             exhausted = True
-            break
-        evidence_records += 1
+            return
         steps += 1
-        fact_class = EVIDENCE_FACT_CLASS[record.kind]
-        rule = _RULE_BY_FACT_CLASS.get(fact_class)
-        if rule is None:
-            # Existing-test and coverage observations are supporting inventory;
-            # they do not independently manufacture obligations.
-            continue
-        subject_value = record.payload.get("subject")
-        behavior_value = record.payload.get("behavior")
-        if not isinstance(subject_value, str) or not subject_value.strip():
-            gaps.append(RegressionObligationGap(
-                code=RegressionObligationGapCode.MISSING_REQUIRED_FIELD,
-                message=f"Evidence {record.id} lacks a non-empty subject.",
-                fact_class=fact_class,
-                evidence_ids=(record.id,),
-                details={"field": "subject"},
-            ))
-            continue
-        if not isinstance(behavior_value, str) or not behavior_value.strip():
-            gaps.append(RegressionObligationGap(
-                code=RegressionObligationGapCode.MISSING_REQUIRED_FIELD,
-                message=f"Evidence {record.id} lacks a non-empty behavior.",
-                fact_class=fact_class,
-                evidence_ids=(record.id,),
-                details={"field": "behavior"},
-            ))
-            continue
-        subject = subject_value.strip()
-        expected_behavior = behavior_value.strip()
-
-        fact_key_value = record.payload.get("fact_key", record.id)
-        if not isinstance(fact_key_value, str) or not fact_key_value.strip():
-            gaps.append(RegressionObligationGap(
-                code=RegressionObligationGapCode.MISSING_REQUIRED_FIELD,
-                message=f"Evidence {record.id} has an invalid fact_key.",
-                fact_class=fact_class,
-                evidence_ids=(record.id,),
-                details={"field": "fact_key"},
-            ))
-            continue
-        fact_identity = (fact_class, subject, fact_key_value.strip())
-        previous_behavior = fact_values.get(fact_identity)
-        if previous_behavior is not None and previous_behavior != expected_behavior:
-            conflicting_fact_keys.add(fact_identity)
-        else:
-            fact_values[fact_identity] = expected_behavior
-
-        identity = _obligation_identity(rule, subject, expected_behavior)
-        candidate_count += 1
+        if not _records_form_exact_obligation(
+            kind,
+            records,
+            subject=subject,
+            surface=surface,
+            action=action,
+            expected_behavior=oracle,
+        ):
+            return
+        identity = _obligation_identity(
+            rule,
+            subject,
+            oracle,
+            surface=surface,
+            action=action,
+            discriminator=discriminator,
+        )
         existing = candidates.get(identity)
         if existing is None:
+            if (
+                len(candidates) >= actual_budget.max_obligations
+                or len(candidates) >= actual_budget.max_bundles
+            ):
+                exhausted = True
+                return
+            candidate_count += 1
             candidates[identity] = _Candidate(
                 rule=rule,
                 subject=subject,
-                expected_behavior=expected_behavior,
-                evidence_ids={record.id},
-                fact_classes={fact_class},
+                surface=surface,
+                action=action,
+                expected_behavior=oracle,
+                evidence_ids={record.id for record in records},
+                discriminator=discriminator,
             )
         else:
-            existing.evidence_ids.add(record.id)
-            existing.fact_classes.add(fact_class)
+            candidate_count += 1
+            existing.evidence_ids.update(record.id for record in records)
             deduplicated += 1
 
-    if conflicting_fact_keys:
-        for fact_class, subject, fact_key in sorted(
-            conflicting_fact_keys,
-            key=lambda item: (
-                list(BehaviorFactClass).index(item[0]),
-                _utf8_key(item[1], path="subject"),
-                _utf8_key(item[2], path="fact_key"),
-            ),
-        ):
-            affected = tuple(
-                record.id for record in inventory.evidence
-                if EVIDENCE_FACT_CLASS[record.kind] is fact_class
-                and record.payload.get("subject") == subject
-                and record.payload.get("fact_key", record.id) == fact_key
+    surfaces = by_class[BehaviorFactClass.SURFACE]
+    for surface_record in surfaces:
+        subject = _payload_text(surface_record, "subject")
+        surface = _payload_text(surface_record, "surface")
+        if subject is None or surface is None:
+            continue
+        navigation = _payload_text(surface_record, "navigation")
+        if navigation is None:
+            add_gap(
+                RegressionObligationGapCode.MISSING_NAVIGATION,
+                f"Surface evidence {surface_record.id} has no navigation semantics.",
+                fact_class=BehaviorFactClass.SURFACE,
+                evidence_ids=(surface_record.id,),
+                details={"subject": subject, "surface": surface},
             )
-            gaps.append(RegressionObligationGap(
-                code=RegressionObligationGapCode.CONFLICTING_FACTS,
-                message=f"Conflicting {fact_class.value} facts share fact_key {fact_key}.",
-                fact_class=fact_class,
-                evidence_ids=affected,
-                details={"subject": subject, "fact_key": fact_key},
-            ))
+
+        linked_actions = [
+            record for record in by_class[BehaviorFactClass.ACTION]
+            if record.payload.get("surface_id") == surface_record.id
+            and _payload_text(record, "subject") == subject
+            and _payload_text(record, "surface") == surface
+            and _payload_text(record, "action") is not None
+        ]
+        if not linked_actions:
+            matching_action_coverage = [
+                item for item in inventory.coverage
+                if item.fact_class is BehaviorFactClass.ACTION
+                and item.scope.get("subject") == subject
+                and item.scope.get("surface") == surface
+            ]
+            if any(
+                item.completeness is FactCoverageCompleteness.COMPLETE
+                and not item.evidence_ids
+                for item in matching_action_coverage
+            ):
+                add_gap(
+                    RegressionObligationGapCode.MISSING_ACTION,
+                    f"Complete local coverage proves no action for surface {surface}.",
+                    fact_class=BehaviorFactClass.ACTION,
+                    evidence_ids=(surface_record.id,),
+                    details={"subject": subject, "surface": surface},
+                )
+            else:
+                add_gap(
+                    RegressionObligationGapCode.COVERAGE_UNKNOWN,
+                    f"Action coverage for surface {surface} is not complete in the same scope.",
+                    fact_class=BehaviorFactClass.ACTION,
+                    evidence_ids=(surface_record.id,),
+                    details={"subject": subject, "surface": surface},
+                )
+            continue
+
+        for action_record in linked_actions:
+            action = _payload_text(action_record, "action")
+            if action is None:
+                continue
+            if _payload_text(action_record, "precondition") is None:
+                add_gap(
+                    RegressionObligationGapCode.MISSING_PRECONDITION,
+                    f"Action evidence {action_record.id} has no precondition.",
+                    fact_class=BehaviorFactClass.ACTION,
+                    evidence_ids=(action_record.id,),
+                    details={"subject": subject, "surface": surface, "action": action},
+                )
+
+            def exact_context(record: Evidence) -> bool:
+                return (
+                    _payload_text(record, "subject") == subject
+                    and _payload_text(record, "surface") == surface
+                    and _payload_text(record, "action") == action
+                    and record.payload.get("surface_id") == surface_record.id
+                    and record.payload.get("action_id") == action_record.id
+                )
+
+            outcomes = [
+                record for record in by_class[BehaviorFactClass.OBSERVABLE_OUTCOME]
+                if exact_context(record) and _payload_text(record, "oracle") is not None
+            ]
+            if not outcomes:
+                add_gap(
+                    RegressionObligationGapCode.MISSING_ORACLE,
+                    f"Action evidence {action_record.id} has no exactly linked observable oracle.",
+                    fact_class=BehaviorFactClass.OBSERVABLE_OUTCOME,
+                    evidence_ids=(action_record.id,),
+                    details={"subject": subject, "surface": surface, "action": action},
+                )
+                continue
+            oracle_values = {_payload_text(record, "oracle") for record in outcomes}
+            if len(oracle_values) > 1:
+                add_gap(
+                    RegressionObligationGapCode.CONTRADICTORY_EVIDENCE,
+                    f"Action {action} has contradictory observable outcomes.",
+                    fact_class=BehaviorFactClass.OBSERVABLE_OUTCOME,
+                    evidence_ids=tuple(record.id for record in outcomes),
+                    details={"subject": subject, "surface": surface, "action": action},
+                )
+
+            safety = [
+                record for record in by_class[BehaviorFactClass.EXECUTION_SAFETY]
+                if exact_context(record)
+                and _payload_text(record, "mode") is not None
+                and record.payload.get("bounded") is True
+            ]
+            if not safety:
+                add_gap(
+                    RegressionObligationGapCode.EXECUTION_SAFETY_UNKNOWN,
+                    f"Execution safety for action {action} is not established by bounded local evidence.",
+                    fact_class=BehaviorFactClass.EXECUTION_SAFETY,
+                    evidence_ids=(action_record.id,),
+                    details={"subject": subject, "surface": surface, "action": action},
+                )
+
+            fields = [record for record in by_class[BehaviorFactClass.FIELD] if exact_context(record)]
+            roles = [
+                record for record in by_class[BehaviorFactClass.ACTOR_ROLE]
+                if _payload_text(record, "subject") == subject
+                and _payload_text(record, "surface") == surface
+                and record.payload.get("surface_id") == surface_record.id
+                and _payload_text(record, "role") is not None
+            ]
+
+            for outcome in outcomes:
+                oracle = _payload_text(outcome, "oracle")
+                if oracle is None or navigation is None or _payload_text(action_record, "precondition") is None:
+                    continue
+                base = (surface_record, action_record, outcome)
+                add_candidate(
+                    TestObligationKind.HAPPY_PATH,
+                    base,
+                    subject=subject,
+                    surface=surface,
+                    action=action,
+                    oracle=oracle,
+                    discriminator=outcome.id,
+                )
+
+                for field_record in fields:
+                    constraints = [
+                        record for record in by_class[BehaviorFactClass.CONSTRAINT]
+                        if exact_context(record)
+                        and record.payload.get("field_id") == field_record.id
+                        and _payload_text(record, "constraint") is not None
+                    ]
+                    if not constraints:
+                        add_gap(
+                            RegressionObligationGapCode.MISSING_CONSTRAINT,
+                            f"Field evidence {field_record.id} has no exactly linked constraint.",
+                            fact_class=BehaviorFactClass.CONSTRAINT,
+                            evidence_ids=(field_record.id,),
+                            details={"field_id": field_record.id},
+                        )
+                    for constraint in constraints:
+                        constraint_kind = _payload_text(constraint, "constraint")
+                        if constraint_kind == "required":
+                            add_candidate(
+                                TestObligationKind.REQUIRED_FIELD,
+                                base + (field_record, constraint),
+                                subject=subject,
+                                surface=surface,
+                                action=action,
+                                oracle=oracle,
+                                discriminator=field_record.id,
+                            )
+                        if constraint_kind not in {"format", "boundary"}:
+                            continue
+                        partition_kind = "invalid_format" if constraint_kind == "format" else "boundary_value"
+                        partitions = [
+                            record for record in by_class[BehaviorFactClass.DATA_PARTITION]
+                            if exact_context(record)
+                            and record.payload.get("field_id") == field_record.id
+                            and record.payload.get("constraint_id") == constraint.id
+                            and _payload_text(record, "partition") == partition_kind
+                        ]
+                        if not partitions:
+                            add_gap(
+                                RegressionObligationGapCode.MISSING_TEST_DATA_PARTITION,
+                                f"Constraint evidence {constraint.id} has no bounded linked {partition_kind} partition.",
+                                fact_class=BehaviorFactClass.DATA_PARTITION,
+                                evidence_ids=(constraint.id,),
+                                details={"constraint_id": constraint.id, "partition": partition_kind},
+                            )
+                        for partition in partitions:
+                            obligation_kind = (
+                                TestObligationKind.INVALID_FORMAT
+                                if constraint_kind == "format"
+                                else TestObligationKind.BOUNDARY_VALUE
+                            )
+                            add_candidate(
+                                obligation_kind,
+                                base + (field_record, constraint, partition),
+                                subject=subject,
+                                surface=surface,
+                                action=action,
+                                oracle=oracle,
+                                discriminator=partition.id,
+                            )
+
+                for transition in by_class[BehaviorFactClass.STATE_TRANSITION]:
+                    if exact_context(transition) and transition.payload.get("outcome_id") == outcome.id:
+                        add_candidate(
+                            TestObligationKind.STATE_TRANSITION,
+                            base + (transition,),
+                            subject=subject,
+                            surface=surface,
+                            action=action,
+                            oracle=oracle,
+                            discriminator=transition.id,
+                        )
+
+                permissions = [
+                    record for record in by_class[BehaviorFactClass.PERMISSION_RELATION]
+                    if exact_context(record) and record.payload.get("outcome_id") == outcome.id
+                ]
+                for permission in permissions:
+                    role = next((item for item in roles if item.id == permission.payload.get("role_id")), None)
+                    if role is None:
+                        add_gap(
+                            RegressionObligationGapCode.MISSING_ROLE_EVIDENCE,
+                            f"Permission evidence {permission.id} references no exact local role.",
+                            fact_class=BehaviorFactClass.ACTOR_ROLE,
+                            evidence_ids=(permission.id,),
+                            details={"role_id": permission.payload.get("role_id")},
+                        )
+                        continue
+                    if permission.payload.get("authenticated") is not True:
+                        add_gap(
+                            RegressionObligationGapCode.AUTHENTICATION_UNPROVEN,
+                            f"Permission evidence {permission.id} does not prove authentication for its role.",
+                            fact_class=BehaviorFactClass.PERMISSION_RELATION,
+                            evidence_ids=(role.id, permission.id),
+                            details={"role_id": role.id},
+                        )
+                        continue
+                    add_candidate(
+                        TestObligationKind.ROLE_PERMISSION,
+                        base + (role, permission),
+                        subject=subject,
+                        surface=surface,
+                        action=action,
+                        oracle=oracle,
+                        discriminator=permission.id,
+                    )
+
+                persistence_facts = [
+                    record for record in by_class[BehaviorFactClass.PERSISTENCE_RELATION]
+                    if exact_context(record) and record.payload.get("outcome_id") == outcome.id
+                ]
+                valid_persistence = [
+                    record for record in persistence_facts
+                    if _payload_text(record, "relation") == "read_back"
+                    and _payload_text(record, "read_surface") is not None
+                    and _payload_text(record, "read_action") is not None
+                ]
+                if persistence_facts and not valid_persistence:
+                    add_gap(
+                        RegressionObligationGapCode.MISSING_PERSISTENCE_READ_BACK,
+                        f"Persistence evidence for action {action} does not establish an independent read back.",
+                        fact_class=BehaviorFactClass.PERSISTENCE_RELATION,
+                        evidence_ids=tuple(record.id for record in persistence_facts),
+                        details={"subject": subject, "surface": surface, "action": action},
+                    )
+                for relation in valid_persistence:
+                    add_candidate(
+                        TestObligationKind.PERSISTENCE_READ_BACK,
+                        base + (relation,),
+                        subject=subject,
+                        surface=surface,
+                        action=action,
+                        oracle=oracle,
+                        discriminator=relation.id,
+                    )
+
+                for recovery in by_class[BehaviorFactClass.ERROR_RECOVERY]:
+                    if exact_context(recovery) and recovery.payload.get("outcome_id") == outcome.id:
+                        add_candidate(
+                            TestObligationKind.ERROR_RECOVERY,
+                            base + (recovery,),
+                            subject=subject,
+                            surface=surface,
+                            action=action,
+                            oracle=oracle,
+                            discriminator=recovery.id,
+                        )
+
+                dependencies = [
+                    record for record in by_class[BehaviorFactClass.DEPENDENCY]
+                    if exact_context(record) and record.payload.get("outcome_id") == outcome.id
+                ]
+                for dependency in dependencies:
+                    if dependency.payload.get("supported") is not True:
+                        add_gap(
+                            RegressionObligationGapCode.UNSUPPORTED_INTERACTION,
+                            f"Dependency evidence {dependency.id} describes an unsupported interaction.",
+                            fact_class=BehaviorFactClass.DEPENDENCY,
+                            evidence_ids=(dependency.id,),
+                            details={"dependency_id": dependency.id},
+                        )
+                        continue
+                    add_candidate(
+                        TestObligationKind.DEPENDENCY,
+                        base + (dependency,),
+                        subject=subject,
+                        surface=surface,
+                        action=action,
+                        oracle=oracle,
+                        discriminator=dependency.id,
+                    )
+
+    index = {record.id: record for record in available}
+    for candidate in candidates.values():
+        ids_by_class: dict[BehaviorFactClass, set[str]] = {}
+        for evidence_id in candidate.evidence_ids:
+            record = index[evidence_id]
+            ids_by_class.setdefault(EVIDENCE_FACT_CLASS[record.kind], set()).add(evidence_id)
+        for fact_class in candidate.rule.fact_classes:
+            coverage = local_coverage(
+                fact_class,
+                candidate.subject,
+                candidate.surface,
+                candidate.action,
+            )
+            exact_ids = ids_by_class.get(fact_class, set())
+            if coverage.completeness is FactCoverageCompleteness.PARTIAL:
+                add_gap(
+                    RegressionObligationGapCode.COVERAGE_PARTIAL,
+                    f"{fact_class.value} has only PARTIAL coverage for the linked journey.",
+                    fact_class=fact_class,
+                    evidence_ids=coverage.evidence_ids,
+                    details={
+                        "subject": candidate.subject,
+                        "surface": candidate.surface,
+                        "action": candidate.action,
+                    },
+                )
+            elif (
+                coverage.completeness is not FactCoverageCompleteness.COMPLETE
+                or not exact_ids <= set(coverage.evidence_ids)
+            ):
+                add_gap(
+                    RegressionObligationGapCode.COVERAGE_UNKNOWN,
+                    f"{fact_class.value} lacks COMPLETE coverage containing the exact linked facts.",
+                    fact_class=fact_class,
+                    evidence_ids=coverage.evidence_ids,
+                    details={
+                        "subject": candidate.subject,
+                        "surface": candidate.surface,
+                        "action": candidate.action,
+                    },
+                )
 
     obligations: list[TestObligation] = []
     bundles: list[VerificationBundle] = []
@@ -1301,8 +1886,8 @@ def derive_regression_test_obligations(
         key=lambda item: (
             list(TestObligationKind).index(item[1].rule.kind),
             _utf8_key(item[1].subject, path="subject"),
-            _utf8_key(item[1].expected_behavior, path="expected_behavior"),
-            tuple(_utf8_key(value, path="evidence id") for value in sorted(item[1].evidence_ids)),
+            _utf8_key(item[1].expected_behavior, path="expected behavior"),
+            _utf8_key(_obligation_id(item[0]), path="obligation id"),
         ),
     )
     for identity, candidate in sorted_candidates:
@@ -1320,31 +1905,26 @@ def derive_regression_test_obligations(
             subject=candidate.subject,
             expected_behavior=candidate.expected_behavior,
             rationale=candidate.rule.rationale,
-            fact_classes=tuple(
-                fact_class for fact_class in BehaviorFactClass
-                if fact_class in candidate.fact_classes
-            ),
+            fact_classes=candidate.rule.fact_classes,
             evidence_ids=tuple(candidate.evidence_ids),
             test_level=candidate.rule.test_level,
-            metadata={"derivation_rule": candidate.rule.kind.value},
+            metadata={
+                "derivation_rule": candidate.rule.kind.value,
+                "surface": candidate.surface,
+                "action": candidate.action,
+                "discriminator": candidate.discriminator,
+            },
         )
         bundle = verify_test_obligation_grounding_bundle(item, inventory)
         obligations.append(item)
         bundles.append(bundle)
-        if bundle.report.verdict is not VerificationVerdict.PASS:
-            gaps.append(RegressionObligationGap(
-                code=RegressionObligationGapCode.UNGROUNDED_OBLIGATION,
-                message=f"Obligation {item.obligation_id} is not fully grounded.",
-                evidence_ids=bundle.report.evidence_ids,
-                details={"obligation_id": item.obligation_id},
-            ))
 
     if exhausted:
-        gaps.append(RegressionObligationGap(
-            code=RegressionObligationGapCode.BUDGET_EXHAUSTED,
-            message="Regression obligation derivation stopped at a declared budget.",
+        add_gap(
+            RegressionObligationGapCode.BUDGET_EXHAUSTED,
+            "Regression obligation derivation stopped at a declared budget.",
             details={"budget": actual_budget.to_dict()},
-        ))
+        )
 
     termination = (
         RegressionObligationTermination.BUDGET_EXHAUSTED

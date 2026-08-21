@@ -594,15 +594,15 @@ BUILTIN_VERIFIER_CAPABILITY_REGISTRY = VerifierCapabilityRegistry((
             "max_steps": DEFAULT_REGRESSION_OBLIGATION_BUDGET.max_steps,
         },
         coverage={
-            "pass_requires": "COMPLETE_REFERENCED_FACT_COVERAGE",
-            "unknown_on": "MISSING_INCOMPATIBLE_OR_INCOMPLETE_GROUNDING",
+            "pass_requires": "COMPLETE_EXACT_LINKED_FACT_COVERAGE",
+            "unknown_on": "MISSING_MISLINKED_WRONG_SCOPE_OR_INCOMPLETE_GROUNDING",
         },
         claim_kinds=(TEST_OBLIGATION_GROUNDED,),
         accepted_evidence_kinds=BEHAVIOR_EVIDENCE_KINDS,
         required_evidence_kinds=(),
         description=(
-            "Checks that a regression test obligation is grounded by exact compatible "
-            "behavior facts with complete referenced fact coverage."
+            "Checks that a regression test obligation is grounded by exact payload-ID "
+            "and subject/action/surface-linked facts with complete local coverage."
         ),
     ),
 ))

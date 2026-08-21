@@ -206,6 +206,6 @@ Do not hide this information by converting UNKNOWN into a confidence percentage.
 
 A proposed test duty is not grounded merely because it cites some evidence ID.
 
-The evidence kind, fact class, subject, expected behavior, and coverage must all match the obligation rule. Partial or unknown coverage stays `UNKNOWN`; unrelated evidence cannot be relabeled to obtain a grounding `PASS`.
+The evidence kind, exact payload relationship IDs, subject, action, surface, rule-specific relation semantics, and local coverage must all match the obligation rule. A route, button, field, requirement, or generic change fact alone is never enough. Partial or wrong-scope coverage stays non-passing, and complete empty coverage proves absence only inside its declared scope.
 
 An obligation plan's `READY` state describes completeness under the declared evidence and finite derivation bounds. It never authorizes merge, deployment, code generation, test execution, or another external side effect.

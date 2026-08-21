@@ -192,11 +192,12 @@ The capability registry is deterministic, fingerprinted, and has no runtime obje
 
 This contains the deterministic Regression Test Obligation Engine:
 
-- the closed 13-kind `gvr.test.*` behavior evidence vocabulary;
-- immutable normalized evidence inventory and per-fact-class coverage;
-- nine strict obligation rules;
-- the `TEST_OBLIGATION_GROUNDED` verifier and one bundle per obligation;
-- stable gaps, finite budgets, deduplication, termination, readiness, and plan fingerprints.
+- the exact 13-kind vocabulary from `gvr.test.surface` through `gvr.test.execution_safety`;
+- immutable normalized evidence inventories and multi-scope fact coverage, including scope-bound complete empty negative evidence;
+- the exact nine rules from `HAPPY_PATH` through `DEPENDENCY`;
+- strict payload-ID plus subject/action/surface linkage and specialized role, persistence, recovery, dependency, transition, and partition checks;
+- the `TEST_OBLIGATION_GROUNDED` verifier, exact bundles, and ClaimLedger staleness compatibility;
+- the stable Task 18 gap taxonomy, finite budgets, bounded partitions, termination, readiness, and plan fingerprints.
 
 The module derives plans only from supplied evidence. It does not acquire evidence, call a model, generate code, run tests, or authorize product actions. Read [Regression test obligations](REGRESSION_TEST_OBLIGATIONS.md) before changing it.
 

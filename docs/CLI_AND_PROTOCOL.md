@@ -141,9 +141,9 @@ Unknown or obsolete nested fields and invalid values return machine-readable `pr
 
 Parses one strict serialized `BehaviorEvidenceInventory` and an optional finite `RegressionObligationBudget`, then returns a deterministic `regression_obligation_plan`.
 
-The inventory contains exact behavior `Evidence` records plus per-fact-class `COMPLETE`, `PARTIAL`, or `UNKNOWN` coverage. The operation rejects unknown fields, unsupported evidence kinds, truth-like evidence controls, ambiguous duplicate evidence IDs, invalid coverage backing, and a supplied inventory fingerprint that does not match semantic content.
+The inventory contains the exact 13-kind behavior vocabulary plus scoped `COMPLETE`, `PARTIAL`, or `UNKNOWN` coverage. It supports complete empty manifests as scope-bound negative evidence, but never treats a complete scan of another subject, action, or surface as proof of absence. The operation rejects unknown fields, old generic evidence kinds, truth-like controls, ambiguous duplicate IDs, invalid coverage references, conflicting class/scope coverage, and forged inventory fingerprints.
 
-The result contains ordered obligations, one exact grounding bundle per obligation, normalized coverage, stable gaps, budget/consumption, termination, `READY / BLOCKED / UNKNOWN` readiness, and a plan fingerprint. It does not call evidence providers, models, browsers, code generators, or test executors, and readiness does not authorize a merge or deployment.
+The result contains ordered obligations, one exact grounding bundle per obligation, normalized scoped coverage, stable gaps, budget/consumption, termination, `READY / BLOCKED / UNKNOWN` readiness, and a plan fingerprint. Obligations are derived only from exact payload-ID and subject/action/surface-linked facts under the nine public rules. The operation does not call providers, models, browsers, code generators, or test executors, and readiness does not authorize a merge or deployment.
 
 See [Regression test obligations](REGRESSION_TEST_OBLIGATIONS.md) for the 13 evidence kinds, nine rules, gap taxonomy, default budget, and a complete request example.
 

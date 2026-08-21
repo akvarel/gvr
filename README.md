@@ -108,7 +108,7 @@ GVR currently includes:
 - `VerificationSession` with exact tri-state composition, freshness, budgets, termination state, and deterministic session identity;
 - immutable `VerifierCapability` descriptors and a distinct deterministic `VerifierCapabilityRegistry`;
 - strict evidence provider request with explicit source/snapshot classes, coverage, stable categorical issue, result, capability, fail-closed class compatibility, public capability-registry validation, and exact runtime registry contracts;
-- immutable behavior-evidence inventories and a deterministic bounded Regression Test Obligation Engine with evidence-grounded bundles, stable gaps, and non-authorizing readiness;
+- immutable behavior-evidence inventories and a bounded Regression Test Obligation Engine with the exact 13 fact kinds, nine linked-fact rules, scoped coverage/absence semantics, exact bundles, stable gaps, and non-authorizing readiness;
 - an honest built-in verifier capability snapshot with exact verifier IDs, bounds, coverage, cost, and D0/D1/O1/M1 semantics;
 - an honest empty built-in evidence provider capability snapshot;
 - schema-v1 JSON protocol and CLI, including `compose_verification_session`, `derive_regression_test_obligations`, `describe_verifier_capabilities`, `describe_evidence_provider_capabilities`, and `validate_evidence_provider_result`.

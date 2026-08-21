@@ -145,11 +145,13 @@ The schema-v1 protocol exposes `describe_evidence_provider_capabilities` with op
 
 ## Regression test obligation layer
 
-The obligation engine consumes a caller-supplied immutable behavior evidence inventory. It accepts a closed 13-kind `gvr.test.*` vocabulary, attaches evidence-backed `COMPLETE`, `PARTIAL`, or `UNKNOWN` coverage to each fact class, and applies nine deterministic derivation rules.
+The obligation engine consumes a caller-supplied immutable behavior evidence inventory. It accepts exactly 13 stable fact kinds from `gvr.test.surface` through `gvr.test.execution_safety`, attaches scoped `COMPLETE`, `PARTIAL`, or `UNKNOWN` coverage, and applies exactly nine deterministic rules from `HAPPY_PATH` through `DEPENDENCY`.
 
-Each derived `TestObligation` is checked by `gvr.regression_test_obligation.v1` under the `TEST_OBLIGATION_GROUNDED` claim. Subject, expected behavior, fact class, evidence kind, and complete coverage must all align. Each report travels in an exact `VerificationBundle`, so later evidence mutation makes a ledger-recorded grounding result stale.
+No single route, button, field, requirement, or generic change fact manufactures an obligation. Required records must be linked by exact payload IDs and matching subject/action/surface semantics. Complete empty coverage proves absence only in its declared scope. Wrong-scope completeness remains unknown.
 
-The final `RegressionObligationPlan` is bounded, ordered, deduplicated, fingerprinted, and explicit about gaps, consumption, termination, and `READY / BLOCKED / UNKNOWN` readiness. Readiness is descriptive verification state, not authorization to merge, deploy, generate code, or execute an external side effect.
+Each derived `TestObligation` is rechecked by `gvr.regression_test_obligation.v1` under `TEST_OBLIGATION_GROUNDED`. Every direct and local-coverage dependency travels in an exact `VerificationBundle`, so later evidence mutation makes a ledger-recorded grounding stale.
+
+The final `RegressionObligationPlan` is bounded, ordered, deduplicated, fingerprinted, and explicit about stable gaps, consumption, termination, and `READY / BLOCKED / UNKNOWN` readiness. Readiness is descriptive verification state, not authorization to merge, deploy, generate code, or execute an external side effect.
 
 ## VerificationReport
 
