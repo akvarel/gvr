@@ -247,6 +247,8 @@ When changing verifier semantics, add tests that try to make GVR produce a false
 
 Session tests also check that different operation histories cannot change semantic identity when the final semantic state is the same.
 
+`tests/test_verification_planner.py` specifies the deterministic planner contract, including exact capability bindings, request sharing and conflicts, graph ordering, budget boundaries, protocol parsing, and installed public exports.
+
 ## Where should a new verifier go?
 
 A generic verifier belongs in GVR if it:

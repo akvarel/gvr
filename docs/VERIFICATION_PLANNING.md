@@ -60,6 +60,8 @@ A plan contains:
 
 The plan and every step are frozen records.
 
+Each `VerificationPlanStep` has a `VerificationPlanStepKind`, a stable step ID, a canonical fingerprint, and deterministic dependency step IDs. `VerificationPlanTermination` represents the final planner state.
+
 ## Canonical step kinds
 
 A complete plan uses only three step kinds.
@@ -119,7 +121,7 @@ If a verifier requires evidence and the binding contains no request, planning fa
 
 ## Stable issues and termination
 
-Planner issues contain only:
+Each `VerificationPlannerIssue` is a frozen structured record containing only:
 
 - an uppercase stable `code`;
 - optional `claim_id`;
@@ -155,7 +157,7 @@ A non-complete plan contains no executable steps. This prevents callers from acc
 
 ## Deterministic budgets
 
-`VerificationPlanningBudget` supports:
+`VerificationPlanningBudget` is the immutable input limit record. It supports:
 
 - `max_atomic_claims`;
 - `max_composite_claims`;
@@ -166,6 +168,8 @@ A non-complete plan contains no executable steps. This prevents callers from acc
 - `max_depth`.
 
 `max_requests` counts unique request fingerprints after exact sharing. `max_steps` counts unique acquisition steps plus all atomic and composite claim steps. `max_depth` counts claim nodes on the longest dependency path, so an independent claim has depth 1.
+
+`VerificationPlanningConsumption` is the immutable output record for the corresponding measured counts.
 
 A value equal to consumption is accepted. A lower value produces stable `BUDGET_EXHAUSTED` termination and no steps. Input insertion order does not change consumption, issues, termination, or plan identity.
 
