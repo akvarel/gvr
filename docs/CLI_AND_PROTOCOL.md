@@ -188,7 +188,7 @@ The payload is the exact `VerificationPlanningRequest.to_dict()` shape:
 }
 ```
 
-Each atomic binding includes its own schema, kind, fingerprint format, fingerprint, exact claim ID, verifier ID/version/capability fingerprint, and full serialized evidence requests. Each nested request and capability also carries its existing exact schema, kind, format, and fingerprint fields.
+Each atomic binding includes its own schema, kind, fingerprint format, fingerprint, exact claim ID, verifier ID/version/capability fingerprint, and full serialized evidence requests. Each nested request and capability also carries its existing exact schema, kind, format, and fingerprint fields. Omitting a required nested fingerprint is a malformed planning request, not permission for the protocol to recompute and accept it.
 
 The response kind is `verification_plan`. A complete plan contains deterministic `ACQUIRE_EVIDENCE`, `VERIFY_ATOMIC_CLAIM`, and `COMPOSE_CLAIM` steps. Unsupported contracts or exhausted budgets return stable termination and structured planner issues with no executable steps.
 

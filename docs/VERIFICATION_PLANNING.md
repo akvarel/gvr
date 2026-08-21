@@ -45,6 +45,8 @@ Binding order is not semantic. Missing, extra, or duplicate bindings are rejecte
 
 The request also rejects one `request_id` reused with different request semantics. The same ID may be reused only when its canonical `EvidenceRequest.fingerprint` is identical.
 
+"Exact" means the concrete public record types are required. Subclasses cannot replace claim graphs, claim nodes, bindings, evidence requests, capability registries, capability descriptors, or budgets and override their contract behavior.
+
 ### `VerificationPlan`
 
 A plan contains:
@@ -128,7 +130,7 @@ Each `VerificationPlannerIssue` is a frozen structured record containing only:
 - optional `request_id`;
 - canonical structured `details`.
 
-They contain no free-text message, claim result, or arbitrary metadata.
+They contain no free-text message, claim result, or arbitrary metadata. Verdict and evidence-adequacy aliases such as `status`, `outcome`, `result`, `truth_value`, `is_sufficient`, and `evidence_adequacy` are rejected even when nested or written with different letter case or hyphenation.
 
 Important issue codes include:
 
@@ -233,6 +235,6 @@ compile_verification_plan
 
 The payload is the exact serialized `VerificationPlanningRequest`, including the claim graph, bindings, evidence requests, capability registries, registry fingerprints, budget, fingerprint formats, and fingerprints.
 
-The parser rejects unknown fields, malformed arrays or mappings, unsupported schema or kind values, duplicate bindings, conflicting request IDs, and every claimed fingerprint mismatch. A successful response has kind `verification_plan`.
+The parser rejects unknown fields, malformed arrays or mappings, unsupported schema or kind values, duplicate bindings, conflicting request IDs, omitted required nested fingerprints, and every claimed fingerprint mismatch. A successful response has kind `verification_plan`.
 
 See [CLI and JSON protocol](CLI_AND_PROTOCOL.md) for the wire shape.

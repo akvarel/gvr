@@ -908,6 +908,8 @@ def test_36_protocol_rejects_omitted_nested_fingerprints(
         {"truth_value": True},
         {"is_sufficient": True},
         {"evidence_adequacy": "complete"},
+        {"nested": {"Truth-Value": True}},
+        {"STATUS": "PASS"},
     ),
 )
 def test_37_planner_issues_reject_verdict_and_sufficiency_metadata_aliases(
