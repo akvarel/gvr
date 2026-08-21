@@ -447,6 +447,11 @@ class VerifierCapabilityRegistry:
                 f"verifier {capability.verifier_id} version {capability.version} "
                 f"does not support claim kind {claim.claim_kind}"
             )
+        if not capability.authoritative:
+            raise VerifierCapabilityError(
+                f"verifier {capability.verifier_id} version {capability.version} "
+                "is not authoritative and cannot verify an AtomicClaim"
+            )
         return capability
 
     def to_dict(self) -> dict[str, Any]:
