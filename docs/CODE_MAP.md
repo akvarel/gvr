@@ -133,6 +133,21 @@ This contains deterministic verification planning:
 
 The planner compiles descriptions only. It does not call runtime providers, verifiers, Graphify, a network, or the file system. Read [Verification planning](VERIFICATION_PLANNING.md) before changing this file.
 
+## `src/gvr/execution.py`
+
+This contains the exact plan execution layer:
+
+- frozen `VerificationExecutionRequest`, limits, lifecycle, issues, counters, termination, and result contracts;
+- `VerifierRuntimeRegistry` with exact `(verifier_id, version)` bindings;
+- full pre-execution plan, graph, capability, runtime, request, step, and DAG revalidation;
+- one-call-per-step provider acquisition through `EvidenceProviderRuntimeRegistry.acquire`;
+- reachable-only verifier inputs and exact dependency records;
+- deterministic fail-closed `UNKNOWN` reports and bundles;
+- exact session composition and replay-stable execution identity;
+- the schema-v1 built-in data-flow verifier runtime adapter.
+
+It contains no fallback, ranking, scope broadening, product authorization, or LLM. Read [Verification execution](VERIFICATION_EXECUTION.md) before changing this file.
+
 ## `src/gvr/adapters/graphify.py`
 
 This converts Graphify traversal output into evidence structures GVR can check.
@@ -199,7 +214,7 @@ This contains the evidence acquisition contract layer:
 - provider-to-verifier structural compatibility checks;
 - pre-invocation request validation and post-result validation against the exact request and capability.
 
-The capability registry is deterministic, fingerprinted, and has no runtime objects. Its request validator requires exact source/snapshot class compatibility and treats empty capability class lists as accepting only missing request classes. The runtime registry dispatches only an exact `(provider_id, version)` binding, calls that validator before invocation, and rechecks mutable provider identity immediately before invocation. Fail-closed conversion applies only to an exception from provider execution and emits deterministic allowlisted categories with no raw exception text or class representation. The built-in schema-v1 capability registry is intentionally empty until GVR ships stable acquisition providers.
+The capability registry is deterministic, fingerprinted, and has no runtime objects. Its request validator requires exact source/snapshot class compatibility and treats empty capability class lists as accepting only missing request classes. The runtime registry fingerprints its capability snapshot and exact runtime keys, dispatches only an exact `(provider_id, version)` binding, calls that validator before invocation, and rechecks mutable provider identity immediately before invocation. Fail-closed conversion applies only to an exception from provider execution and emits deterministic allowlisted categories with no raw exception text or class representation. The built-in schema-v1 capability registry is intentionally empty until GVR ships stable acquisition providers.
 
 ## `src/gvr/protocol.py`
 
@@ -219,9 +234,10 @@ Current operations include:
 - `describe_verifier_capabilities`;
 - `describe_evidence_provider_capabilities`;
 - `validate_evidence_provider_result`;
-- `compile_verification_plan`.
+- `compile_verification_plan`;
+- `execute_verification_plan`.
 
-The session wire path also validates the explicit bundle fingerprint format before accepting a materialized bundle. The planning wire path strictly validates every nested schema, kind, unknown field, and claimed fingerprint before compilation.
+The session wire path also validates the explicit bundle fingerprint format before accepting a materialized bundle. The planning wire path strictly validates every nested schema, kind, unknown field, and claimed fingerprint before compilation. The execution wire path additionally validates exact plan steps, runtime registry descriptors, exact request keys, deterministic limits, and the outer execution fingerprint before dispatch.
 
 ## `src/gvr/wire.py`
 
@@ -239,7 +255,7 @@ They are intentionally small. The CLI sends work into the same protocol layer us
 
 ## `tests/`
 
-The tests are part of the specification.
+The tests are part of the specification. `tests/test_verification_execution.py` contains the Task 19 adversarial matrix for identity substitution, malformed or exceptional runtimes, prerequisite fail-closed behavior, reachable-only inputs, exact request execution counts, tri-state composition, deterministic replay, changed evidence identity, execution limits, product-policy absence, and installed CLI/protocol behavior.
 
 GVR uses many adversarial tests because the most dangerous bugs are often not normal crashes. They are false definitive answers such as a wrong PASS or a wrong absence result.
 

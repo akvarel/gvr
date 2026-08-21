@@ -13,10 +13,11 @@ You do not need to know AI research terms to read it. You do not need to know gr
 5. [Verification sessions](VERIFICATION_SESSIONS.md) — how several claims are combined safely.
 6. [Verifier capabilities](VERIFIER_CAPABILITIES.md) — how exact verifier and evidence provider contracts are described and discovered.
 7. [Verification planning](VERIFICATION_PLANNING.md) — how exact contracts become bounded acquisition, atomic-check, and composition steps without execution.
-8. [Architecture](ARCHITECTURE.md) — how the current GVR pieces fit together.
-9. [CLI and JSON protocol](CLI_AND_PROTOCOL.md) — how another program can call GVR.
-10. [Code map](CODE_MAP.md) — where the main pieces live in the repository.
-11. [Design rules](DESIGN_RULES.md) — the safety rules GVR follows and why they exist.
+8. [Verification execution](VERIFICATION_EXECUTION.md) — how one exact complete plan runs against exact provider and verifier runtime registries.
+9. [Architecture](ARCHITECTURE.md) — how the current GVR pieces fit together.
+10. [CLI and JSON protocol](CLI_AND_PROTOCOL.md) — how another program can call GVR.
+11. [Code map](CODE_MAP.md) — where the main pieces live in the repository.
+12. [Design rules](DESIGN_RULES.md) — the safety rules GVR follows and why they exist.
 
 ## The shortest explanation
 
@@ -42,10 +43,14 @@ The verifier returns one of three results:
 claim
   |
   v
-evidence
+VerificationPlan
   |
   v
-verifier
+exact plan executor
+  |
+  +--> exact provider runtime
+  |
+  +--> exact verifier runtime
   |
   v
 PASS / FAIL / UNKNOWN
@@ -66,7 +71,7 @@ The ledger remembers which result depends on which evidence. If the evidence cha
 
 A verification session can combine several current claims with exact `AND`, `OR`, and `NOT` rules. Missing or stale required claims stay `UNKNOWN`.
 
-A verifier capability registry describes the exact verifier IDs and contracts GVR currently publishes. A pure evidence provider capability registry separately describes exact `(provider_id, version)` acquisition contracts, including source and snapshot classes, and can be queried by deterministic `request_kind` and `evidence_kind` filters. The verification planner validates exact snapshots of both registries and compiles bounded work descriptions. Runtime provider bindings live in another exact registry. None of these registries silently ranks or substitutes entries, and only the runtime provider registry executes acquisition.
+A verifier capability registry describes the exact verifier IDs and contracts GVR currently publishes. A pure evidence provider capability registry separately describes exact `(provider_id, version)` acquisition contracts, including source and snapshot classes, and can be queried by deterministic `request_kind` and `evidence_kind` filters. The verification planner validates exact snapshots of both registries and compiles bounded work descriptions. The verification executor then accepts only that exact complete plan, exact request identities, and exact runtime registries. It dispatches no fallback and passes each verifier only reachable evidence and dependencies.
 
 ## If you want to contribute
 

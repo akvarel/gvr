@@ -201,3 +201,19 @@ A high UNKNOWN rate can reveal that the system needs:
 - a larger but still bounded search.
 
 Do not hide this information by converting UNKNOWN into a confidence percentage.
+
+## Rule 15: execute the exact plan or fail closed
+
+The executor must not silently repair or reinterpret a plan.
+
+Before invocation, it must validate the exact plan, graph, request keys, capability fingerprints, runtime keys, step IDs, and dependency DAG.
+
+During execution:
+
+- one acquisition step means one exact `(request_id, request_fingerprint)` execution;
+- one verifier step means one exact verifier ID and version;
+- only reachable evidence and exact claim dependencies may cross the verifier boundary;
+- an invalid prerequisite cannot be upgraded to `PASS`;
+- deterministic limits may block work, but wall-clock races and random cutoffs must not define semantic identity.
+
+No fallback, ranking, scope broadening, product decision, or LLM belongs in this layer.

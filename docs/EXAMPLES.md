@@ -265,3 +265,24 @@ There is no deterministic GVR rule for beauty.
 A model can give an opinion, but that opinion should not be turned into an authoritative GVR `PASS`.
 
 For unsupported claims, GVR should stay explicit about the limit instead of pretending everything is mechanically decidable.
+
+## Example 10: exact plan execution does not merge request IDs
+
+Two atomic claims depend on the same exact evidence request key:
+
+```text
+(request-A, fingerprint-X)
+```
+
+The planner emits one `ACQUIRE_EVIDENCE` step. The executor calls the exact provider once and gives the validated result only to verifier steps that depend on that acquisition step.
+
+Now consider two requests with identical semantic content but different IDs:
+
+```text
+(request-A, fingerprint-X)
+(request-B, fingerprint-X)
+```
+
+These are two executable identities. The planner emits two acquisition steps and the executor calls the provider twice. It does not merge them because doing so would erase caller-visible execution identity.
+
+If either provider returns a malformed result, or a required result is unavailable, the dependent verifier is not allowed to manufacture `PASS`. The executor records an explicit `UNKNOWN` bundle and a failed or blocked lifecycle issue instead.

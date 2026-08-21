@@ -24,6 +24,9 @@ from .evidence_providers import (
     EVIDENCE_PROVIDER_CAPABILITY_REGISTRY_KIND,
     EVIDENCE_PROVIDER_CAPABILITY_REGISTRY_SCHEMA_VERSION,
     EVIDENCE_PROVIDER_CAPABILITY_SCHEMA_VERSION,
+    EVIDENCE_PROVIDER_RUNTIME_REGISTRY_FINGERPRINT_FORMAT,
+    EVIDENCE_PROVIDER_RUNTIME_REGISTRY_KIND,
+    EVIDENCE_PROVIDER_RUNTIME_REGISTRY_SCHEMA_VERSION,
     EvidenceAcquisitionStatus,
     EvidenceCompleteness,
     EvidenceCoverage,
@@ -32,6 +35,7 @@ from .evidence_providers import (
     EvidenceProviderCapabilityRegistry,
     EvidenceProviderIssue,
     EvidenceProviderResult,
+    EvidenceProviderRuntimeRegistry,
     EvidenceRequest,
     builtin_evidence_provider_capability_registry,
     validate_evidence_provider_result,
@@ -43,11 +47,34 @@ from .planning import (
     VERIFICATION_PLANNING_REQUEST_FINGERPRINT_FORMAT,
     VERIFICATION_PLANNING_REQUEST_KIND,
     VERIFICATION_PLANNING_REQUEST_SCHEMA_VERSION,
+    VERIFICATION_PLAN_FINGERPRINT_FORMAT,
+    VERIFICATION_PLAN_KIND,
+    VERIFICATION_PLAN_SCHEMA_VERSION,
     AtomicClaimBinding,
+    VerificationPlan,
+    VerificationPlannerIssue,
+    VerificationPlanningConsumption,
     VerificationPlanningBudget,
     VerificationPlanningError,
     VerificationPlanningRequest,
+    VerificationPlanStep,
+    VerificationPlanStepKind,
+    VerificationPlanTermination,
     compile_verification_plan,
+)
+from .execution import (
+    VERIFICATION_EXECUTION_REQUEST_FINGERPRINT_FORMAT,
+    VERIFICATION_EXECUTION_REQUEST_KIND,
+    VERIFICATION_EXECUTION_REQUEST_SCHEMA_VERSION,
+    VERIFIER_RUNTIME_REGISTRY_FINGERPRINT_FORMAT,
+    VERIFIER_RUNTIME_REGISTRY_KIND,
+    VERIFIER_RUNTIME_REGISTRY_SCHEMA_VERSION,
+    VerificationExecutionError,
+    VerificationExecutionLimits,
+    VerificationExecutionRequest,
+    VerifierRuntimeRegistry,
+    builtin_verifier_runtime_registry,
+    execute_verification_plan,
 )
 from .core import Action, Goal, Predicate, Proposal, StateEffect, VerificationContext, default_registry
 from .model import Evidence, VerificationIssue, VerificationReport, VerificationVerdict
@@ -940,6 +967,497 @@ def _verification_planning_request(
     return request
 
 
+def _execution_protocol_error(message: str) -> ProtocolError:
+    return ProtocolError("INVALID_VERIFICATION_EXECUTION_REQUEST", message)
+
+
+def _optional_string(value: Any, *, name: str) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise _execution_protocol_error(f"{name} must be a string or null")
+    return value
+
+
+def _verification_plan_step(data: Mapping[str, Any]) -> VerificationPlanStep:
+    _reject_unexpected_fields(
+        data,
+        {
+            "kind", "dependency_step_ids", "claim_id", "claim_kind",
+            "claim_fingerprint", "operator", "request_id",
+            "request_fingerprint", "request_kind", "requested_evidence_kinds",
+            "provider_id", "provider_version", "provider_capability_fingerprint",
+            "verifier_id", "verifier_version", "verifier_capability_fingerprint",
+            "fingerprint", "step_id",
+        },
+        code="INVALID_VERIFICATION_EXECUTION_REQUEST",
+        noun="verification plan step",
+    )
+    try:
+        raw_operator = data.get("operator")
+        step = VerificationPlanStep(
+            kind=VerificationPlanStepKind(data.get("kind")),
+            dependency_step_ids=_string_array(
+                data.get("dependency_step_ids", ()),
+                "dependency_step_ids",
+            ),
+            claim_id=_optional_string(data.get("claim_id"), name="claim_id"),
+            claim_kind=_optional_string(data.get("claim_kind"), name="claim_kind"),
+            claim_fingerprint=_optional_string(
+                data.get("claim_fingerprint"),
+                name="claim_fingerprint",
+            ),
+            operator=(
+                None if raw_operator is None else ClaimOperator(raw_operator)
+            ),
+            request_id=_optional_string(data.get("request_id"), name="request_id"),
+            request_fingerprint=_optional_string(
+                data.get("request_fingerprint"),
+                name="request_fingerprint",
+            ),
+            request_kind=_optional_string(
+                data.get("request_kind"),
+                name="request_kind",
+            ),
+            requested_evidence_kinds=_string_array(
+                data.get("requested_evidence_kinds", ()),
+                "requested_evidence_kinds",
+            ),
+            provider_id=_optional_string(
+                data.get("provider_id"),
+                name="provider_id",
+            ),
+            provider_version=_optional_string(
+                data.get("provider_version"),
+                name="provider_version",
+            ),
+            provider_capability_fingerprint=_optional_string(
+                data.get("provider_capability_fingerprint"),
+                name="provider_capability_fingerprint",
+            ),
+            verifier_id=_optional_string(
+                data.get("verifier_id"),
+                name="verifier_id",
+            ),
+            verifier_version=_optional_string(
+                data.get("verifier_version"),
+                name="verifier_version",
+            ),
+            verifier_capability_fingerprint=_optional_string(
+                data.get("verifier_capability_fingerprint"),
+                name="verifier_capability_fingerprint",
+            ),
+        )
+    except (ProtocolError, VerificationPlanningError, TypeError, ValueError) as exc:
+        if isinstance(exc, ProtocolError):
+            raise _execution_protocol_error(exc.message) from exc
+        raise _execution_protocol_error(str(exc)) from exc
+    if data.get("fingerprint") != step.fingerprint:
+        raise _execution_protocol_error(
+            "verification plan step fingerprint does not match canonical content"
+        )
+    if data.get("step_id") != step.step_id:
+        raise _execution_protocol_error(
+            "verification plan step_id does not match canonical content"
+        )
+    return step
+
+
+def _verification_plan(data: Mapping[str, Any]) -> VerificationPlan:
+    _reject_unexpected_fields(
+        data,
+        {
+            "schema_version", "kind", "fingerprint_format", "fingerprint",
+            "request_fingerprint", "claim_graph_fingerprint",
+            "verifier_capability_registry_fingerprint",
+            "evidence_provider_capability_registry_fingerprint", "budget",
+            "consumption", "termination", "steps", "issues",
+        },
+        code="INVALID_VERIFICATION_EXECUTION_REQUEST",
+        noun="verification plan",
+    )
+    if data.get("schema_version") != VERIFICATION_PLAN_SCHEMA_VERSION:
+        raise _execution_protocol_error(
+            "unsupported verification plan schema_version"
+        )
+    if data.get("kind") != VERIFICATION_PLAN_KIND:
+        raise _execution_protocol_error("unsupported verification plan kind")
+    if data.get("fingerprint_format") != VERIFICATION_PLAN_FINGERPRINT_FORMAT:
+        raise _execution_protocol_error(
+            "unsupported verification plan fingerprint format"
+        )
+    consumption_data = _require_mapping(
+        data.get("consumption"),
+        "verification plan consumption",
+    )
+    _reject_unexpected_fields(
+        consumption_data,
+        {
+            "atomic_claims", "composite_claims", "steps", "requests",
+            "dependency_edges", "requests_per_claim", "depth",
+        },
+        code="INVALID_VERIFICATION_EXECUTION_REQUEST",
+        noun="verification plan consumption",
+    )
+    steps_data = data.get("steps")
+    issues_data = data.get("issues")
+    if not isinstance(steps_data, (list, tuple)):
+        raise _execution_protocol_error("verification plan steps must be an array")
+    if not isinstance(issues_data, (list, tuple)):
+        raise _execution_protocol_error("verification plan issues must be an array")
+    try:
+        issues: list[VerificationPlannerIssue] = []
+        for item in issues_data:
+            issue_data = _require_mapping(item, "verification planner issue")
+            _reject_unexpected_fields(
+                issue_data,
+                {"code", "claim_id", "request_id", "details"},
+                code="INVALID_VERIFICATION_EXECUTION_REQUEST",
+                noun="verification planner issue",
+            )
+            issues.append(VerificationPlannerIssue(
+                code=issue_data.get("code"),
+                claim_id=_optional_string(
+                    issue_data.get("claim_id"),
+                    name="issue claim_id",
+                ),
+                request_id=_optional_string(
+                    issue_data.get("request_id"),
+                    name="issue request_id",
+                ),
+                details=decode_markers(dict(_require_mapping(
+                    issue_data.get("details", {}),
+                    "verification planner issue details",
+                ))),
+            ))
+        plan = VerificationPlan(
+            request_fingerprint=data.get("request_fingerprint"),
+            claim_graph_fingerprint=data.get("claim_graph_fingerprint"),
+            verifier_capability_registry_fingerprint=data.get(
+                "verifier_capability_registry_fingerprint"
+            ),
+            evidence_provider_capability_registry_fingerprint=data.get(
+                "evidence_provider_capability_registry_fingerprint"
+            ),
+            budget=_planning_budget(_require_mapping(data.get("budget"), "budget")),
+            consumption=VerificationPlanningConsumption(
+                atomic_claims=consumption_data.get("atomic_claims"),
+                composite_claims=consumption_data.get("composite_claims"),
+                steps=consumption_data.get("steps"),
+                requests=consumption_data.get("requests"),
+                dependency_edges=consumption_data.get("dependency_edges"),
+                requests_per_claim=consumption_data.get("requests_per_claim"),
+                depth=consumption_data.get("depth"),
+            ),
+            termination=VerificationPlanTermination(data.get("termination")),
+            steps=tuple(
+                _verification_plan_step(_require_mapping(item, "verification plan step"))
+                for item in steps_data
+            ),
+            issues=tuple(issues),
+            schema_version=data.get("schema_version"),
+            kind=data.get("kind"),
+            fingerprint_format=data.get("fingerprint_format"),
+        )
+    except ProtocolError:
+        raise
+    except (VerificationPlanningError, TypeError, ValueError) as exc:
+        raise _execution_protocol_error(str(exc)) from exc
+    if data.get("fingerprint") != plan.fingerprint:
+        raise _execution_protocol_error(
+            "verification plan fingerprint does not match canonical content"
+        )
+    return plan
+
+
+def _runtime_keys(value: Any, *, noun: str) -> tuple[tuple[str, str], ...]:
+    if not isinstance(value, (list, tuple)):
+        raise _execution_protocol_error(f"{noun} runtime_keys must be an array")
+    keys: list[tuple[str, str]] = []
+    for item in value:
+        if (
+            not isinstance(item, (list, tuple))
+            or len(item) != 2
+            or not all(isinstance(part, str) and part for part in item)
+        ):
+            raise _execution_protocol_error(
+                f"{noun} runtime_keys must contain [id, version] pairs"
+            )
+        keys.append((item[0], item[1]))
+    if len(set(keys)) != len(keys):
+        raise _execution_protocol_error(f"{noun} runtime_keys contain duplicates")
+    return tuple(keys)
+
+
+def _verifier_runtime_registry(
+    data: Mapping[str, Any],
+    supplied: VerifierRuntimeRegistry | None,
+) -> VerifierRuntimeRegistry:
+    _reject_unexpected_fields(
+        data,
+        {
+            "schema_version", "kind", "fingerprint_format", "fingerprint",
+            "capability_registry_fingerprint", "runtime_keys",
+            "capability_registry",
+        },
+        code="INVALID_VERIFICATION_EXECUTION_REQUEST",
+        noun="verifier runtime registry",
+    )
+    if data.get("schema_version") != VERIFIER_RUNTIME_REGISTRY_SCHEMA_VERSION:
+        raise _execution_protocol_error(
+            "unsupported verifier runtime registry schema_version"
+        )
+    if data.get("kind") != VERIFIER_RUNTIME_REGISTRY_KIND:
+        raise _execution_protocol_error("unsupported verifier runtime registry kind")
+    if data.get("fingerprint_format") != VERIFIER_RUNTIME_REGISTRY_FINGERPRINT_FORMAT:
+        raise _execution_protocol_error(
+            "unsupported verifier runtime registry fingerprint format"
+        )
+    try:
+        capability_registry = _verifier_capability_registry(_require_mapping(
+            data.get("capability_registry"),
+            "verifier capability registry",
+        ))
+    except ProtocolError as exc:
+        raise _execution_protocol_error(exc.message) from exc
+    registry = (
+        builtin_verifier_runtime_registry(capability_registry)
+        if supplied is None
+        else supplied
+    )
+    if type(registry) is not VerifierRuntimeRegistry:
+        raise _execution_protocol_error(
+            "verifier_runtime_registry must be an exact VerifierRuntimeRegistry"
+        )
+    expected_keys = _runtime_keys(
+        data.get("runtime_keys"),
+        noun="verifier runtime registry",
+    )
+    if registry.capability_registry.to_dict() != capability_registry.to_dict():
+        raise _execution_protocol_error(
+            "verifier runtime capability registry does not match payload"
+        )
+    if expected_keys != registry.runtime_keys:
+        raise _execution_protocol_error(
+            "verifier runtime keys do not match exact runtime registry"
+        )
+    if data.get("capability_registry_fingerprint") != capability_registry.fingerprint:
+        raise _execution_protocol_error(
+            "verifier runtime capability fingerprint does not match registry"
+        )
+    if data.get("fingerprint") != registry.fingerprint:
+        raise _execution_protocol_error(
+            "verifier runtime registry fingerprint does not match exact registry"
+        )
+    return registry
+
+
+def _provider_runtime_registry(
+    data: Mapping[str, Any],
+    supplied: EvidenceProviderRuntimeRegistry | None,
+) -> EvidenceProviderRuntimeRegistry:
+    _reject_unexpected_fields(
+        data,
+        {
+            "schema_version", "kind", "fingerprint_format", "fingerprint",
+            "capability_registry_fingerprint", "runtime_keys",
+            "capability_registry",
+        },
+        code="INVALID_VERIFICATION_EXECUTION_REQUEST",
+        noun="evidence provider runtime registry",
+    )
+    if data.get("schema_version") != EVIDENCE_PROVIDER_RUNTIME_REGISTRY_SCHEMA_VERSION:
+        raise _execution_protocol_error(
+            "unsupported evidence provider runtime registry schema_version"
+        )
+    if data.get("kind") != EVIDENCE_PROVIDER_RUNTIME_REGISTRY_KIND:
+        raise _execution_protocol_error(
+            "unsupported evidence provider runtime registry kind"
+        )
+    if (
+        data.get("fingerprint_format")
+        != EVIDENCE_PROVIDER_RUNTIME_REGISTRY_FINGERPRINT_FORMAT
+    ):
+        raise _execution_protocol_error(
+            "unsupported evidence provider runtime registry fingerprint format"
+        )
+    try:
+        capability_registry = _provider_capability_registry(_require_mapping(
+            data.get("capability_registry"),
+            "evidence provider capability registry",
+        ))
+    except ProtocolError as exc:
+        raise _execution_protocol_error(exc.message) from exc
+    registry = (
+        EvidenceProviderRuntimeRegistry(capability_registry, {})
+        if supplied is None
+        else supplied
+    )
+    if type(registry) is not EvidenceProviderRuntimeRegistry:
+        raise _execution_protocol_error(
+            "evidence_provider_runtime_registry must be an exact EvidenceProviderRuntimeRegistry"
+        )
+    expected_keys = _runtime_keys(
+        data.get("runtime_keys"),
+        noun="evidence provider runtime registry",
+    )
+    if registry.capability_registry.to_dict() != capability_registry.to_dict():
+        raise _execution_protocol_error(
+            "provider runtime capability registry does not match payload"
+        )
+    if expected_keys != registry.runtime_keys:
+        raise _execution_protocol_error(
+            "provider runtime keys do not match exact runtime registry"
+        )
+    if data.get("capability_registry_fingerprint") != capability_registry.fingerprint:
+        raise _execution_protocol_error(
+            "provider runtime capability fingerprint does not match registry"
+        )
+    if data.get("fingerprint") != registry.fingerprint:
+        raise _execution_protocol_error(
+            "provider runtime registry fingerprint does not match exact registry"
+        )
+    return registry
+
+
+def _execution_limits(data: Mapping[str, Any]) -> VerificationExecutionLimits:
+    allowed = {
+        "max_steps", "max_acquisitions", "max_verifier_invocations",
+        "max_compositions", "max_evidence_records", "max_evidence_bytes",
+    }
+    _reject_unexpected_fields(
+        data,
+        allowed,
+        code="INVALID_VERIFICATION_EXECUTION_REQUEST",
+        noun="verification execution limits",
+    )
+    try:
+        return VerificationExecutionLimits(**{
+            key: data.get(key) for key in allowed
+        })
+    except VerificationExecutionError as exc:
+        raise _execution_protocol_error(str(exc)) from exc
+
+
+def _verification_execution_request(
+    data: Mapping[str, Any],
+    *,
+    verifier_runtime_registry: VerifierRuntimeRegistry | None,
+    evidence_provider_runtime_registry: EvidenceProviderRuntimeRegistry | None,
+) -> VerificationExecutionRequest:
+    _reject_unexpected_fields(
+        data,
+        {
+            "schema_version", "kind", "fingerprint_format", "fingerprint",
+            "plan", "plan_fingerprint", "claim_graph",
+            "claim_graph_fingerprint", "roots", "verifier_runtime_registry",
+            "verifier_capability_registry_fingerprint",
+            "evidence_provider_runtime_registry",
+            "evidence_provider_capability_registry_fingerprint",
+            "evidence_requests", "limits", "correlation_id",
+        },
+        code="INVALID_VERIFICATION_EXECUTION_REQUEST",
+        noun="verification execution request",
+    )
+    if data.get("schema_version") != VERIFICATION_EXECUTION_REQUEST_SCHEMA_VERSION:
+        raise _execution_protocol_error(
+            "unsupported verification execution request schema_version"
+        )
+    if data.get("kind") != VERIFICATION_EXECUTION_REQUEST_KIND:
+        raise _execution_protocol_error(
+            "unsupported verification execution request kind"
+        )
+    if (
+        data.get("fingerprint_format")
+        != VERIFICATION_EXECUTION_REQUEST_FINGERPRINT_FORMAT
+    ):
+        raise _execution_protocol_error(
+            "unsupported verification execution request fingerprint format"
+        )
+    requests_data = data.get("evidence_requests")
+    if not isinstance(requests_data, (list, tuple)):
+        raise _execution_protocol_error("evidence_requests must be an array")
+    exact_requests: dict[tuple[str, str], EvidenceRequest] = {}
+    for item in requests_data:
+        entry = _require_mapping(item, "exact evidence request")
+        _reject_unexpected_fields(
+            entry,
+            {"request_id", "request_fingerprint", "request"},
+            code="INVALID_VERIFICATION_EXECUTION_REQUEST",
+            noun="exact evidence request",
+        )
+        request_data = _require_mapping(entry.get("request"), "evidence request")
+        if not isinstance(request_data.get("fingerprint"), str):
+            raise _execution_protocol_error(
+                "nested evidence request fingerprint is required"
+            )
+        try:
+            parsed = _evidence_provider_request(request_data)
+        except ProtocolError as exc:
+            raise _execution_protocol_error(exc.message) from exc
+        key = (entry.get("request_id"), entry.get("request_fingerprint"))
+        if key != (parsed.request_id, parsed.fingerprint):
+            raise _execution_protocol_error(
+                "exact evidence request key does not match nested request"
+            )
+        if key in exact_requests:
+            raise _execution_protocol_error(
+                "duplicate exact evidence request identity"
+            )
+        exact_requests[key] = parsed
+    correlation_id = data.get("correlation_id")
+    if correlation_id is not None and not isinstance(correlation_id, str):
+        raise _execution_protocol_error("correlation_id must be a string or null")
+    try:
+        request = VerificationExecutionRequest(
+            schema_version=data.get("schema_version"),
+            kind=data.get("kind"),
+            fingerprint_format=data.get("fingerprint_format"),
+            plan=_verification_plan(_require_mapping(data.get("plan"), "plan")),
+            plan_fingerprint=data.get("plan_fingerprint"),
+            claim_graph=_strict_claim_graph(_require_mapping(
+                data.get("claim_graph"),
+                "claim_graph",
+            )),
+            claim_graph_fingerprint=data.get("claim_graph_fingerprint"),
+            roots=_string_array(data.get("roots"), "roots"),
+            verifier_runtime_registry=_verifier_runtime_registry(
+                _require_mapping(
+                    data.get("verifier_runtime_registry"),
+                    "verifier_runtime_registry",
+                ),
+                verifier_runtime_registry,
+            ),
+            verifier_capability_registry_fingerprint=data.get(
+                "verifier_capability_registry_fingerprint"
+            ),
+            evidence_provider_runtime_registry=_provider_runtime_registry(
+                _require_mapping(
+                    data.get("evidence_provider_runtime_registry"),
+                    "evidence_provider_runtime_registry",
+                ),
+                evidence_provider_runtime_registry,
+            ),
+            evidence_provider_capability_registry_fingerprint=data.get(
+                "evidence_provider_capability_registry_fingerprint"
+            ),
+            evidence_requests=exact_requests,
+            limits=_execution_limits(_require_mapping(data.get("limits"), "limits")),
+            correlation_id=correlation_id,
+        )
+    except ProtocolError as exc:
+        if exc.code == "INVALID_VERIFICATION_EXECUTION_REQUEST":
+            raise
+        raise _execution_protocol_error(exc.message) from exc
+    except VerificationExecutionError as exc:
+        raise _execution_protocol_error(str(exc)) from exc
+    if data.get("fingerprint") != request.fingerprint:
+        raise _execution_protocol_error(
+            "verification execution request fingerprint does not match canonical content"
+        )
+    return request
+
+
 def _session_budget(data: Mapping[str, Any]) -> SessionBudget:
     try:
         return SessionBudget(
@@ -1006,7 +1524,12 @@ def _data_flow_inputs(
     return claim, traversal
 
 
-def handle_request(request: Mapping[str, Any]) -> dict[str, Any]:
+def handle_request(
+    request: Mapping[str, Any],
+    *,
+    verifier_runtime_registry: VerifierRuntimeRegistry | None = None,
+    evidence_provider_runtime_registry: EvidenceProviderRuntimeRegistry | None = None,
+) -> dict[str, Any]:
     if request.get("schema_version") != SCHEMA_VERSION:
         raise ProtocolError(
             "UNSUPPORTED_SCHEMA_VERSION",
@@ -1014,6 +1537,38 @@ def handle_request(request: Mapping[str, Any]) -> dict[str, Any]:
         )
     op = str(request.get("op") or "")
     payload = _require_mapping(request.get("payload", {}), "payload")
+
+    if op == "execute_verification_plan":
+        unexpected_request_fields = set(request) - {
+            "schema_version", "op", "payload",
+        }
+        if unexpected_request_fields:
+            raise ProtocolError(
+                "INVALID_VERIFICATION_EXECUTION_REQUEST",
+                "unsupported protocol request fields: "
+                + ", ".join(sorted(unexpected_request_fields)),
+            )
+        try:
+            execution_request = _verification_execution_request(
+                payload,
+                verifier_runtime_registry=verifier_runtime_registry,
+                evidence_provider_runtime_registry=evidence_provider_runtime_registry,
+            )
+        except ProtocolError as exc:
+            if exc.code == "INVALID_VERIFICATION_EXECUTION_REQUEST":
+                raise
+            raise ProtocolError(
+                "INVALID_VERIFICATION_EXECUTION_REQUEST",
+                exc.message,
+            ) from exc
+        try:
+            result = execute_verification_plan(execution_request)
+        except VerificationExecutionError as exc:
+            raise ProtocolError(
+                "INVALID_VERIFICATION_EXECUTION_REQUEST",
+                str(exc),
+            ) from exc
+        return envelope("verification_execution_result", result.to_dict())
 
     if op == "compile_verification_plan":
         unexpected_request_fields = set(request) - {
@@ -1220,8 +1775,17 @@ def handle_request(request: Mapping[str, Any]) -> dict[str, Any]:
     raise ProtocolError("UNKNOWN_OPERATION", f"unsupported operation: {op!r}")
 
 
-def safe_handle_request(request: Mapping[str, Any]) -> dict[str, Any]:
+def safe_handle_request(
+    request: Mapping[str, Any],
+    *,
+    verifier_runtime_registry: VerifierRuntimeRegistry | None = None,
+    evidence_provider_runtime_registry: EvidenceProviderRuntimeRegistry | None = None,
+) -> dict[str, Any]:
     try:
-        return handle_request(request)
+        return handle_request(
+            request,
+            verifier_runtime_registry=verifier_runtime_registry,
+            evidence_provider_runtime_registry=evidence_provider_runtime_registry,
+        )
     except ProtocolError as exc:
         return envelope("protocol_error", {"code": exc.code, "message": exc.message})

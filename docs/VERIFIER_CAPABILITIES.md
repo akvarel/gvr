@@ -6,10 +6,11 @@ It is metadata about a verifier contract. It does not run the verifier, acquire 
 
 ## Two different registries
 
-GVR has four intentionally separate registry types:
+GVR has five intentionally separate registry types:
 
 - `VerifierRegistry` in `core.py` contains executable goal/action verifier objects and combines their reports.
 - `VerifierCapabilityRegistry` in `capabilities.py` contains immutable descriptions of verifier contracts.
+- `VerifierRuntimeRegistry` in `execution.py` separately binds exact verifier runtime objects to one exact capability registry.
 - `EvidenceProviderCapabilityRegistry` in `evidence_providers.py` contains immutable, fingerprinted evidence acquisition descriptors only.
 - `EvidenceProviderRuntimeRegistry` in `evidence_providers.py` separately binds exact runtime providers to one capability registry and performs validated acquisition.
 
@@ -130,6 +131,12 @@ The planner checks all three identity levels before compiling a `VERIFY_ATOMIC_C
 
 Planning never queries for a preferred verifier and never falls back to another version. A missing or mismatched exact capability produces stable `UNSUPPORTED_CLAIM` planning termination with no executable steps.
 
+## Use by the verification executor
+
+`VerifierRuntimeRegistry` binds exact `(verifier_id, version)` keys to runtime objects and fingerprints the exact capability-registry identity plus exact runtime keys. Registration and every invocation recheck the runtime ID, version, exact capability, and callable `verify()` method.
+
+The executor accepts only the exact verifier step already present in the plan. `VerifierExecutionInput` contains the exact atomic claim, exact capability, reachable acquisition inputs and evidence only, and exact claim dependencies only. There is no ranking, version negotiation, fallback, or LLM selection. Exceptions and malformed reports become stable fail-closed `UNKNOWN` bundles. See [Verification execution](VERIFICATION_EXECUTION.md).
+
 ## Built-in snapshot
 
 `builtin_verifier_capability_registry()` returns the immutable schema-v1 snapshot shipped with GVR.
@@ -220,16 +227,16 @@ The operation parses serialized request, capability, and result objects, checks 
 
 ## Current limits
 
-The registry is descriptive and static in schema v1.
+The capability registry remains descriptive and static in schema v1. The separate runtime registry can execute exact caller-supplied bindings, but neither registry discovers or chooses alternatives.
 
-It does not yet:
+They do not:
 
 - load plugins dynamically;
-- negotiate provider availability;
+- negotiate provider or verifier availability;
 - rank or select verifiers;
-- acquire evidence;
+- broaden evidence or claim scope;
 - estimate numeric runtime cost;
 - authorize product side effects;
 - attest who produced a descriptor.
 
-The deterministic planner can validate caller-supplied exact selections and compile bounded work descriptions. It does not add ranking, discovery policy, acquisition, or execution to this registry.
+The deterministic planner validates caller-supplied exact selections and compiles bounded work descriptions. The deterministic executor runs only those exact steps and runtime keys. Neither layer adds ranking, discovery policy, fallback, product policy, or LLM authority.

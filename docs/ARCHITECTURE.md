@@ -17,44 +17,42 @@ This page shows how the current GVR pieces fit together.
         +-----------------------+
                    |
                    v
-       +-----------------------+
-       | verification planner  |
-       | validates exact       |
-       | bindings and budgets  |
-       +-----------------------+
+        +-----------------------+
+        | verification planner  |
+        | exact bindings, DAG,  |
+        | capability snapshots  |
+        +-----------------------+
+                   |
+                   v
+            VerificationPlan
                    |
                    v
         +-----------------------+
-        |       verifier        |
-        | clear rules for one   |
-        | kind of claim         |
+        | verification executor |
+        | exact runtimes,       |
+        | requests, and limits  |
         +-----------------------+
-                   ^
-                   |
-                evidence
-                   |
-       +-----------+-----------+
-       |                       |
-       v                       v
- direct structured data   evidence provider
-                           or adapter such as Graphify
-       |                       |
-       +-----------+-----------+
-                   |
-                   v
-          VerificationReport
-                   |
-                   v
-          VerificationBundle
-                   |
-                   v
-             ClaimLedger
-                   |
-                   v
-              ClaimGraph
-                   |
-                   v
-         VerificationSession
+             |             |
+             v             v
+    exact provider     exact verifier
+       runtime            runtime
+             |             ^
+             v             |
+ EvidenceProviderResult ---+
+                           |
+                 VerificationReport
+                           |
+                           v
+                 VerificationBundle
+                           |
+                           v
+                    ClaimLedger
+                           |
+                           v
+                    ClaimGraph
+                           |
+                           v
+                VerificationSession
 ```
 
 The important idea is separation.
@@ -86,7 +84,7 @@ The protocol layer:
 
 - checks request shape;
 - converts JSON into GVR data models;
-- calls the correct verifier or session composer;
+- calls the correct planner, executor, verifier, or session composer;
 - returns a machine-readable response;
 - returns a protocol error for malformed input.
 
@@ -99,6 +97,16 @@ The planner accepts a `ClaimGraph`, exact `AtomicClaimBinding` records, exact ve
 It validates exact IDs, versions, claim and request kinds, evidence-kind structure, source/snapshot classes, required evidence kinds, graph dependencies, and work limits. It then emits only `ACQUIRE_EVIDENCE`, `VERIFY_ATOMIC_CLAIM`, and `COMPOSE_CLAIM` steps in deterministic order.
 
 The planner invokes nothing. It has no runtime provider bindings and does not call verifiers, Graphify, a network, or the file system. Non-complete planning returns stable structured issues and no executable steps.
+
+## Verification executor layer
+
+The executor accepts one exact complete `VerificationPlan`, the exact `ClaimGraph`, exact request identities, selected session roots, exact verifier and provider runtime registries, and deterministic execution limits.
+
+Before invocation it reconstructs every nested fingerprinted contract, recompiles the expected plan, and checks exact DAG dependencies, step IDs, claim identities, capability identities, runtime keys, and request keys. A mismatch fails before any runtime call.
+
+`ACQUIRE_EVIDENCE` dispatches once through the exact `EvidenceProviderRuntimeRegistry`. `VERIFY_ATOMIC_CLAIM` receives only directly reachable evidence and exact claim dependencies. `COMPOSE_CLAIM` uses the existing session tri-state logic. Runtime exceptions, malformed artifacts, invalid prerequisites, and limit exhaustion materialize explicit lifecycle issues and preserve affected claims as `UNKNOWN`; no fallback, ranking, scope broadening, product policy, or LLM is present.
+
+See [Verification execution](VERIFICATION_EXECUTION.md) for the full contract.
 
 ## Verifier layer
 
@@ -153,11 +161,11 @@ An evidence provider is an acquisition contract, not a truth-producing verifier.
 
 `EvidenceRequest` names one exact provider ID and version, a request kind, requested evidence kinds, optional explicit source/snapshot classes, subject/spec, semantic scope, source/snapshot context, and bounds. Its semantic fingerprint excludes only the correlation request ID. `EvidenceProviderCapability` publishes exact request kinds, produced evidence kinds, source classes, and snapshot classes; empty class lists explicitly accept only unclassified requests. `EvidenceProviderResult` references the exact request fingerprint and carries exact provider identity, acquisition status, explicit fingerprinted coverage, deeply snapshotted evidence, stable code/category `EvidenceProviderIssue` diagnostics with no free text or verdict, and the capability fingerprint used for validation.
 
-The built-in schema-v1 `EvidenceProviderCapabilityRegistry` is honestly empty and purely descriptive. Its public request validator enforces exact source/snapshot class compatibility. `EvidenceProviderRuntimeRegistry` separately owns detached immutable runtime bindings and uses that validator before every invocation. It rechecks provider identity, converts only real execution exceptions to deterministic allowlisted secret-safe categories, and leaves malformed returned results as contract errors. Provider-to-verifier adapters expose structural evidence-kind facts without a generic sufficiency or truth field.
+The built-in schema-v1 `EvidenceProviderCapabilityRegistry` is honestly empty and purely descriptive. Its public request validator enforces exact source/snapshot class compatibility. `EvidenceProviderRuntimeRegistry` separately owns detached immutable runtime bindings, fingerprints the exact capability snapshot and registered runtime keys, and uses the validator before every invocation. It rechecks provider identity, converts only real execution exceptions to deterministic allowlisted secret-safe categories, and leaves malformed returned results as contract errors. Provider-to-verifier adapters expose structural evidence-kind facts without a generic sufficiency or truth field.
 
 The schema-v1 protocol exposes `describe_evidence_provider_capabilities` with optional `request_kind` and `evidence_kind` filters, and `validate_evidence_provider_result`, which parses serialized request, capability, and result payloads and returns either a normalized `evidence_provider_result` or a machine-readable protocol error.
 
-The schema-v1 `compile_verification_plan` operation separately parses exact claim, binding, request, registry, budget, and fingerprint artifacts and returns an immutable `verification_plan`. It does not dispatch through the runtime provider registry.
+The schema-v1 `compile_verification_plan` operation separately parses exact claim, binding, request, registry, budget, and fingerprint artifacts and returns an immutable `verification_plan`. It does not dispatch through the runtime provider registry. The schema-v1 `execute_verification_plan` operation accepts the resulting exact plan plus runtime registry descriptors, exact request identities, roots, and deterministic limits, then returns a `verification_execution_result`.
 
 ## VerificationReport
 
@@ -324,11 +332,10 @@ A product can use GVR truth, but product policy is a separate layer.
 
 GVR is under active development.
 
-Planned runtime layers include ideas such as:
+Potential later layers include:
 
-- evidence provider protocol;
-- deterministic verification planning;
-- automatic evidence acquisition;
-- counterexample and falsification support.
+- deterministic counterexample and falsification support;
+- separately governed plugin loading and attestation;
+- additional built-in verifier and provider runtimes once their public contracts are stable.
 
-These should be treated as available only after they are merged into the integration branch and documented as current behavior.
+Automatic ranking, fallback, scope broadening, product policy, and LLM authority are not hidden future behavior of the executor. New capabilities should be treated as available only after they are merged and documented as current behavior.

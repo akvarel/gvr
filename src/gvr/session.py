@@ -720,6 +720,17 @@ class VerificationSession:
             if isinstance(node, CompositeClaim):
                 self._recompute_claim(node)
 
+    def compose_claim(self, claim_id: str) -> VerificationSnapshot | None:
+        """Compose one exact composite claim without traversing other plan steps."""
+
+        try:
+            node = self.graph.claim(claim_id)
+        except KeyError as exc:
+            raise VerificationSessionError(f"unknown claim {claim_id}") from exc
+        if not isinstance(node, CompositeClaim):
+            raise VerificationSessionError(f"claim {claim_id} is not composite")
+        return self._recompute_claim(node)
+
     def remove_evidence(self, evidence_id: str) -> None:
         self._ledger.remove_evidence(evidence_id)
 

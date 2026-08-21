@@ -323,6 +323,14 @@ class VerificationBundle:
             raise BundleValidationError(str(exc)) from exc
         object.__setattr__(self, "fingerprint", fingerprint)
 
+    def to_dict(self) -> dict[str, Any]:
+        value = _bundle_content(self)
+        value["fingerprint"] = self.fingerprint
+        return value
+
+    def export(self) -> dict[str, Any]:
+        return self.to_dict()
+
 
 def build_verification_bundle(
     report: VerificationReport,

@@ -29,7 +29,7 @@ An `AtomicClaimBinding` connects one exact atomic claim to:
 
 Every atomic claim has exactly one binding. Composite claims do not have bindings.
 
-Evidence request order is not semantic. Duplicate request IDs or duplicate request semantics inside one binding are rejected. Reusing the same exact request across different atomic claims is allowed so acquisition can be shared.
+Evidence request order is not semantic. Duplicate request IDs inside one binding are rejected. Reusing the same exact `(request_id, request_fingerprint)` across claims is allowed so acquisition can be shared. Requests with identical semantic fingerprints but different request IDs remain distinct executable requests, including when they belong to the same claim.
 
 ### `VerificationPlanningRequest`
 
@@ -238,3 +238,9 @@ The payload is the exact serialized `VerificationPlanningRequest`, including the
 The parser rejects unknown fields, malformed arrays or mappings, unsupported schema or kind values, duplicate bindings, conflicting request IDs, omitted required nested fingerprints, and every claimed fingerprint mismatch. A successful response has kind `verification_plan`.
 
 See [CLI and JSON protocol](CLI_AND_PROTOCOL.md) for the wire shape.
+
+## Execution boundary
+
+A complete plan can be passed to `execute_verification_plan` only through an exact `VerificationExecutionRequest`. The executor revalidates and deterministically recompiles the plan from the exact graph, request keys, capability registries, and plan budget before invoking any runtime.
+
+Planning still has no runtime behavior. Execution adds no discovery or repair policy: it runs the exact `ACQUIRE_EVIDENCE`, `VERIFY_ATOMIC_CLAIM`, and `COMPOSE_CLAIM` steps or fails closed. See [Verification execution](VERIFICATION_EXECUTION.md).

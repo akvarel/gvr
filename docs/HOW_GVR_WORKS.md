@@ -25,6 +25,16 @@ The planner can describe acquisition, atomic verification, and composition steps
 
 If an exact capability is missing, evidence structure does not match, required evidence is not requested, the graph is cyclic, or a budget is exceeded, planning fails closed before execution.
 
+## Optional execution step: run only the exact complete plan
+
+A caller may wrap that plan, the exact `ClaimGraph`, exact request identities, exact provider and verifier runtime registries, roots, and deterministic limits in a `VerificationExecutionRequest`.
+
+The executor first recompiles and compares the plan. It then runs each exact acquisition once, invokes each exact verifier with reachable evidence and dependencies only, builds `VerificationBundle` artifacts, and composes exact `AND`, `OR`, and `NOT` steps into a final `VerificationSession`.
+
+Identity mismatches fail before invocation. Provider or verifier exceptions, malformed results, conflicting evidence identities, invalid prerequisites, and deterministic limit exhaustion cannot become `PASS`; affected claims stay `UNKNOWN` with stable lifecycle issues. Correlation IDs, clocks, random values, and raw exception text are excluded from semantic fingerprints.
+
+See [Verification execution](VERIFICATION_EXECUTION.md).
+
 ## Step 2: GVR receives evidence
 
 A verifier needs evidence that matches the kind of claim.
@@ -200,3 +210,7 @@ Fail closed means:
 > When GVR cannot prove that a definitive result is safe, it does not turn the uncertainty into success.
 
 In practice this usually means returning `UNKNOWN` or rejecting malformed input.
+
+In the plan executor, an invalid provider result, verifier exception, unreachable evidence reference, runtime identity change, or blocked prerequisite produces a failed or blocked lifecycle step and an explicit `UNKNOWN` artifact rather than a fallback attempt.
+
+It never means "guess the missing field," "try a broader scope," "pick another runtime," or "ask an LLM."

@@ -61,7 +61,7 @@ The runtime `EvidenceProvider` protocol declares:
 - exact `capability`;
 - `acquire(request)`.
 
-`EvidenceProviderCapabilityRegistry` is a pure, immutable, fingerprinted descriptor registry. It never stores or executes runtime provider objects. Its public `validate_request(request)` method resolves the exact capability and applies the complete request compatibility contract. `EvidenceProviderRuntimeRegistry` separately binds exact `(provider_id, version)` keys to runtime providers and references one capability registry. Registration and every dispatch recheck the runtime provider ID, version, exact capability identity, and callable protocol. Runtime dispatch calls the public registry validator before invocation. There is no fallback to another provider or version.
+`EvidenceProviderCapabilityRegistry` is a pure, immutable, fingerprinted descriptor registry. It never stores or executes runtime provider objects. Its public `validate_request(request)` method resolves the exact capability and applies the complete request compatibility contract. `EvidenceProviderRuntimeRegistry` separately binds exact `(provider_id, version)` keys to runtime providers, references one capability registry, and fingerprints that capability-registry identity plus its exact runtime keys. Registration and every dispatch recheck the runtime provider ID, version, exact capability identity, and callable protocol. Runtime dispatch calls the public registry validator before invocation. There is no fallback to another provider or version.
 
 ## Validation
 
@@ -98,9 +98,17 @@ Before emitting an `ACQUIRE_EVIDENCE` step, the planner validates exact provider
 
 The provider request kind remains distinct from the verifier claim kind. The planner does not infer one from the other.
 
-Acquisition sharing uses only the exact canonical `EvidenceRequest.fingerprint`. The correlation request ID is retained on the acquisition step, but similar requests with different semantic fingerprints are never merged. Reusing one request ID with different semantics is rejected.
+Acquisition sharing uses the exact executable key `(request_id, request_fingerprint)`. Reusing that exact key across claims shares one plan step and one execution. Identical semantic request fingerprints under different request IDs remain separate steps and executions. Reusing one request ID with different semantics is rejected.
 
 The planner never calls `EvidenceProviderRuntimeRegistry.acquire`. It only describes possible acquisition work.
+
+## Use by the verification executor
+
+`VerificationExecutionRequest` carries every exact request in a mapping keyed by `(request_id, request_fingerprint)` and carries the exact provider runtime registry plus its capability-registry fingerprint.
+
+For each `ACQUIRE_EVIDENCE` step, the executor calls `EvidenceProviderRuntimeRegistry.acquire(request, fail_closed=True)` exactly once, then reconstructs and validates the result again. A malformed returned result fails the acquisition step; an actual provider execution exception remains the existing deterministic `UNAVAILABLE` result. Downstream verifiers receive only results and evidence reachable from their exact dependency step IDs.
+
+Unavailable, unsupported, missing-required-kind, malformed, or blocked acquisitions cannot be upgraded to `PASS`. The verifier is not called for that invalid prerequisite, and the executor records an explicit `UNKNOWN` bundle. See [Verification execution](VERIFICATION_EXECUTION.md).
 
 Graphify materialized evidence kinds remain the stable data-flow evidence surface:
 
@@ -118,6 +126,7 @@ gvr.evidence_coverage.ieee754-json.v1
 gvr.evidence_provider_result.ieee754-json.v1
 gvr.evidence_provider_capability.ieee754-json.v1
 gvr.evidence_provider_capability_registry.ieee754-json.v1
+gvr.evidence_provider_runtime_registry.ieee754-json.v1
 ```
 
 These are intentionally distinct from verifier capability and verification bundle domains. Mapping key order, request/evidence kind order, evidence record order, issue order, and capability registry input order do not affect semantic identity where those collections are sets by contract.

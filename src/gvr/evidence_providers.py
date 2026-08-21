@@ -27,6 +27,11 @@ EVIDENCE_PROVIDER_CAPABILITY_FINGERPRINT_FORMAT = "gvr.evidence_provider_capabil
 EVIDENCE_PROVIDER_CAPABILITY_REGISTRY_SCHEMA_VERSION = 1
 EVIDENCE_PROVIDER_CAPABILITY_REGISTRY_KIND = "gvr.evidence_provider_capability_registry"
 EVIDENCE_PROVIDER_CAPABILITY_REGISTRY_FINGERPRINT_FORMAT = "gvr.evidence_provider_capability_registry.ieee754-json.v1"
+EVIDENCE_PROVIDER_RUNTIME_REGISTRY_SCHEMA_VERSION = 1
+EVIDENCE_PROVIDER_RUNTIME_REGISTRY_KIND = "gvr.evidence_provider_runtime_registry"
+EVIDENCE_PROVIDER_RUNTIME_REGISTRY_FINGERPRINT_FORMAT = (
+    "gvr.evidence_provider_runtime_registry.ieee754-json.v1"
+)
 
 
 class EvidenceProviderError(ValueError):
@@ -983,6 +988,7 @@ def _execution_failure_category(error: BaseException) -> EvidenceProviderIssueCa
 class EvidenceProviderRuntimeRegistry:
     capability_registry: EvidenceProviderCapabilityRegistry
     runtime_providers: Mapping[tuple[str, str], EvidenceProvider]
+    fingerprint: str = field(init=False)
     _runtime_by_key: Mapping[tuple[str, str], EvidenceProvider] = field(
         init=False,
         repr=False,
@@ -1014,6 +1020,65 @@ class EvidenceProviderRuntimeRegistry:
         runtime_proxy = MappingProxyType(dict(runtime))
         object.__setattr__(self, "runtime_providers", runtime_proxy)
         object.__setattr__(self, "_runtime_by_key", runtime_proxy)
+        object.__setattr__(
+            self,
+            "fingerprint",
+            _fingerprint(
+                self.semantic_definition(),
+                fingerprint_format=EVIDENCE_PROVIDER_RUNTIME_REGISTRY_FINGERPRINT_FORMAT,
+            ),
+        )
+
+    @property
+    def runtime_keys(self) -> tuple[tuple[str, str], ...]:
+        return tuple(
+            sorted(
+                self._runtime_by_key,
+                key=lambda item: (
+                    canonical_utf8_key(item[0], path="provider_id"),
+                    canonical_utf8_key(item[1], path="version"),
+                ),
+            )
+        )
+
+    def semantic_definition(self) -> dict[str, Any]:
+        return {
+            "schema_version": EVIDENCE_PROVIDER_RUNTIME_REGISTRY_SCHEMA_VERSION,
+            "kind": EVIDENCE_PROVIDER_RUNTIME_REGISTRY_KIND,
+            "capability_registry_fingerprint": self.capability_registry.fingerprint,
+            "runtime_keys": self.runtime_keys,
+        }
+
+    def to_dict(self) -> dict[str, Any]:
+        value = _export_value(self.semantic_definition())
+        value.update({
+            "fingerprint_format": EVIDENCE_PROVIDER_RUNTIME_REGISTRY_FINGERPRINT_FORMAT,
+            "fingerprint": self.fingerprint,
+            "capability_registry": self.capability_registry.to_dict(),
+        })
+        return value
+
+    def export(self) -> dict[str, Any]:
+        return self.to_dict()
+
+    def validate_runtime(
+        self,
+        provider_id: str,
+        version: str,
+    ) -> EvidenceProvider:
+        key = (
+            _strict_identifier(provider_id, name="provider_id"),
+            _strict_identifier(version, name="version"),
+        )
+        capability = self.capability_registry.lookup(*key)
+        try:
+            provider = self._runtime_by_key[key]
+        except KeyError as exc:
+            raise UnknownEvidenceProviderError(
+                f"no runtime evidence provider for {key[0]} version {key[1]}"
+            ) from exc
+        _validate_runtime_provider(provider, key, capability)
+        return provider
 
     def acquire(
         self,
@@ -1023,12 +1088,7 @@ class EvidenceProviderRuntimeRegistry:
     ) -> EvidenceProviderResult:
         capability = self.capability_registry.validate_request(request)
         key = (request.provider_id, request.provider_version)
-        try:
-            provider = self._runtime_by_key[key]
-        except KeyError as exc:
-            raise UnknownEvidenceProviderError(
-                f"no runtime evidence provider for {key[0]} version {key[1]}"
-            ) from exc
+        provider = self.validate_runtime(*key)
 
         # Runtime provider objects can be mutable. Recheck the full identity
         # immediately before every invocation instead of trusting registration.

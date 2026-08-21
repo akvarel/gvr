@@ -131,8 +131,8 @@ The important part is that the final result comes from an explicit check, not fr
 
 ## What GVR is trying to become
 
-The long-term goal is a general verification runtime that can combine many small verifiers.
+GVR now includes deterministic planning and exact plan execution for combining many small verifiers.
 
-A complex answer can be split into smaller claims. Different verifiers can check different claims. GVR can then keep track of what is proven, what is false, what is unknown, and what became stale because evidence changed.
+A complex answer can be split into smaller claims. Different exact runtime verifiers can check different claims. The executor runs only the caller-supplied complete plan, gives each verifier reachable evidence and dependencies only, and builds reports, bundles, lifecycle records, and a final session without fallback or product policy. GVR can then keep track of what is proven, what is false, what is unknown, and what became stale because evidence changed.
 
 GVR is designed so this core can stay open source while products can build their own private policy on top of it.

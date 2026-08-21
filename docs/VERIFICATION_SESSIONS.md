@@ -190,12 +190,21 @@ Independent bundles can arrive in a different order without changing the final s
 
 Internal ClaimLedger mutation clocks are audit data. They are not used as semantic session identity.
 
+## Use by the verification executor
+
+The plan executor creates one `VerificationSession` for the exact request graph and roots. Each valid atomic verifier report becomes a `VerificationBundle` recorded through the public session API. Each exact `COMPOSE_CLAIM` step calls `compose_claim(claim_id)` once, so the executor does not recompute future or unrelated composite steps.
+
+Runtime or prerequisite failures materialize explicit `UNKNOWN` atomic bundles before downstream composition. This ensures a later `PASS` cannot bypass an invalid prerequisite while preserving the existing session freshness and tri-state rules.
+
+The execution-result fingerprint includes the final session fingerprint but excludes the optional nonsemantic correlation ID. See [Verification execution](VERIFICATION_EXECUTION.md).
+
 ## JSON protocol
 
-Schema version 1 exposes:
+Schema version 1 exposes both direct composition and exact plan execution:
 
 ```text
 compose_verification_session
+execute_verification_plan
 ```
 
 The request contains:
@@ -215,7 +224,7 @@ The response contains:
 - termination reason;
 - session fingerprint.
 
-Malformed graphs or bundles fail closed as protocol errors.
+`compose_verification_session` accepts already materialized bundles. `execute_verification_plan` creates those bundles and the final session from one exact complete plan and exact runtime registries. Malformed graphs, bundles, execution identities, or runtime descriptors fail closed as protocol errors.
 
 ## One important boundary
 

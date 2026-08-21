@@ -212,3 +212,18 @@ C depends on A and B
 If A or B becomes stale, C must not remain trusted.
 
 This is called **transitive stale propagation**.
+
+## Verification execution
+
+A `VerificationPlan` is only a deterministic work description. A `VerificationExecutionRequest` binds that exact complete plan to:
+
+- the exact `ClaimGraph` and roots;
+- exact provider and verifier runtime registries;
+- exact evidence requests keyed by `(request_id, request_fingerprint)`;
+- deterministic execution limits.
+
+The executor revalidates and recompiles the plan before invocation. It then records provider results, verifier reports, bundles, step lifecycle, issues, counters, termination, and a final `VerificationSession` in one `VerificationExecutionResult`.
+
+Execution identity is semantic. It includes exact artifact fingerprints and excludes correlation IDs, clocks, random values, runtime object addresses, and raw exception text.
+
+Execution state is not product policy. `COMPLETE`, `FAILED_CLOSED`, and `LIMIT_EXHAUSTED` describe how the plan ran; they do not authorize a deployment, deletion, payment, or another side effect.

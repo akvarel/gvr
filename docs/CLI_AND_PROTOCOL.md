@@ -196,6 +196,66 @@ The wire parser is strict. It rejects unknown fields at every new planning layer
 
 See [Verification planning](VERIFICATION_PLANNING.md) for sharing, ordering, compatibility, budget, issue, and identity rules.
 
+### `execute_verification_plan`
+
+Runs one exact complete `VerificationPlan` against exact provider and verifier runtime registries. It does not discover, rank, repair, broaden, or replace a step.
+
+The payload is the exact `VerificationExecutionRequest.to_dict()` shape. The following is an abbreviated field map; every nested plan, graph, capability registry, runtime registry, and evidence request must still include its complete `to_dict()` content and required schema, kind, format, and fingerprint fields:
+
+```json
+{
+  "schema_version": 1,
+  "kind": "gvr.verification_execution_request",
+  "fingerprint_format": "gvr.verification_execution_request.ieee754-json.v1",
+  "fingerprint": "...",
+  "plan": {"kind": "gvr.verification_plan", "fingerprint": "..."},
+  "plan_fingerprint": "...",
+  "claim_graph": {"kind": "gvr.claim_graph", "fingerprint": "..."},
+  "claim_graph_fingerprint": "...",
+  "roots": ["root-claim"],
+  "verifier_runtime_registry": {
+    "kind": "gvr.verifier_runtime_registry",
+    "capability_registry_fingerprint": "...",
+    "runtime_keys": [["verifier.id", "1"]],
+    "fingerprint": "...",
+    "capability_registry": {}
+  },
+  "verifier_capability_registry_fingerprint": "...",
+  "evidence_provider_runtime_registry": {
+    "kind": "gvr.evidence_provider_runtime_registry",
+    "capability_registry_fingerprint": "...",
+    "runtime_keys": [["provider.id", "1"]],
+    "fingerprint": "...",
+    "capability_registry": {}
+  },
+  "evidence_provider_capability_registry_fingerprint": "...",
+  "evidence_requests": [
+    {
+      "request_id": "request-A",
+      "request_fingerprint": "...",
+      "request": {"kind": "gvr.evidence_request", "fingerprint": "..."}
+    }
+  ],
+  "limits": {
+    "max_steps": null,
+    "max_acquisitions": null,
+    "max_verifier_invocations": null,
+    "max_compositions": null,
+    "max_evidence_records": null,
+    "max_evidence_bytes": null
+  },
+  "correlation_id": null
+}
+```
+
+The parser validates every nested schema, kind, format, fingerprint, exact runtime key, exact request key, plan step, DAG dependency, and deterministic limit. The executor recompiles the plan from those exact inputs before invocation.
+
+The response kind is `verification_execution_result`. It contains provider results, atomic bundles, the final session, step lifecycle, stable issues, deterministic counters, termination, and a result fingerprint. Runtime failures are valid fail-closed execution results with affected claims `UNKNOWN`; malformed execution requests return `INVALID_VERIFICATION_EXECUTION_REQUEST`.
+
+Python integrations may pass exact custom runtime registries through keyword arguments to `handle_request()` or `safe_handle_request()`. JSON cannot carry executable Python objects. The standalone CLI therefore binds only runtime keys shipped by GVR. Schema v1 ships a built-in data-flow verifier adapter and no built-in evidence providers.
+
+See [Verification execution](VERIFICATION_EXECUTION.md) for the full execution and replay contract.
+
 ### `verify_goal`
 
 Checks a proposed action sequence against an initial state and goal predicates.
@@ -384,7 +444,7 @@ Example shape:
 }
 ```
 
-GVR does not try to repair an ambiguous request by guessing what the caller meant.
+GVR does not try to repair an ambiguous request by guessing what the caller meant. The exact execution operation uses the dedicated error code `INVALID_VERIFICATION_EXECUTION_REQUEST` for unknown fields, missing nested fingerprints, plan or graph mismatches, runtime descriptor mismatches, request-key mismatches, and deterministic recompile failures.
 
 ## Exit codes
 
