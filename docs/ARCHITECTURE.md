@@ -1,0 +1,236 @@
+# GVR architecture
+
+This page shows how the current GVR pieces fit together.
+
+## The big picture
+
+```text
+                 caller
+          AI / agent / human / app
+                   |
+                   v
+          structured claim/request
+                   |
+                   v
+        +-----------------------+
+        |   GVR API / protocol  |
+        +-----------------------+
+                   |
+                   v
+        +-----------------------+
+        |       verifier        |
+        | clear rules for one   |
+        | kind of claim         |
+        +-----------------------+
+                   ^
+                   |
+                evidence
+                   |
+       +-----------+-----------+
+       |                       |
+       v                       v
+ direct structured data   evidence adapter
+                           such as Graphify
+       |                       |
+       +-----------+-----------+
+                   |
+                   v
+          VerificationReport
+                   |
+                   v
+          VerificationBundle
+                   |
+                   v
+             ClaimLedger
+```
+
+The important idea is separation.
+
+Each part has one job.
+
+## Caller
+
+The caller asks GVR to check something.
+
+The caller may be:
+
+- a Python program;
+- a command-line script;
+- an AI agent;
+- another service.
+
+The caller is allowed to propose a claim.
+
+The caller is not allowed to make that claim true just by saying it is true.
+
+## API and protocol layer
+
+GVR can be called directly as a Python library.
+
+It also has a schema-v1 JSON protocol.
+
+The protocol layer:
+
+- checks request shape;
+- converts JSON into GVR data models;
+- calls the correct verifier;
+- returns a machine-readable response;
+- returns a protocol error for malformed input.
+
+It should not invent evidence or change truth rules.
+
+## Verifier layer
+
+A verifier knows how to check one kind of claim.
+
+Examples in the current codebase include:
+
+- goal and action checks;
+- exact text search;
+- functional regression checks;
+- data-flow claims.
+
+A verifier should be narrow enough that its behavior can be tested clearly.
+
+## Evidence layer
+
+Evidence is the structured data a verifier uses.
+
+Some evidence comes directly from the caller.
+
+Other evidence comes from an external producer.
+
+### Graphify example
+
+For source-code data flow:
+
+```text
+source code
+    |
+    v
+Graphify
+    |
+    v
+bounded traversal result
+    |
+    v
+GVR Graphify adapter
+    |
+    v
+GVR data-flow verifier
+```
+
+Graphify answers source-analysis questions and produces graph evidence.
+
+GVR checks verification claims against that evidence.
+
+GVR does not secretly build another source graph in the verifier.
+
+## VerificationReport
+
+The report is the immediate result of a verifier.
+
+It contains the verdict and supporting information such as issues and evidence IDs.
+
+A report is useful inside one process, but evidence IDs alone are not enough for trusted remote transport.
+
+## VerificationBundle
+
+A bundle makes the verification self-contained.
+
+```text
+bundle
+├── report
+├── exact evidence records
+├── optional claim dependencies
+├── fingerprint format
+└── fingerprint
+```
+
+The bundle validates that the evidence set exactly matches the report dependencies.
+
+This makes it possible for another program to receive both the result and its proof basis.
+
+## Canonical fingerprint layer
+
+A bundle fingerprint must mean the same thing in different programming languages.
+
+GVR therefore uses a defined canonical transport format instead of relying on whatever JSON string a language happens to produce.
+
+The canonical layer handles details such as:
+
+- number representation;
+- deterministic map ordering;
+- Unicode-safe ordering;
+- unsupported values.
+
+This matters when a Python producer sends a bundle to a TypeScript, Java, Go, or other consumer that wants to independently verify the fingerprint.
+
+## ClaimLedger
+
+The ledger tracks what a claim depends on.
+
+Example:
+
+```text
+Claim C
+├── Evidence E1 version 10
+└── Evidence E2 version 12
+```
+
+If E1 changes, C becomes stale.
+
+If another claim depends on C, that dependent claim also becomes stale.
+
+This is how GVR prevents old results from silently surviving source changes.
+
+## Historical verdict vs current verdict
+
+GVR separates stored history from current effective truth.
+
+Example:
+
+```text
+yesterday:
+C = PASS using Evidence E version 1
+
+now:
+Evidence E is version 2
+```
+
+GVR can remember that yesterday's verification was PASS.
+
+But current effective C is:
+
+```text
+UNKNOWN
+```
+
+until C is verified again.
+
+## What is outside the GVR core
+
+The generic GVR core should not contain private product decisions such as:
+
+- tenant billing;
+- customer permissions;
+- production deployment authorization;
+- commercial risk policy;
+- private incident-routing logic.
+
+A product can use GVR truth, but product policy is a separate layer.
+
+## What is being built next
+
+GVR is under active development.
+
+The next runtime layers include ideas such as:
+
+- multi-claim verification sessions;
+- claim graphs;
+- verifier capability registry;
+- evidence provider protocol;
+- deterministic verification planning;
+- counterexample and falsification support.
+
+These should be treated as available only after they are merged into the integration branch and documented as current behavior.
