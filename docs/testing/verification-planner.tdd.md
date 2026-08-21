@@ -30,10 +30,11 @@ ImportError: cannot import name 'AtomicClaimBinding' from 'gvr'
 
 This was the intended compile-time RED signal because the required public planner API did not exist.
 
-Two later adversarial review cycles added focused RED coverage for contract gaps found after the initial implementation:
+Three later adversarial review cycles added focused RED coverage for contract gaps found after the initial implementation:
 
 - `4476d8ca726f6559ab207d5889f3ed3b8cca30e0` (`test: expose verification planner contract gaps`) produced `4 failed, 39 passed`. It covered invalid requests hiding missing required evidence, subclass substitution of exact registries, and omitted nested protocol fingerprints. `d58517fb9406d327dcb1b96162bab33d64d81c23` (`fix: harden verification planner contracts`) made those cases GREEN.
 - `51e5b00c20d23b98070f3a778a1ebd173f9a4c3d` (`test: harden planner issue metadata contract`) produced `6 failed, 43 passed`. It covered verdict and evidence-adequacy aliases in planner issue details. `fe9cebfd8d26472a2f2d0e16a2be433e086bc143` (`fix: reject planner result metadata aliases`) made those cases GREEN.
+- `346bb0f` (`test: expose compound planner metadata aliases`) produced `4 failed, 51 passed`. It covered compound status/sufficiency keys and direct `PASS`/`UNKNOWN` keys. `2433425` (`fix: reject compound planner metadata aliases`) made those cases GREEN through normalized semantic-token rejection.
 
 ## GREEN evidence
 
@@ -77,10 +78,10 @@ All commands completed successfully. The generated `gvr-0.2.0-py3-none-any.whl` 
 
 ```bash
 python -m pytest -q tests/test_verification_planner.py
-# 51 passed
+# 55 passed
 
 python -m pytest
-# 432 passed
+# 436 passed
 
 python -m compileall -q src/gvr tests/test_verification_planner.py
 git diff --check f107742575ef86ca9816e79cde0dd5965226b10b..HEAD
@@ -109,6 +110,6 @@ Additional probes exercised 16 simultaneous graph, binding, request, verifier-re
 
 ## Coverage and known gaps
 
-The focused file contains 37 named adversarial scenarios and 51 executed pytest cases. Budget overflow is parameterized across seven independent limits, nested fingerprint omission across two locations, and metadata aliases across eight direct, nested, case, and hyphenation forms.
+The focused file contains 37 named adversarial scenarios and 55 executed pytest cases. Budget overflow is parameterized across seven independent limits, nested fingerprint omission across two locations, and metadata aliases across twelve direct, compound, nested, case, and hyphenation forms.
 
 No provider, verifier, Graphify, network, or file-system execution path is part of the planner. Runtime acquisition and verification remain intentionally outside this task.
