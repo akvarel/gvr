@@ -11,11 +11,12 @@ You do not need to know AI research terms to read it. You do not need to know gr
 3. [How GVR works](HOW_GVR_WORKS.md) — what happens from a claim to a final result.
 4. [Examples](EXAMPLES.md) — small examples with text, program behavior, and data flow.
 5. [Verification sessions](VERIFICATION_SESSIONS.md) — how several claims are combined safely.
-6. [Verifier capabilities](VERIFIER_CAPABILITIES.md) — how exact verifier and evidence provider contracts are described and discovered.
-7. [Architecture](ARCHITECTURE.md) — how the current GVR pieces fit together.
-8. [CLI and JSON protocol](CLI_AND_PROTOCOL.md) — how another program can call GVR.
-9. [Code map](CODE_MAP.md) — where the main pieces live in the repository.
-10. [Design rules](DESIGN_RULES.md) — the safety rules GVR follows and why they exist.
+6. [Regression test obligations](REGRESSION_TEST_OBLIGATIONS.md) — how behavior facts become bounded evidence-grounded test duties.
+7. [Verifier capabilities](VERIFIER_CAPABILITIES.md) — how exact verifier and evidence provider contracts are described and discovered.
+8. [Architecture](ARCHITECTURE.md) — how the current GVR pieces fit together.
+9. [CLI and JSON protocol](CLI_AND_PROTOCOL.md) — how another program can call GVR.
+10. [Code map](CODE_MAP.md) — where the main pieces live in the repository.
+11. [Design rules](DESIGN_RULES.md) — the safety rules GVR follows and why they exist.
 
 ## The shortest explanation
 

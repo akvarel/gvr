@@ -17,6 +17,12 @@ from .core import (
     PreconditionsVerifier,
 )
 from .session import COMPOSITE_CLAIM_VERIFIER
+from .regression_test_obligations import (
+    BEHAVIOR_EVIDENCE_KINDS,
+    DEFAULT_REGRESSION_OBLIGATION_BUDGET,
+    REGRESSION_TEST_OBLIGATION_VERIFIER,
+    TEST_OBLIGATION_GROUNDED,
+)
 from .software import FUNCTIONAL_REGRESSION_VERIFIER
 from .text_search import TEXT_SEARCH_VERIFIER
 from .verifiers.data_flow import DATA_FLOW_VERIFIER
@@ -575,6 +581,29 @@ BUILTIN_VERIFIER_CAPABILITY_REGISTRY = VerifierCapabilityRegistry((
         bounds={"domain": "IMMUTABLE_CLAIM_GRAPH_AND_BUNDLES", "budget": "SESSION_BUDGET"},
         coverage={"scope": "REACHABLE_REQUESTED_ROOTS"},
         description="Composes current bundle verdicts with exact tri-state operators.",
+    ),
+    _builtin(
+        REGRESSION_TEST_OBLIGATION_VERIFIER,
+        determinism=VerifierDeterminism.D1,
+        cost=VerifierCost.MEDIUM,
+        bounds={
+            "domain": "IMMUTABLE_BEHAVIOR_EVIDENCE_INVENTORY",
+            "max_obligations": DEFAULT_REGRESSION_OBLIGATION_BUDGET.max_obligations,
+            "max_bundles": DEFAULT_REGRESSION_OBLIGATION_BUDGET.max_bundles,
+            "max_evidence_records": DEFAULT_REGRESSION_OBLIGATION_BUDGET.max_evidence_records,
+            "max_steps": DEFAULT_REGRESSION_OBLIGATION_BUDGET.max_steps,
+        },
+        coverage={
+            "pass_requires": "COMPLETE_REFERENCED_FACT_COVERAGE",
+            "unknown_on": "MISSING_INCOMPATIBLE_OR_INCOMPLETE_GROUNDING",
+        },
+        claim_kinds=(TEST_OBLIGATION_GROUNDED,),
+        accepted_evidence_kinds=BEHAVIOR_EVIDENCE_KINDS,
+        required_evidence_kinds=(),
+        description=(
+            "Checks that a regression test obligation is grounded by exact compatible "
+            "behavior facts with complete referenced fact coverage."
+        ),
     ),
 ))
 

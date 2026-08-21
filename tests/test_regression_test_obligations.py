@@ -395,7 +395,7 @@ def test_29_builtin_capability_truthfully_matches_runtime_contract() -> None:
         "1",
     )
     assert capability.claim_kinds == (rto.TEST_OBLIGATION_GROUNDED,)
-    assert capability.accepted_evidence_kinds == rto.BEHAVIOR_EVIDENCE_KINDS
+    assert capability.accepted_evidence_kinds == tuple(sorted(rto.BEHAVIOR_EVIDENCE_KINDS))
     assert capability.required_evidence_kinds == ()
     assert capability.authoritative is True
     assert capability.bounds["max_obligations"] == rto.DEFAULT_REGRESSION_OBLIGATION_BUDGET.max_obligations
@@ -439,7 +439,7 @@ def test_32_schema_v1_derive_operation_rejects_unknown_fields_and_forged_fingerp
             "payload": {"inventory": data},
         }
     )
-    assert forged["kind"] == "error"
+    assert forged["kind"] == "protocol_error"
     assert forged["payload"]["code"] == "INVALID_REGRESSION_OBLIGATION_REQUEST"
     extra = safe_handle_request(
         {
@@ -448,7 +448,7 @@ def test_32_schema_v1_derive_operation_rejects_unknown_fields_and_forged_fingerp
             "payload": {"inventory": inventory().to_dict(), "provider": "forbidden"},
         }
     )
-    assert extra["kind"] == "error"
+    assert extra["kind"] == "protocol_error"
     assert extra["payload"]["code"] == "INVALID_PAYLOAD"
 
 

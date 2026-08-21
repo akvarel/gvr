@@ -108,9 +108,10 @@ GVR currently includes:
 - `VerificationSession` with exact tri-state composition, freshness, budgets, termination state, and deterministic session identity;
 - immutable `VerifierCapability` descriptors and a distinct deterministic `VerifierCapabilityRegistry`;
 - strict evidence provider request with explicit source/snapshot classes, coverage, stable categorical issue, result, capability, fail-closed class compatibility, public capability-registry validation, and exact runtime registry contracts;
+- immutable behavior-evidence inventories and a deterministic bounded Regression Test Obligation Engine with evidence-grounded bundles, stable gaps, and non-authorizing readiness;
 - an honest built-in verifier capability snapshot with exact verifier IDs, bounds, coverage, cost, and D0/D1/O1/M1 semantics;
 - an honest empty built-in evidence provider capability snapshot;
-- schema-v1 JSON protocol and CLI, including `compose_verification_session`, `describe_verifier_capabilities`, `describe_evidence_provider_capabilities`, and `validate_evidence_provider_result`.
+- schema-v1 JSON protocol and CLI, including `compose_verification_session`, `derive_regression_test_obligations`, `describe_verifier_capabilities`, `describe_evidence_provider_capabilities`, and `validate_evidence_provider_result`.
 
 GVR is under active development. Deterministic planning, automatic evidence acquisition, and falsification layers are not part of the current integration branch yet. The verifier capability registry is descriptive: it does not load, rank, or execute verifiers. The evidence provider capability registry is also purely descriptive and has no built-in entries in schema v1. Runtime provider bindings live in a separate exact registry. Provider discovery filters are deterministic `request_kind` and `evidence_kind` filters, not verifier claim selection.
 
@@ -160,8 +161,9 @@ Recommended reading order:
 4. [Examples](docs/EXAMPLES.md)
 5. [Verification sessions](docs/VERIFICATION_SESSIONS.md)
 6. [Verifier capabilities](docs/VERIFIER_CAPABILITIES.md)
-7. [CLI and JSON protocol](docs/CLI_AND_PROTOCOL.md)
-8. [Design rules](docs/DESIGN_RULES.md)
+7. [Regression test obligations](docs/REGRESSION_TEST_OBLIGATIONS.md)
+8. [CLI and JSON protocol](docs/CLI_AND_PROTOCOL.md)
+9. [Design rules](docs/DESIGN_RULES.md)
 
 The docs intentionally use plain English and short examples.
 

@@ -201,3 +201,11 @@ A high UNKNOWN rate can reveal that the system needs:
 - a larger but still bounded search.
 
 Do not hide this information by converting UNKNOWN into a confidence percentage.
+
+## Rule 15: do not launder a test obligation
+
+A proposed test duty is not grounded merely because it cites some evidence ID.
+
+The evidence kind, fact class, subject, expected behavior, and coverage must all match the obligation rule. Partial or unknown coverage stays `UNKNOWN`; unrelated evidence cannot be relabeled to obtain a grounding `PASS`.
+
+An obligation plan's `READY` state describes completeness under the declared evidence and finite derivation bounds. It never authorizes merge, deployment, code generation, test execution, or another external side effect.

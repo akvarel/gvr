@@ -54,7 +54,7 @@ Examples include the current exact text-search and goal/action checks.
 
 The verifier or composer evaluates immutable snapshots, bundles, or other fixed evidence artifacts deterministically.
 
-Examples include functional regression and composite claim sessions.
+Examples include functional regression, composite claim sessions, and regression test obligation grounding.
 
 ### `O1`: deterministic evaluation of a captured observation
 
@@ -135,6 +135,7 @@ Unknown verifier IDs, unknown versions, unsupported claim kinds, and ambiguous o
 | `functional_regression` | `1` | `D1` | `MEDIUM` | Uses functional snapshots, but no stable `Evidence.kind` contract is emitted. |
 | `gvr.graphify.data_flow.v1` | `1` | `O1` | `EXTERNAL` | Claims: `CAN_FLOW_TO`, `NO_SUPPORTED_PATH`. Evidence may be an edge, a query result, or a blocking boundary. |
 | `gvr.claim_graph.composite.v1` | `1` | `D1` | `MEDIUM` | Operates on composite nodes and bundles, not `AtomicClaim.claim_kind`. |
+| `gvr.regression_test_obligation.v1` | `1` | `D1` | `MEDIUM` | Claim: `TEST_OBLIGATION_GROUNDED`. Accepts exactly the 13 schema-v1 `gvr.test.*` behavior evidence kinds and requires complete coverage for referenced fact classes. |
 
 The snapshot uses the verifier IDs the runtime actually emits. It does not invent claim kinds, evidence kinds, or formal schemas for APIs that do not yet publish them.
 
@@ -147,6 +148,8 @@ The data-flow verifier publishes these evidence kinds:
 - `graphify.data_flow_boundary` when a blocking boundary keeps the answer unknown.
 
 Its `required_evidence_kinds` list is empty because these proof paths are conditional. No single evidence kind appears in every result.
+
+The regression test obligation descriptor also has an empty `required_evidence_kinds` list because the exact required kind depends on the obligation rule. Its accepted union exactly matches the runtime's closed behavior vocabulary. Its finite bounds match `DEFAULT_REGRESSION_OBLIGATION_BUDGET`, and its coverage contract publishes `COMPLETE_REFERENCED_FACT_COVERAGE` as the requirement for grounding PASS.
 
 ## Schema-v1 discovery operation
 

@@ -188,6 +188,18 @@ This contains the evidence acquisition contract layer:
 
 The capability registry is deterministic, fingerprinted, and has no runtime objects. Its request validator requires exact source/snapshot class compatibility and treats empty capability class lists as accepting only missing request classes. The runtime registry dispatches only an exact `(provider_id, version)` binding, calls that validator before invocation, and rechecks mutable provider identity immediately before invocation. Fail-closed conversion applies only to an exception from provider execution and emits deterministic allowlisted categories with no raw exception text or class representation. The built-in schema-v1 capability registry is intentionally empty until GVR ships stable acquisition providers.
 
+## `src/gvr/regression_test_obligations.py`
+
+This contains the deterministic Regression Test Obligation Engine:
+
+- the closed 13-kind `gvr.test.*` behavior evidence vocabulary;
+- immutable normalized evidence inventory and per-fact-class coverage;
+- nine strict obligation rules;
+- the `TEST_OBLIGATION_GROUNDED` verifier and one bundle per obligation;
+- stable gaps, finite budgets, deduplication, termination, readiness, and plan fingerprints.
+
+The module derives plans only from supplied evidence. It does not acquire evidence, call a model, generate code, run tests, or authorize product actions. Read [Regression test obligations](REGRESSION_TEST_OBLIGATIONS.md) before changing it.
+
 ## `src/gvr/protocol.py`
 
 This is the schema-v1 request dispatcher.
@@ -205,7 +217,8 @@ Current operations include:
 - `compose_verification_session`;
 - `describe_verifier_capabilities`;
 - `describe_evidence_provider_capabilities`;
-- `validate_evidence_provider_result`.
+- `validate_evidence_provider_result`;
+- `derive_regression_test_obligations`.
 
 The session wire path also validates the explicit bundle fingerprint format before accepting a materialized bundle.
 

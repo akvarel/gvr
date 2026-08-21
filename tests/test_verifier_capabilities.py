@@ -11,6 +11,7 @@ from gvr import (
     AtomicClaim,
     COMPOSITE_CLAIM_VERIFIER,
     DATA_FLOW_VERIFIER,
+    REGRESSION_TEST_OBLIGATION_VERIFIER,
     DataFlowClaim,
     DataFlowClaimKind,
     VerifierCapability,
@@ -470,9 +471,13 @@ def test_builtin_snapshot_audits_all_runtime_verifier_contracts():
             VerifierDeterminism.D1,
             VerifierCost.MEDIUM,
         ),
+        REGRESSION_TEST_OBLIGATION_VERIFIER: (
+            VerifierDeterminism.D1,
+            VerifierCost.MEDIUM,
+        ),
     }
 
-    assert len(registry.list()) == 7
+    assert len(registry.list()) == 8
     with pytest.raises(UnknownVerifierCapabilityError, match="unknown verifier capability"):
         registry.lookup("registry", "1")
     assert {
@@ -489,7 +494,10 @@ def test_builtin_snapshot_audits_all_runtime_verifier_contracts():
     assert all(
         not item.claim_kinds and not item.accepted_evidence_kinds
         for item in registry.list()
-        if item.verifier_id != DATA_FLOW_VERIFIER
+        if item.verifier_id not in {
+            DATA_FLOW_VERIFIER,
+            REGRESSION_TEST_OBLIGATION_VERIFIER,
+        }
     )
 
 

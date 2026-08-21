@@ -95,6 +95,7 @@ Examples in the current codebase include:
 - exact text search;
 - functional regression checks;
 - data-flow claims.
+- regression test obligation grounding.
 
 A verifier should be narrow enough that its behavior can be tested clearly.
 
@@ -141,6 +142,14 @@ An evidence provider is an acquisition contract, not a truth-producing verifier.
 The built-in schema-v1 `EvidenceProviderCapabilityRegistry` is honestly empty and purely descriptive. Its public request validator enforces exact source/snapshot class compatibility. `EvidenceProviderRuntimeRegistry` separately owns detached immutable runtime bindings and uses that validator before every invocation. It rechecks provider identity, converts only real execution exceptions to deterministic allowlisted secret-safe categories, and leaves malformed returned results as contract errors. Provider-to-verifier adapters expose structural evidence-kind facts without a generic sufficiency or truth field.
 
 The schema-v1 protocol exposes `describe_evidence_provider_capabilities` with optional `request_kind` and `evidence_kind` filters, and `validate_evidence_provider_result`, which parses serialized request, capability, and result payloads and returns either a normalized `evidence_provider_result` or a machine-readable protocol error.
+
+## Regression test obligation layer
+
+The obligation engine consumes a caller-supplied immutable behavior evidence inventory. It accepts a closed 13-kind `gvr.test.*` vocabulary, attaches evidence-backed `COMPLETE`, `PARTIAL`, or `UNKNOWN` coverage to each fact class, and applies nine deterministic derivation rules.
+
+Each derived `TestObligation` is checked by `gvr.regression_test_obligation.v1` under the `TEST_OBLIGATION_GROUNDED` claim. Subject, expected behavior, fact class, evidence kind, and complete coverage must all align. Each report travels in an exact `VerificationBundle`, so later evidence mutation makes a ledger-recorded grounding result stale.
+
+The final `RegressionObligationPlan` is bounded, ordered, deduplicated, fingerprinted, and explicit about gaps, consumption, termination, and `READY / BLOCKED / UNKNOWN` readiness. Readiness is descriptive verification state, not authorization to merge, deploy, generate code, or execute an external side effect.
 
 ## VerificationReport
 

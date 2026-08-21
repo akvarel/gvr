@@ -36,6 +36,16 @@ from .session import (
     VerificationSession,
     VerificationSessionError,
 )
+from .regression_test_obligations import (
+    DEFAULT_REGRESSION_OBLIGATION_BUDGET,
+    BehaviorEvidenceInventory,
+    BehaviorFactClass,
+    FactClassCoverage,
+    FactCoverageCompleteness,
+    RegressionObligationBudget,
+    RegressionObligationError,
+    derive_regression_test_obligations,
+)
 from .text_search import TextSearchAssertion, evaluate_text_search
 from .verifiers.data_flow import (
     DataFlowClaim,
@@ -546,6 +556,142 @@ def _data_flow_inputs(
     return claim, traversal
 
 
+def _regression_inventory_evidence(data: Mapping[str, Any]) -> Evidence:
+    _reject_unexpected_fields(
+        data,
+        {"id", "kind", "payload", "source", "fingerprint"},
+        code="INVALID_REGRESSION_OBLIGATION_REQUEST",
+        noun="behavior evidence",
+    )
+    if not isinstance(data.get("id"), str) or not isinstance(data.get("kind"), str):
+        raise ProtocolError(
+            "INVALID_REGRESSION_OBLIGATION_REQUEST",
+            "behavior evidence requires string id and kind",
+        )
+    source = data.get("source")
+    fingerprint = data.get("fingerprint")
+    if source is not None and not isinstance(source, str):
+        raise ProtocolError(
+            "INVALID_REGRESSION_OBLIGATION_REQUEST",
+            "behavior evidence source must be a string or null",
+        )
+    if fingerprint is not None and not isinstance(fingerprint, str):
+        raise ProtocolError(
+            "INVALID_REGRESSION_OBLIGATION_REQUEST",
+            "behavior evidence fingerprint must be a string or null",
+        )
+    return Evidence(
+        id=data["id"],
+        kind=data["kind"],
+        payload=decode_markers(
+            dict(_require_mapping(data.get("payload", {}), "evidence payload"))
+        ),
+        source=source,
+        fingerprint=fingerprint,
+    )
+
+
+def _regression_fact_coverage(data: Mapping[str, Any]) -> FactClassCoverage:
+    _reject_unexpected_fields(
+        data,
+        {"fact_class", "completeness", "evidence_ids", "scope"},
+        code="INVALID_REGRESSION_OBLIGATION_REQUEST",
+        noun="fact coverage",
+    )
+    try:
+        return FactClassCoverage(
+            fact_class=BehaviorFactClass(str(data.get("fact_class") or "")),
+            completeness=FactCoverageCompleteness(
+                str(data.get("completeness") or "")
+            ),
+            evidence_ids=_string_array(
+                data.get("evidence_ids", ()), "coverage evidence_ids"
+            ),
+            scope=decode_markers(
+                dict(_require_mapping(data.get("scope", {}), "coverage scope"))
+            ),
+        )
+    except ValueError as exc:
+        raise ProtocolError("INVALID_REGRESSION_OBLIGATION_REQUEST", str(exc)) from exc
+
+
+def _regression_inventory(data: Mapping[str, Any]) -> BehaviorEvidenceInventory:
+    _reject_unexpected_fields(
+        data,
+        {
+            "schema_version", "kind", "fingerprint_format", "fingerprint",
+            "evidence", "coverage",
+        },
+        code="INVALID_REGRESSION_OBLIGATION_REQUEST",
+        noun="behavior evidence inventory",
+    )
+    evidence_data = data.get("evidence", ())
+    coverage_data = data.get("coverage", ())
+    if not isinstance(evidence_data, (list, tuple)):
+        raise ProtocolError(
+            "INVALID_REGRESSION_OBLIGATION_REQUEST",
+            "inventory evidence must be an array",
+        )
+    if not isinstance(coverage_data, (list, tuple)):
+        raise ProtocolError(
+            "INVALID_REGRESSION_OBLIGATION_REQUEST",
+            "inventory coverage must be an array",
+        )
+    try:
+        inventory = BehaviorEvidenceInventory(
+            schema_version=data.get("schema_version"),
+            kind=data.get("kind"),
+            fingerprint_format=data.get("fingerprint_format"),
+            evidence=tuple(
+                _regression_inventory_evidence(
+                    _require_mapping(item, "behavior evidence")
+                )
+                for item in evidence_data
+            ),
+            coverage=tuple(
+                _regression_fact_coverage(_require_mapping(item, "fact coverage"))
+                for item in coverage_data
+            ),
+        )
+    except ProtocolError:
+        raise
+    except RegressionObligationError as exc:
+        raise ProtocolError("INVALID_REGRESSION_OBLIGATION_REQUEST", str(exc)) from exc
+    supplied_fingerprint = data.get("fingerprint")
+    if not isinstance(supplied_fingerprint, str):
+        raise ProtocolError(
+            "INVALID_REGRESSION_OBLIGATION_REQUEST",
+            "behavior evidence inventory fingerprint is required",
+        )
+    if supplied_fingerprint != inventory.fingerprint:
+        raise ProtocolError(
+            "INVALID_REGRESSION_OBLIGATION_REQUEST",
+            "behavior evidence inventory fingerprint does not match semantic content",
+        )
+    return inventory
+
+
+def _regression_budget(data: Mapping[str, Any]) -> RegressionObligationBudget:
+    _reject_unexpected_fields(
+        data,
+        {"max_obligations", "max_bundles", "max_evidence_records", "max_steps"},
+        code="INVALID_REGRESSION_OBLIGATION_REQUEST",
+        noun="regression obligation budget",
+    )
+    defaults = DEFAULT_REGRESSION_OBLIGATION_BUDGET
+    try:
+        return RegressionObligationBudget(
+            max_obligations=data.get("max_obligations", defaults.max_obligations),
+            max_bundles=data.get("max_bundles", defaults.max_bundles),
+            max_evidence_records=data.get(
+                "max_evidence_records", defaults.max_evidence_records
+            ),
+            max_steps=data.get("max_steps", defaults.max_steps),
+        )
+    except RegressionObligationError as exc:
+        raise ProtocolError("INVALID_REGRESSION_OBLIGATION_REQUEST", str(exc)) from exc
+
+
 def handle_request(request: Mapping[str, Any]) -> dict[str, Any]:
     if request.get("schema_version") != SCHEMA_VERSION:
         raise ProtocolError(
@@ -623,6 +769,33 @@ def handle_request(request: Mapping[str, Any]) -> dict[str, Any]:
         except EvidenceProviderError as exc:
             raise ProtocolError("INVALID_EVIDENCE_PROVIDER_RESULT", str(exc)) from exc
         return envelope("evidence_provider_result", normalized.to_dict())
+
+    if op == "derive_regression_test_obligations":
+        unexpected = set(payload) - {"inventory", "budget"}
+        if unexpected:
+            raise ProtocolError(
+                "INVALID_PAYLOAD",
+                "unsupported regression obligation derivation fields: "
+                + ", ".join(sorted(unexpected)),
+            )
+        try:
+            inventory = _regression_inventory(
+                _require_mapping(payload.get("inventory", {}), "inventory")
+            )
+            budget_data = payload.get("budget")
+            budget = (
+                DEFAULT_REGRESSION_OBLIGATION_BUDGET
+                if budget_data is None
+                else _regression_budget(_require_mapping(budget_data, "budget"))
+            )
+            plan = derive_regression_test_obligations(inventory, budget=budget)
+        except ProtocolError:
+            raise
+        except RegressionObligationError as exc:
+            raise ProtocolError(
+                "INVALID_REGRESSION_OBLIGATION_REQUEST", str(exc)
+            ) from exc
+        return envelope("regression_obligation_plan", plan.to_dict())
 
     if op == "verify_goal":
         state = decode_markers(dict(_require_mapping(payload.get("initial_state", {}), "initial_state")))
