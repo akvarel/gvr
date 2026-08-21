@@ -38,6 +38,8 @@ full suite: 510 passed
 compileall: passed
 ```
 
+The archived count is authoritative for the committed GREEN tree. It corrects the earlier `528 full-suite tests` figure embedded in the GREEN commit message.
+
 The GREEN implementation adds exact immutable descriptors and registries, explicit planning bindings, canonical `RUN_FALSIFICATION` steps, exact executor orchestration, verifier gates, six generic built-in strategies, the Latvian weekday regression corpus, schema-v1 protocol support, and public documentation.
 
 ## Requested adversarial specification
