@@ -83,6 +83,29 @@ from .model import (
     combine_verdicts,
 )
 from .adapters.graphify import GraphifyTraversalEvidence, ingest_traversal_result
+from .evidence_providers import (
+    BUILTIN_EVIDENCE_PROVIDER_REGISTRY,
+    EVIDENCE_PROVIDER_CAPABILITY_FINGERPRINT_FORMAT,
+    EVIDENCE_PROVIDER_CAPABILITY_KIND,
+    EVIDENCE_PROVIDER_CAPABILITY_REGISTRY_FINGERPRINT_FORMAT,
+    EVIDENCE_PROVIDER_CAPABILITY_REGISTRY_KIND,
+    EVIDENCE_PROVIDER_CAPABILITY_REGISTRY_SCHEMA_VERSION,
+    EVIDENCE_PROVIDER_CAPABILITY_SCHEMA_VERSION,
+    EvidenceAcquisitionStatus,
+    EvidenceCompleteness,
+    EvidenceCoverage,
+    EvidenceProvider,
+    EvidenceProviderCapability,
+    EvidenceProviderCompatibility,
+    EvidenceProviderError,
+    EvidenceProviderRegistry,
+    EvidenceProviderResult,
+    EvidenceRequest,
+    UnknownEvidenceProviderError,
+    builtin_evidence_provider_registry,
+    provider_capability_is_compatible_with_verifier,
+    validate_evidence_provider_result,
+)
 from .protocol import ProtocolError, handle_request, safe_handle_request
 from .text_search import (
     TEXT_SEARCH_VERIFIER,
@@ -139,6 +162,20 @@ __all__ = [
     "VerifierCapabilityRegistry", "VerifierCapabilityError",
     "UnknownVerifierCapabilityError", "BUILTIN_VERIFIER_CAPABILITY_REGISTRY",
     "builtin_verifier_capability_registry",
+    "EVIDENCE_PROVIDER_CAPABILITY_SCHEMA_VERSION",
+    "EVIDENCE_PROVIDER_CAPABILITY_KIND",
+    "EVIDENCE_PROVIDER_CAPABILITY_FINGERPRINT_FORMAT",
+    "EVIDENCE_PROVIDER_CAPABILITY_REGISTRY_SCHEMA_VERSION",
+    "EVIDENCE_PROVIDER_CAPABILITY_REGISTRY_KIND",
+    "EVIDENCE_PROVIDER_CAPABILITY_REGISTRY_FINGERPRINT_FORMAT",
+    "EvidenceAcquisitionStatus", "EvidenceCompleteness", "EvidenceCoverage",
+    "EvidenceProvider", "EvidenceProviderCapability",
+    "EvidenceProviderCompatibility", "EvidenceProviderError",
+    "EvidenceProviderRegistry", "EvidenceProviderResult", "EvidenceRequest",
+    "UnknownEvidenceProviderError", "BUILTIN_EVIDENCE_PROVIDER_REGISTRY",
+    "builtin_evidence_provider_registry",
+    "provider_capability_is_compatible_with_verifier",
+    "validate_evidence_provider_result",
 ]
 
 from .software import Coverage, DeltaKind, FunctionalDeltaItem, FunctionalDeltaResult, FunctionalSnapshot, Observable, RevisionRef, compare_functionality, FUNCTIONAL_REGRESSION_VERIFIER, verify_functional_regression

@@ -107,10 +107,12 @@ GVR currently includes:
 - `ClaimGraph` with atomic and composite claims;
 - `VerificationSession` with exact tri-state composition, freshness, budgets, termination state, and deterministic session identity;
 - immutable `VerifierCapability` descriptors and a distinct deterministic `VerifierCapabilityRegistry`;
-- an honest built-in capability snapshot with exact verifier IDs, bounds, coverage, cost, and D0/D1/O1/M1 semantics;
-- schema-v1 JSON protocol and CLI, including `compose_verification_session` and `describe_verifier_capabilities`.
+- strict evidence provider request, coverage, result, capability, compatibility, and exact runtime registry contracts;
+- an honest built-in verifier capability snapshot with exact verifier IDs, bounds, coverage, cost, and D0/D1/O1/M1 semantics;
+- an honest empty built-in evidence provider capability snapshot;
+- schema-v1 JSON protocol and CLI, including `compose_verification_session`, `describe_verifier_capabilities`, and `describe_evidence_provider_capabilities`.
 
-GVR is under active development. Provider registries, deterministic planning, automatic evidence acquisition, and falsification layers are not part of the current integration branch yet. The capability registry is descriptive: it does not load, rank, or execute verifiers.
+GVR is under active development. Deterministic planning, automatic evidence acquisition, and falsification layers are not part of the current integration branch yet. The verifier capability registry is descriptive: it does not load, rank, or execute verifiers. The evidence provider registry is exact and has no built-in runtime providers in schema v1.
 
 ## Five-minute start
 

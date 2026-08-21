@@ -117,6 +117,20 @@ The response kind is `verifier_capability_registry`. Capabilities are ordered by
 
 See [Verifier capabilities](VERIFIER_CAPABILITIES.md) for field and fingerprint semantics.
 
+### `describe_evidence_provider_capabilities`
+
+Returns the immutable built-in evidence provider capability snapshot. The schema-v1 built-in registry is honestly empty because no runtime acquisition providers ship with GVR yet.
+
+```json
+{
+  "schema_version": 1,
+  "op": "describe_evidence_provider_capabilities",
+  "payload": {}
+}
+```
+
+The optional filter is `claim_kind`, which matches one exact published claim kind. The response kind is `evidence_provider_capability_registry`. See [Evidence providers](EVIDENCE_PROVIDERS.md) for request, coverage, result, exact registry, compatibility, and fingerprint semantics.
+
 ### `verify_goal`
 
 Checks a proposed action sequence against an initial state and goal predicates.

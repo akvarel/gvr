@@ -8,6 +8,11 @@ from .capabilities import (
     VerifierCapabilityRegistry,
     builtin_verifier_capability_registry,
 )
+from .evidence_providers import (
+    EvidenceProviderError,
+    EvidenceProviderRegistry,
+    builtin_evidence_provider_registry,
+)
 from .core import Action, Goal, Predicate, Proposal, StateEffect, VerificationContext, default_registry
 from .model import Evidence, VerificationIssue, VerificationReport, VerificationVerdict
 from .session import (
@@ -361,6 +366,26 @@ def handle_request(request: Mapping[str, Any]) -> dict[str, Any]:
         except VerifierCapabilityError as exc:
             raise ProtocolError("INVALID_PAYLOAD", str(exc)) from exc
         return envelope("verifier_capability_registry", registry.to_dict())
+
+    if op == "describe_evidence_provider_capabilities":
+        unexpected = set(payload) - {"claim_kind"}
+        if unexpected:
+            raise ProtocolError(
+                "INVALID_PAYLOAD",
+                "unsupported evidence provider capability query fields: "
+                + ", ".join(sorted(unexpected)),
+            )
+        claim_kind = payload.get("claim_kind")
+        if claim_kind is not None and not isinstance(claim_kind, str):
+            raise ProtocolError("INVALID_PAYLOAD", "claim_kind must be a string")
+        try:
+            capabilities = builtin_evidence_provider_registry().query(
+                claim_kind=claim_kind,
+            )
+            registry = EvidenceProviderRegistry(capabilities)
+        except EvidenceProviderError as exc:
+            raise ProtocolError("INVALID_PAYLOAD", str(exc)) from exc
+        return envelope("evidence_provider_capability_registry", registry.to_dict())
 
     if op == "verify_goal":
         state = decode_markers(dict(_require_mapping(payload.get("initial_state", {}), "initial_state")))
