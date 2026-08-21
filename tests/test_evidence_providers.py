@@ -40,10 +40,13 @@ def request(**overrides: Any) -> EvidenceRequest:
         "request_id": "req-1",
         "provider_id": "provider.alpha",
         "provider_version": "1",
-        "claim_kind": "CAN_FLOW_TO",
-        "required_evidence_kinds": ("graphify.data_flow_query_result",),
-        "accepted_evidence_kinds": ("graphify.data_flow_query_result", "graphify.data_flow_edge"),
-        "input": {"target": "x", "scope": ["a", "b"]},
+        "request_kind": "CAN_FLOW_TO",
+        "requested_evidence_kinds": ("graphify.data_flow_query_result",),
+        "subject": {"target": "x"},
+        "spec": {},
+        "semantic_scope": {"scope": ["a", "b"]},
+        "source_context": {},
+        "snapshot_context": {},
         "bounds": {"max_depth": 3},
     }
     values.update(overrides)
@@ -54,7 +57,7 @@ def capability(**overrides: Any) -> EvidenceProviderCapability:
     values = {
         "provider_id": "provider.alpha",
         "version": "1",
-        "claim_kinds": ("CAN_FLOW_TO",),
+        "request_kinds": ("CAN_FLOW_TO",),
         "produced_evidence_kinds": ("graphify.data_flow_query_result", "graphify.data_flow_edge"),
         "input_schema": {},
         "output_schema": {},
@@ -74,12 +77,18 @@ def result(**overrides: Any) -> EvidenceProviderResult:
     req = request()
     values = {
         "request_id": req.request_id,
+        "request_fingerprint": req.fingerprint,
         "provider_id": cap.provider_id,
         "provider_version": cap.version,
         "status": EvidenceAcquisitionStatus.COMPLETE,
         "coverage": EvidenceCoverage(
             completeness=EvidenceCompleteness.COMPLETE,
             covered_evidence_kinds=("graphify.data_flow_query_result",),
+            declared_scope=req.semantic_scope,
+            observed_scope=req.semantic_scope,
+            declared_bounds=req.bounds,
+            source_identity=req.source_context,
+            snapshot_identity=req.snapshot_context,
             truncated=False,
             details={"nodes_examined": 2},
         ),
@@ -100,13 +109,13 @@ def result(**overrides: Any) -> EvidenceProviderResult:
 
 def test_evidence_request_is_strict_immutable_and_detached() -> None:
     payload = {"z": [1]}
-    req = request(input=payload)
+    req = request(subject=payload)
     payload["z"].append(2)
-    assert req.input["z"] == (1,)
+    assert req.subject["z"] == (1,)
     with pytest.raises(FrozenInstanceError):
         req.request_id = "changed"  # type: ignore[misc]
     with pytest.raises(TypeError):
-        req.input["new"] = True  # type: ignore[index]
+        req.subject["new"] = True  # type: ignore[index]
 
 
 @pytest.mark.parametrize(
@@ -116,11 +125,9 @@ def test_evidence_request_is_strict_immutable_and_detached() -> None:
         ("request_id", " req"),
         ("provider_id", "provider id"),
         ("provider_version", ""),
-        ("claim_kind", "CAN FLOW"),
-        ("required_evidence_kinds", ("x", "x")),
-        ("accepted_evidence_kinds", ("x", "x")),
-        ("required_evidence_kinds", ("missing",)),
-        ("input", {1: "bad"}),
+        ("request_kind", "CAN FLOW"),
+        ("requested_evidence_kinds", ("x", "x")),
+        ("subject", {1: "bad"}),
         ("bounds", {"bad": float("nan")}),
     ],
 )
@@ -134,8 +141,8 @@ def test_coverage_complete_partial_unknown_invariants() -> None:
     assert complete.covered_evidence_kinds == ("a", "b")
     with pytest.raises(EvidenceProviderError):
         EvidenceCoverage(EvidenceCompleteness.COMPLETE, (), True, {})
-    with pytest.raises(EvidenceProviderError):
-        EvidenceCoverage(EvidenceCompleteness.PARTIAL, (), False, {})
+    partial = EvidenceCoverage(EvidenceCompleteness.PARTIAL, (), False, {})
+    assert partial.truncated is False
     with pytest.raises(EvidenceProviderError):
         EvidenceCoverage(EvidenceCompleteness.UNKNOWN, ("x",), False, {})
 
@@ -175,8 +182,10 @@ def test_capability_fingerprint_is_canonical_and_distinct_from_verifier_domain()
     [
         ("provider_id", ""),
         ("version", "bad version"),
-        ("claim_kinds", ("x", "x")),
+        ("request_kinds", ("x", "x")),
+        ("request_kinds", ()),
         ("produced_evidence_kinds", ("x", "x")),
+        ("produced_evidence_kinds", ()),
         ("input_schema", {1: "bad"}),
         ("determinism", "BAD"),
         ("cost", "FREE"),
@@ -197,7 +206,7 @@ def test_registry_is_deterministic_exact_and_rejects_conflicting_duplicates() ->
     with pytest.raises(UnknownEvidenceProviderError):
         reg.lookup("provider.a", "2")
     with pytest.raises(EvidenceProviderError):
-        EvidenceProviderRegistry((a, capability(provider_id="provider.b", claim_kinds=("NO_SUPPORTED_PATH",))))
+        EvidenceProviderRegistry((a, capability(provider_id="provider.b", request_kinds=("NO_SUPPORTED_PATH",))))
 
 
 def test_builtin_provider_registry_is_honestly_empty_and_exported() -> None:
@@ -209,9 +218,12 @@ def test_builtin_provider_registry_is_honestly_empty_and_exported() -> None:
 
 
 class Provider:
-    def __init__(self, res: EvidenceProviderResult | BaseException) -> None:
+    def __init__(self, res: EvidenceProviderResult | BaseException, cap: EvidenceProviderCapability | None = None) -> None:
         self.calls: list[EvidenceRequest] = []
         self.res = res
+        self.capability = capability() if cap is None else cap
+        self.provider_id = self.capability.provider_id
+        self.version = self.capability.version
 
     def acquire(self, req: EvidenceRequest) -> EvidenceProviderResult:
         self.calls.append(req)
@@ -222,9 +234,11 @@ class Provider:
 
 def test_runtime_registry_invokes_exact_provider_without_fallback_and_fails_closed() -> None:
     req = request(provider_id="provider.alpha")
-    provider = Provider(result(request_id=req.request_id))
-    fallback = Provider(result(provider_id="provider.fallback"))
-    reg = EvidenceProviderRegistry((capability(), capability(provider_id="provider.fallback")), runtime_providers={("provider.alpha", "1"): provider, ("provider.fallback", "1"): fallback})
+    alpha_cap = capability()
+    fallback_cap = capability(provider_id="provider.fallback")
+    provider = Provider(result(request_id=req.request_id), alpha_cap)
+    fallback = Provider(result(provider_id="provider.fallback"), fallback_cap)
+    reg = EvidenceProviderRegistry((alpha_cap, fallback_cap), runtime_providers={("provider.alpha", "1"): provider, ("provider.fallback", "1"): fallback})
     assert isinstance(provider, EvidenceProvider)
     acquired = reg.acquire(req)
     assert acquired.request_id == req.request_id
@@ -234,7 +248,8 @@ def test_runtime_registry_invokes_exact_provider_without_fallback_and_fails_clos
     with pytest.raises(UnknownEvidenceProviderError):
         reg.acquire(request(provider_version="2"))
 
-    failing = EvidenceProviderRegistry((capability(),), runtime_providers={("provider.alpha", "1"): Provider(RuntimeError("boom"))})
+    failing_cap = capability()
+    failing = EvidenceProviderRegistry((failing_cap,), runtime_providers={("provider.alpha", "1"): Provider(RuntimeError("boom"), failing_cap)})
     closed = failing.acquire(request(), fail_closed=True)
     assert closed.status is EvidenceAcquisitionStatus.UNAVAILABLE
     assert closed.evidence == ()
@@ -259,7 +274,7 @@ def test_validate_result_catches_request_provider_capability_and_kind_mismatches
 
 
 def test_provider_to_verifier_compatibility_is_exact_and_never_upgrades_truth() -> None:
-    provider_cap = capability(claim_kinds=("CAN_FLOW_TO", "NO_SUPPORTED_PATH"), produced_evidence_kinds=("graphify.data_flow_edge", "graphify.data_flow_query_result", "graphify.data_flow_boundary"))
+    provider_cap = capability(request_kinds=("CAN_FLOW_TO", "NO_SUPPORTED_PATH"), produced_evidence_kinds=("graphify.data_flow_edge", "graphify.data_flow_query_result", "graphify.data_flow_boundary"))
     verifier_cap = VerifierCapability(
         verifier_id="gvr.graphify.data_flow.v1",
         version="1",
@@ -283,8 +298,8 @@ def test_provider_to_verifier_compatibility_is_exact_and_never_upgrades_truth() 
 
 
 def test_registry_queries_by_request_and_evidence_kind_not_claim_kind() -> None:
-    alpha = capability(provider_id="provider.alpha", claim_kinds=("CAN_FLOW_TO",), produced_evidence_kinds=("graphify.data_flow_query_result",))
-    beta = capability(provider_id="provider.beta", claim_kinds=("NO_SUPPORTED_PATH",), produced_evidence_kinds=("graphify.data_flow_edge",))
+    alpha = capability(provider_id="provider.alpha", request_kinds=("CAN_FLOW_TO",), produced_evidence_kinds=("graphify.data_flow_query_result",))
+    beta = capability(provider_id="provider.beta", request_kinds=("NO_SUPPORTED_PATH",), produced_evidence_kinds=("graphify.data_flow_edge",))
     reg = EvidenceProviderRegistry((beta, alpha))
 
     assert reg.query(request_kind="CAN_FLOW_TO") == (alpha,)
@@ -309,16 +324,7 @@ def test_validate_evidence_provider_result_protocol_operation_normalizes_seriali
         "schema_version": 1,
         "op": "validate_evidence_provider_result",
         "payload": {
-            "request": {
-                "request_id": req.request_id,
-                "provider_id": req.provider_id,
-                "provider_version": req.provider_version,
-                "claim_kind": req.claim_kind,
-                "required_evidence_kinds": list(reversed(req.required_evidence_kinds)),
-                "accepted_evidence_kinds": list(reversed(req.accepted_evidence_kinds)),
-                "input": {"scope": ["a", "b"], "target": "x"},
-                "bounds": dict(req.bounds),
-            },
+            "request": req.to_dict(),
             "capability": cap.to_dict(),
             "result": res.to_dict(),
         },
@@ -338,16 +344,7 @@ def test_validate_evidence_provider_result_protocol_operation_returns_machine_re
         "schema_version": 1,
         "op": "validate_evidence_provider_result",
         "payload": {
-            "request": {
-                "request_id": req.request_id,
-                "provider_id": req.provider_id,
-                "provider_version": req.provider_version,
-                "claim_kind": req.claim_kind,
-                "required_evidence_kinds": list(req.required_evidence_kinds),
-                "accepted_evidence_kinds": list(req.accepted_evidence_kinds),
-                "input": dict(req.input),
-                "bounds": dict(req.bounds),
-            },
+            "request": req.to_dict(),
             "capability": cap.to_dict(),
             "result": bad,
         },

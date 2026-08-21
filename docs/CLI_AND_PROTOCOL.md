@@ -133,9 +133,9 @@ Optional filters are `request_kind` and `evidence_kind`. Both match exact publis
 
 ### `validate_evidence_provider_result`
 
-Parses serialized `request`, `capability`, and `result` objects, validates the result against the exact request and provider capability, and returns a normalized `evidence_provider_result`.
+Parses strict serialized `request`, `capability`, and `result` objects, including complete coverage, source/snapshot identities, schema/kind fields, fingerprint formats, and fingerprints. It validates the result against the exact request fingerprint and provider capability, rejects cross-request replay and claimed fingerprint mismatches, and returns a normalized `evidence_provider_result`.
 
-Invalid payloads return machine-readable `protocol_error` responses through the safe handler, including `INVALID_EVIDENCE_PROVIDER_REQUEST`, `INVALID_EVIDENCE_PROVIDER_CAPABILITY`, and `INVALID_EVIDENCE_PROVIDER_RESULT`.
+Unknown or obsolete nested fields and invalid values return machine-readable `protocol_error` responses through the safe handler, including `INVALID_EVIDENCE_PROVIDER_REQUEST`, `INVALID_EVIDENCE_PROVIDER_CAPABILITY`, and `INVALID_EVIDENCE_PROVIDER_RESULT`.
 
 ### `verify_goal`
 

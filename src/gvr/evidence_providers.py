@@ -9,6 +9,15 @@ from .canonical import CanonicalizationError, canonical_fingerprint, canonical_t
 from .capabilities import VerifierCapability, VerifierCost, VerifierDeterminism
 from .model import Evidence, VerificationIssue, VerificationVerdict
 
+EVIDENCE_REQUEST_SCHEMA_VERSION = 1
+EVIDENCE_REQUEST_KIND = "gvr.evidence_request"
+EVIDENCE_REQUEST_FINGERPRINT_FORMAT = "gvr.evidence_request.ieee754-json.v1"
+EVIDENCE_COVERAGE_SCHEMA_VERSION = 1
+EVIDENCE_COVERAGE_KIND = "gvr.evidence_coverage"
+EVIDENCE_COVERAGE_FINGERPRINT_FORMAT = "gvr.evidence_coverage.ieee754-json.v1"
+EVIDENCE_PROVIDER_RESULT_SCHEMA_VERSION = 1
+EVIDENCE_PROVIDER_RESULT_KIND = "gvr.evidence_provider_result"
+EVIDENCE_PROVIDER_RESULT_FINGERPRINT_FORMAT = "gvr.evidence_provider_result.ieee754-json.v1"
 EVIDENCE_PROVIDER_CAPABILITY_SCHEMA_VERSION = 1
 EVIDENCE_PROVIDER_CAPABILITY_KIND = "gvr.evidence_provider_capability"
 EVIDENCE_PROVIDER_CAPABILITY_FINGERPRINT_FORMAT = "gvr.evidence_provider_capability.ieee754-json.v1"
@@ -50,6 +59,13 @@ def _strict_identifier(value: Any, *, name: str) -> str:
     except CanonicalizationError as exc:
         raise EvidenceProviderError(str(exc)) from exc
     return value
+
+
+def _strict_sha256_fingerprint(value: Any, *, name: str) -> str:
+    fingerprint = _strict_identifier(value, name=name)
+    if len(fingerprint) != 64 or any(character not in "0123456789abcdef" for character in fingerprint):
+        raise EvidenceProviderError(f"{name} must be a lowercase SHA-256 fingerprint")
+    return fingerprint
 
 
 def _string_tuple(values: Iterable[str], *, name: str) -> tuple[str, ...]:
@@ -107,30 +123,97 @@ def _enum_value(value: Any, enum_type: type[Enum], *, name: str) -> Enum:
         raise EvidenceProviderError(f"unsupported {name} {value!r}") from exc
 
 
-@dataclass(frozen=True)
+def _fingerprint(value: Any, *, fingerprint_format: str) -> str:
+    try:
+        return canonical_fingerprint(value, fingerprint_format=fingerprint_format)
+    except CanonicalizationError as exc:
+        raise EvidenceProviderError(str(exc)) from exc
+
+
+def _validate_versioned_domain(
+    *,
+    schema_version: Any,
+    expected_schema_version: int,
+    kind: Any,
+    expected_kind: str,
+    fingerprint_format: Any,
+    expected_fingerprint_format: str,
+    noun: str,
+) -> None:
+    if type(schema_version) is not int or schema_version != expected_schema_version:
+        raise EvidenceProviderError(f"unsupported {noun} schema version {schema_version}")
+    if kind != expected_kind:
+        raise EvidenceProviderError(f"unsupported {noun} kind {kind}")
+    if fingerprint_format != expected_fingerprint_format:
+        raise EvidenceProviderError(f"unsupported {noun} fingerprint format {fingerprint_format}")
+
+
+@dataclass(frozen=True, kw_only=True)
 class EvidenceRequest:
     request_id: str
     provider_id: str
     provider_version: str
-    claim_kind: str
-    required_evidence_kinds: tuple[str, ...]
-    accepted_evidence_kinds: tuple[str, ...]
-    input: Mapping[str, Any] = field(default_factory=dict)
-    bounds: Mapping[str, Any] = field(default_factory=dict)
+    request_kind: str
+    requested_evidence_kinds: tuple[str, ...]
+    subject: Mapping[str, Any]
+    spec: Mapping[str, Any]
+    semantic_scope: Mapping[str, Any]
+    source_context: Mapping[str, Any]
+    snapshot_context: Mapping[str, Any]
+    bounds: Mapping[str, Any]
+    schema_version: int = EVIDENCE_REQUEST_SCHEMA_VERSION
+    kind: str = EVIDENCE_REQUEST_KIND
+    fingerprint_format: str = EVIDENCE_REQUEST_FINGERPRINT_FORMAT
+    fingerprint: str = field(init=False)
 
     def __post_init__(self) -> None:
+        _validate_versioned_domain(
+            schema_version=self.schema_version,
+            expected_schema_version=EVIDENCE_REQUEST_SCHEMA_VERSION,
+            kind=self.kind,
+            expected_kind=EVIDENCE_REQUEST_KIND,
+            fingerprint_format=self.fingerprint_format,
+            expected_fingerprint_format=EVIDENCE_REQUEST_FINGERPRINT_FORMAT,
+            noun="evidence request",
+        )
         object.__setattr__(self, "request_id", _strict_identifier(self.request_id, name="request_id"))
         object.__setattr__(self, "provider_id", _strict_identifier(self.provider_id, name="provider_id"))
         object.__setattr__(self, "provider_version", _strict_identifier(self.provider_version, name="provider_version"))
-        object.__setattr__(self, "claim_kind", _strict_identifier(self.claim_kind, name="claim_kind"))
-        required = _string_tuple(self.required_evidence_kinds, name="required_evidence_kinds")
-        accepted = _string_tuple(self.accepted_evidence_kinds, name="accepted_evidence_kinds")
-        if not set(required) <= set(accepted):
-            raise EvidenceProviderError("required_evidence_kinds must be a subset of accepted_evidence_kinds")
-        object.__setattr__(self, "required_evidence_kinds", required)
-        object.__setattr__(self, "accepted_evidence_kinds", accepted)
-        object.__setattr__(self, "input", _strict_mapping(self.input, name="input"))
-        object.__setattr__(self, "bounds", _strict_mapping(self.bounds, name="bounds"))
+        object.__setattr__(self, "request_kind", _strict_identifier(self.request_kind, name="request_kind"))
+        object.__setattr__(self, "requested_evidence_kinds", _string_tuple(self.requested_evidence_kinds, name="requested_evidence_kinds"))
+        if not self.requested_evidence_kinds:
+            raise EvidenceProviderError("requested_evidence_kinds must not be empty")
+        for name in ("subject", "spec", "semantic_scope", "source_context", "snapshot_context", "bounds"):
+            object.__setattr__(self, name, _strict_mapping(getattr(self, name), name=name))
+        object.__setattr__(self, "fingerprint", _fingerprint(self.semantic_definition(), fingerprint_format=self.fingerprint_format))
+
+    def semantic_definition(self) -> dict[str, Any]:
+        return {
+            "schema_version": self.schema_version,
+            "kind": self.kind,
+            "provider_id": self.provider_id,
+            "provider_version": self.provider_version,
+            "request_kind": self.request_kind,
+            "requested_evidence_kinds": self.requested_evidence_kinds,
+            "subject": self.subject,
+            "spec": self.spec,
+            "semantic_scope": self.semantic_scope,
+            "source_context": self.source_context,
+            "snapshot_context": self.snapshot_context,
+            "bounds": self.bounds,
+        }
+
+    def to_dict(self) -> dict[str, Any]:
+        value = _export_value(self.semantic_definition())
+        value.update({
+            "request_id": self.request_id,
+            "fingerprint_format": self.fingerprint_format,
+            "fingerprint": self.fingerprint,
+        })
+        return value
+
+    def export(self) -> dict[str, Any]:
+        return self.to_dict()
 
 
 @dataclass(frozen=True)
@@ -139,106 +222,221 @@ class EvidenceCoverage:
     covered_evidence_kinds: tuple[str, ...] = ()
     truncated: bool = False
     details: Mapping[str, Any] = field(default_factory=dict)
+    declared_scope: Mapping[str, Any] = field(default_factory=dict)
+    observed_scope: Mapping[str, Any] = field(default_factory=dict)
+    declared_bounds: Mapping[str, Any] = field(default_factory=dict)
+    consumed: Mapping[str, Any] = field(default_factory=dict)
+    termination: Mapping[str, Any] = field(default_factory=dict)
+    termination_reason: str = "UNKNOWN"
+    source_identity: Mapping[str, Any] = field(default_factory=dict)
+    snapshot_identity: Mapping[str, Any] = field(default_factory=dict)
+    schema_version: int = EVIDENCE_COVERAGE_SCHEMA_VERSION
+    kind: str = EVIDENCE_COVERAGE_KIND
+    fingerprint_format: str = EVIDENCE_COVERAGE_FINGERPRINT_FORMAT
+    fingerprint: str = field(init=False)
 
     def __post_init__(self) -> None:
+        _validate_versioned_domain(
+            schema_version=self.schema_version,
+            expected_schema_version=EVIDENCE_COVERAGE_SCHEMA_VERSION,
+            kind=self.kind,
+            expected_kind=EVIDENCE_COVERAGE_KIND,
+            fingerprint_format=self.fingerprint_format,
+            expected_fingerprint_format=EVIDENCE_COVERAGE_FINGERPRINT_FORMAT,
+            noun="evidence coverage",
+        )
         object.__setattr__(self, "completeness", _enum_value(self.completeness, EvidenceCompleteness, name="completeness"))
         object.__setattr__(self, "covered_evidence_kinds", _string_tuple(self.covered_evidence_kinds, name="covered_evidence_kinds"))
         if not isinstance(self.truncated, bool):
             raise EvidenceProviderError("truncated must be a boolean")
-        object.__setattr__(self, "details", _strict_mapping(self.details, name="details"))
+        object.__setattr__(self, "termination_reason", _strict_identifier(self.termination_reason, name="termination_reason"))
+        for name in ("declared_scope", "observed_scope", "declared_bounds", "consumed", "termination", "source_identity", "snapshot_identity", "details"):
+            object.__setattr__(self, name, _strict_mapping(getattr(self, name), name=name))
         if self.completeness is EvidenceCompleteness.COMPLETE and self.truncated:
             raise EvidenceProviderError("complete coverage cannot be truncated")
-        if self.completeness is EvidenceCompleteness.PARTIAL and not self.truncated:
-            raise EvidenceProviderError("partial coverage must declare truncation")
         if self.completeness is EvidenceCompleteness.UNKNOWN and self.covered_evidence_kinds:
             raise EvidenceProviderError("unknown coverage cannot declare covered evidence kinds")
+        object.__setattr__(self, "fingerprint", _fingerprint(self.semantic_definition(), fingerprint_format=self.fingerprint_format))
 
-    def to_dict(self) -> dict[str, Any]:
+    def semantic_definition(self) -> dict[str, Any]:
         return {
+            "schema_version": self.schema_version,
+            "kind": self.kind,
             "completeness": self.completeness.value,
-            "covered_evidence_kinds": list(self.covered_evidence_kinds),
+            "covered_evidence_kinds": self.covered_evidence_kinds,
+            "declared_scope": self.declared_scope,
+            "observed_scope": self.observed_scope,
+            "declared_bounds": self.declared_bounds,
+            "consumed": self.consumed,
+            "termination": self.termination,
             "truncated": self.truncated,
-            "details": _export_value(self.details),
+            "termination_reason": self.termination_reason,
+            "source_identity": self.source_identity,
+            "snapshot_identity": self.snapshot_identity,
+            "details": self.details,
         }
 
+    def to_dict(self) -> dict[str, Any]:
+        value = _export_value(self.semantic_definition())
+        value.update({"fingerprint_format": self.fingerprint_format, "fingerprint": self.fingerprint})
+        return value
 
-@dataclass(frozen=True)
+    def export(self) -> dict[str, Any]:
+        return self.to_dict()
+
+
+def _normalize_evidence(record: Evidence) -> Evidence:
+    if not isinstance(record, Evidence):
+        raise EvidenceProviderError("evidence must contain Evidence records")
+    evidence_id = _strict_identifier(record.id, name="evidence id")
+    evidence_kind = _strict_identifier(record.kind, name=f"evidence {evidence_id} kind")
+    payload = _strict_mapping(record.payload, name=f"evidence {evidence_id} payload")
+    source = None if record.source is None else _strict_identifier(record.source, name=f"evidence {evidence_id} source")
+    producer_fingerprint = None if record.fingerprint is None else _strict_identifier(record.fingerprint, name=f"evidence {evidence_id} fingerprint")
+    return Evidence(evidence_id, evidence_kind, payload, source, producer_fingerprint)
+
+
+def _evidence_definition(record: Evidence) -> dict[str, Any]:
+    return {
+        "id": record.id,
+        "kind": record.kind,
+        "payload": record.payload,
+        "source": record.source,
+        "fingerprint": record.fingerprint,
+    }
+
+
+def _normalize_issue(issue: VerificationIssue) -> VerificationIssue:
+    if not isinstance(issue, VerificationIssue):
+        raise EvidenceProviderError("issues must contain VerificationIssue records")
+    code = _strict_identifier(issue.code, name="issue code")
+    if not isinstance(issue.message, str):
+        raise EvidenceProviderError("issue message must be a string")
+    try:
+        canonical_utf8_key(issue.message, path="issue message")
+    except CanonicalizationError as exc:
+        raise EvidenceProviderError(str(exc)) from exc
+    if issue.verdict is not VerificationVerdict.UNKNOWN:
+        raise EvidenceProviderError("provider issues must not carry PASS or FAIL verdicts")
+    return VerificationIssue(code, issue.message, issue.verdict, _string_tuple(issue.evidence_ids, name="issue evidence_ids"))
+
+
+def _issue_definition(issue: VerificationIssue) -> dict[str, Any]:
+    return {
+        "code": issue.code,
+        "message": issue.message,
+        "verdict": issue.verdict.value,
+        "evidence_ids": issue.evidence_ids,
+    }
+
+
+@dataclass(frozen=True, kw_only=True)
 class EvidenceProviderResult:
     request_id: str
+    request_fingerprint: str
     provider_id: str
     provider_version: str
     status: EvidenceAcquisitionStatus
     coverage: EvidenceCoverage
     evidence: tuple[Evidence, ...] = ()
     issues: tuple[VerificationIssue, ...] = ()
-    capability_fingerprint: str = ""
+    capability_fingerprint: str
+    schema_version: int = EVIDENCE_PROVIDER_RESULT_SCHEMA_VERSION
+    kind: str = EVIDENCE_PROVIDER_RESULT_KIND
+    fingerprint_format: str = EVIDENCE_PROVIDER_RESULT_FINGERPRINT_FORMAT
+    fingerprint: str = field(init=False)
 
     def __post_init__(self) -> None:
+        _validate_versioned_domain(
+            schema_version=self.schema_version,
+            expected_schema_version=EVIDENCE_PROVIDER_RESULT_SCHEMA_VERSION,
+            kind=self.kind,
+            expected_kind=EVIDENCE_PROVIDER_RESULT_KIND,
+            fingerprint_format=self.fingerprint_format,
+            expected_fingerprint_format=EVIDENCE_PROVIDER_RESULT_FINGERPRINT_FORMAT,
+            noun="evidence provider result",
+        )
         object.__setattr__(self, "request_id", _strict_identifier(self.request_id, name="request_id"))
+        object.__setattr__(self, "request_fingerprint", _strict_sha256_fingerprint(self.request_fingerprint, name="request_fingerprint"))
         object.__setattr__(self, "provider_id", _strict_identifier(self.provider_id, name="provider_id"))
         object.__setattr__(self, "provider_version", _strict_identifier(self.provider_version, name="provider_version"))
         object.__setattr__(self, "status", _enum_value(self.status, EvidenceAcquisitionStatus, name="status"))
         if not isinstance(self.coverage, EvidenceCoverage):
             raise EvidenceProviderError("coverage must be EvidenceCoverage")
-        evidence = tuple(self.evidence)
-        if any(not isinstance(item, Evidence) for item in evidence):
-            raise EvidenceProviderError("evidence must contain Evidence records")
-        ids = [item.id for item in evidence]
-        if any(not item for item in ids) or len(set(ids)) != len(ids):
-            raise EvidenceProviderError("evidence IDs must be non-empty and unique")
-        object.__setattr__(self, "evidence", evidence)
-        issues = tuple(self.issues)
-        if any(not isinstance(item, VerificationIssue) for item in issues):
-            raise EvidenceProviderError("issues must contain VerificationIssue records")
-        if any(item.verdict is not VerificationVerdict.UNKNOWN for item in issues):
-            raise EvidenceProviderError("provider issues must not carry PASS or FAIL verdicts")
-        object.__setattr__(self, "issues", issues)
-        object.__setattr__(self, "capability_fingerprint", _strict_identifier(self.capability_fingerprint, name="capability_fingerprint"))
+
+        evidence_by_id: dict[str, Evidence] = {}
+        semantics_by_id: dict[str, dict[str, Any]] = {}
+        try:
+            supplied_evidence = tuple(self.evidence)
+        except TypeError as exc:
+            raise EvidenceProviderError("evidence must be iterable") from exc
+        for supplied in supplied_evidence:
+            normalized = _normalize_evidence(supplied)
+            semantics = _evidence_definition(normalized)
+            previous = semantics_by_id.get(normalized.id)
+            if previous is not None and previous != semantics:
+                raise EvidenceProviderError(f"conflicting evidence records share ID {normalized.id}")
+            semantics_by_id[normalized.id] = semantics
+            evidence_by_id.setdefault(normalized.id, normalized)
+        normalized_evidence = tuple(evidence_by_id[key] for key in sorted(evidence_by_id, key=lambda item: canonical_utf8_key(item, path="evidence id")))
+        object.__setattr__(self, "evidence", normalized_evidence)
+
+        try:
+            normalized_issues = tuple(_normalize_issue(item) for item in self.issues)
+        except TypeError as exc:
+            raise EvidenceProviderError("issues must be iterable") from exc
+        normalized_issues = tuple(sorted(normalized_issues, key=lambda item: _fingerprint(_issue_definition(item), fingerprint_format=EVIDENCE_PROVIDER_RESULT_FINGERPRINT_FORMAT)))
+        evidence_ids = set(evidence_by_id)
+        for issue in normalized_issues:
+            if not set(issue.evidence_ids) <= evidence_ids:
+                raise EvidenceProviderError("provider issue references evidence absent from result")
+        object.__setattr__(self, "issues", normalized_issues)
+        object.__setattr__(self, "capability_fingerprint", _strict_sha256_fingerprint(self.capability_fingerprint, name="capability_fingerprint"))
+
         if self.status is EvidenceAcquisitionStatus.COMPLETE and self.coverage.completeness is not EvidenceCompleteness.COMPLETE:
             raise EvidenceProviderError("COMPLETE status requires complete coverage")
         if self.status is EvidenceAcquisitionStatus.PARTIAL and self.coverage.completeness is not EvidenceCompleteness.PARTIAL:
             raise EvidenceProviderError("PARTIAL status requires partial coverage")
         if self.status in (EvidenceAcquisitionStatus.UNAVAILABLE, EvidenceAcquisitionStatus.UNSUPPORTED):
-            if evidence:
+            if normalized_evidence:
                 raise EvidenceProviderError("unavailable or unsupported results cannot include evidence")
             if self.coverage.completeness is not EvidenceCompleteness.UNKNOWN:
                 raise EvidenceProviderError("unavailable or unsupported results require unknown coverage")
+        object.__setattr__(self, "fingerprint", _fingerprint(self.semantic_definition(), fingerprint_format=self.fingerprint_format))
 
-    def to_dict(self) -> dict[str, Any]:
+    def semantic_definition(self) -> dict[str, Any]:
         return {
-            "request_id": self.request_id,
+            "schema_version": self.schema_version,
+            "kind": self.kind,
+            "request_fingerprint": self.request_fingerprint,
             "provider_id": self.provider_id,
             "provider_version": self.provider_version,
             "status": self.status.value,
-            "coverage": self.coverage.to_dict(),
-            "evidence": [
-                {
-                    "id": item.id,
-                    "kind": item.kind,
-                    "payload": _export_value(item.payload),
-                    "source": item.source,
-                    "fingerprint": item.fingerprint,
-                }
-                for item in self.evidence
-            ],
-            "issues": [
-                {
-                    "code": item.code,
-                    "message": item.message,
-                    "verdict": item.verdict.value,
-                    "evidence_ids": list(item.evidence_ids),
-                }
-                for item in self.issues
-            ],
+            "coverage": self.coverage.semantic_definition(),
+            "evidence": tuple(_evidence_definition(item) for item in self.evidence),
+            "issues": tuple(_issue_definition(item) for item in self.issues),
             "capability_fingerprint": self.capability_fingerprint,
         }
+
+    def to_dict(self) -> dict[str, Any]:
+        value = _export_value(self.semantic_definition())
+        value.update({
+            "request_id": self.request_id,
+            "fingerprint_format": self.fingerprint_format,
+            "fingerprint": self.fingerprint,
+        })
+        value["coverage"] = self.coverage.to_dict()
+        return value
+
+    def export(self) -> dict[str, Any]:
+        return self.to_dict()
 
 
 @dataclass(frozen=True, kw_only=True)
 class EvidenceProviderCapability:
     provider_id: str
     version: str
-    claim_kinds: tuple[str, ...]
+    request_kinds: tuple[str, ...]
     produced_evidence_kinds: tuple[str, ...]
     input_schema: Mapping[str, Any]
     output_schema: Mapping[str, Any]
@@ -253,8 +451,12 @@ class EvidenceProviderCapability:
     def __post_init__(self) -> None:
         object.__setattr__(self, "provider_id", _strict_identifier(self.provider_id, name="provider_id"))
         object.__setattr__(self, "version", _strict_identifier(self.version, name="version"))
-        object.__setattr__(self, "claim_kinds", _string_tuple(self.claim_kinds, name="claim_kinds"))
+        object.__setattr__(self, "request_kinds", _string_tuple(self.request_kinds, name="request_kinds"))
         object.__setattr__(self, "produced_evidence_kinds", _string_tuple(self.produced_evidence_kinds, name="produced_evidence_kinds"))
+        if not self.request_kinds:
+            raise EvidenceProviderError("request_kinds must not be empty")
+        if not self.produced_evidence_kinds:
+            raise EvidenceProviderError("produced_evidence_kinds must not be empty")
         object.__setattr__(self, "input_schema", _strict_mapping(self.input_schema, name="input_schema"))
         object.__setattr__(self, "output_schema", _strict_mapping(self.output_schema, name="output_schema"))
         object.__setattr__(self, "determinism", _enum_value(self.determinism, VerifierDeterminism, name="determinism"))
@@ -270,11 +472,7 @@ class EvidenceProviderCapability:
                 canonical_utf8_key(self.description, path="description")
             except CanonicalizationError as exc:
                 raise EvidenceProviderError(str(exc)) from exc
-        try:
-            fingerprint = canonical_fingerprint(self.semantic_definition(), fingerprint_format=EVIDENCE_PROVIDER_CAPABILITY_FINGERPRINT_FORMAT)
-        except CanonicalizationError as exc:
-            raise EvidenceProviderError(str(exc)) from exc
-        object.__setattr__(self, "fingerprint", fingerprint)
+        object.__setattr__(self, "fingerprint", _fingerprint(self.semantic_definition(), fingerprint_format=EVIDENCE_PROVIDER_CAPABILITY_FINGERPRINT_FORMAT))
 
     def semantic_definition(self) -> dict[str, Any]:
         return {
@@ -282,7 +480,7 @@ class EvidenceProviderCapability:
             "kind": EVIDENCE_PROVIDER_CAPABILITY_KIND,
             "provider_id": self.provider_id,
             "version": self.version,
-            "claim_kinds": self.claim_kinds,
+            "request_kinds": self.request_kinds,
             "produced_evidence_kinds": self.produced_evidence_kinds,
             "input_schema": self.input_schema,
             "output_schema": self.output_schema,
@@ -302,7 +500,7 @@ class EvidenceProviderCapability:
         return self.to_dict()
 
     def supports_request_kind(self, request_kind: str) -> bool:
-        return request_kind in self.claim_kinds
+        return request_kind in self.request_kinds
 
     def produces_evidence_kind(self, evidence_kind: str) -> bool:
         return evidence_kind in self.produced_evidence_kinds
@@ -313,57 +511,135 @@ class EvidenceProviderCompatibility:
     compatible: bool
     evidence_kinds: tuple[str, ...] = ()
     missing_required_evidence_kinds: tuple[str, ...] = ()
-    unsupported_claim_kind: bool = False
+    unsupported_request_kind: bool = False
     truth_upgraded: bool = False
+
+    @property
+    def unsupported_claim_kind(self) -> bool:
+        """Compatibility alias for schema-v1 callers."""
+        return self.unsupported_request_kind
 
 
 def provider_capability_is_compatible_with_verifier(
     provider: EvidenceProviderCapability,
     verifier: VerifierCapability,
     *,
-    claim_kind: str,
+    request_kind: str | None = None,
+    claim_kind: str | None = None,
 ) -> EvidenceProviderCompatibility:
-    claim_kind = _strict_identifier(claim_kind, name="claim_kind")
-    unsupported = claim_kind not in provider.claim_kinds or claim_kind not in verifier.claim_kinds
+    selected = request_kind if request_kind is not None else claim_kind
+    if selected is None or (request_kind is not None and claim_kind is not None and request_kind != claim_kind):
+        raise EvidenceProviderError("one exact request_kind is required")
+    selected = _strict_identifier(selected, name="request_kind")
+    unsupported = selected not in provider.request_kinds or selected not in verifier.claim_kinds
     intersection = tuple(sorted(set(provider.produced_evidence_kinds) & set(verifier.accepted_evidence_kinds), key=lambda item: canonical_utf8_key(item, path="evidence_kind")))
     missing = tuple(sorted(set(verifier.required_evidence_kinds) - set(provider.produced_evidence_kinds), key=lambda item: canonical_utf8_key(item, path="evidence_kind")))
     return EvidenceProviderCompatibility(
         compatible=not unsupported and not missing and bool(intersection),
         evidence_kinds=intersection,
         missing_required_evidence_kinds=missing,
-        unsupported_claim_kind=unsupported,
+        unsupported_request_kind=unsupported,
         truth_upgraded=False,
     )
 
 
 @runtime_checkable
 class EvidenceProvider(Protocol):
+    provider_id: str
+    version: str
+    capability: EvidenceProviderCapability
+
     def acquire(self, request: EvidenceRequest) -> EvidenceProviderResult: ...
+
+
+@dataclass(frozen=True)
+class EvidenceProviderVerifierInput:
+    status: EvidenceAcquisitionStatus
+    coverage: EvidenceCoverage
+    evidence: tuple[Evidence, ...]
+    issues: tuple[VerificationIssue, ...]
+    result_fingerprint: str
+    verifier_capability_fingerprint: str
+    compatible: bool
+    sufficient: bool
+    truth_upgraded: bool = False
+
+
+def provider_result_for_verifier(result: EvidenceProviderResult, verifier: VerifierCapability) -> EvidenceProviderVerifierInput:
+    if not isinstance(result, EvidenceProviderResult):
+        raise EvidenceProviderError("result must be an exact EvidenceProviderResult")
+    if not isinstance(verifier, VerifierCapability):
+        raise EvidenceProviderError("verifier must be an exact VerifierCapability")
+    accepted = set(verifier.accepted_evidence_kinds)
+    emitted = {record.kind for record in result.evidence}
+    unsupported = emitted - accepted
+    if unsupported:
+        kind = min(unsupported, key=lambda item: canonical_utf8_key(item, path="evidence kind"))
+        raise EvidenceProviderError(f"evidence kind {kind} is not accepted by verifier capability")
+    present_required = set(verifier.required_evidence_kinds) <= emitted
+    sufficient = (
+        bool(result.evidence)
+        and result.status is EvidenceAcquisitionStatus.COMPLETE
+        and result.coverage.completeness is EvidenceCompleteness.COMPLETE
+        and present_required
+    )
+    return EvidenceProviderVerifierInput(
+        status=result.status,
+        coverage=result.coverage,
+        evidence=result.evidence,
+        issues=result.issues,
+        result_fingerprint=result.fingerprint,
+        verifier_capability_fingerprint=verifier.fingerprint,
+        compatible=True,
+        sufficient=sufficient,
+        truth_upgraded=False,
+    )
 
 
 def validate_evidence_provider_result(result: EvidenceProviderResult, request: EvidenceRequest, capability: EvidenceProviderCapability) -> EvidenceProviderResult:
     if not isinstance(result, EvidenceProviderResult):
         raise EvidenceProviderError("result must be EvidenceProviderResult")
+    if not isinstance(request, EvidenceRequest):
+        raise EvidenceProviderError("request must be EvidenceRequest")
+    if not isinstance(capability, EvidenceProviderCapability):
+        raise EvidenceProviderError("capability must be EvidenceProviderCapability")
     if result.request_id != request.request_id:
         raise EvidenceProviderError("result request_id does not match request")
+    if result.request_fingerprint != request.fingerprint:
+        raise EvidenceProviderError("result request fingerprint does not match exact request semantics")
     if result.provider_id != request.provider_id or result.provider_id != capability.provider_id:
         raise EvidenceProviderError("result provider_id does not match request and capability")
     if result.provider_version != request.provider_version or result.provider_version != capability.version:
         raise EvidenceProviderError("result provider_version does not match request and capability")
+    if request.request_kind not in capability.request_kinds:
+        raise EvidenceProviderError("request kind is not supported by provider capability")
+    produced = set(capability.produced_evidence_kinds)
+    requested = set(request.requested_evidence_kinds)
+    if not requested <= produced:
+        raise EvidenceProviderError("requested evidence kinds are not all produced by provider capability")
     if result.capability_fingerprint != capability.fingerprint:
         raise EvidenceProviderError("result capability fingerprint does not match capability")
-    produced = set(capability.produced_evidence_kinds)
-    accepted = set(request.accepted_evidence_kinds)
     for item in result.evidence:
         if item.kind not in produced:
             raise EvidenceProviderError(f"evidence kind {item.kind} is not produced by provider capability")
-        if item.kind not in accepted:
-            raise EvidenceProviderError(f"evidence kind {item.kind} was not accepted by request")
+        if item.kind not in requested:
+            raise EvidenceProviderError(f"evidence kind {item.kind} was not requested")
     covered = set(result.coverage.covered_evidence_kinds)
-    if not covered <= produced:
-        raise EvidenceProviderError("coverage includes evidence kind not produced by provider capability")
-    if not set(request.required_evidence_kinds) <= covered and result.status is EvidenceAcquisitionStatus.COMPLETE:
-        raise EvidenceProviderError("complete result does not cover all requested required evidence kinds")
+    if not covered <= produced or not covered <= requested:
+        raise EvidenceProviderError("coverage includes an unrequested or unsupported evidence kind")
+    if result.coverage.declared_scope != request.semantic_scope:
+        raise EvidenceProviderError("coverage declared scope does not match request semantic scope")
+    if result.coverage.declared_bounds != request.bounds:
+        raise EvidenceProviderError("coverage declared bounds do not match request bounds")
+    if result.coverage.source_identity != request.source_context:
+        raise EvidenceProviderError("coverage source identity does not match request source context")
+    if result.coverage.snapshot_identity != request.snapshot_context:
+        raise EvidenceProviderError("coverage snapshot identity does not match request snapshot context")
+    if result.status is EvidenceAcquisitionStatus.COMPLETE:
+        if not requested <= covered:
+            raise EvidenceProviderError("complete result does not cover all requested evidence kinds")
+        if result.coverage.observed_scope != result.coverage.declared_scope:
+            raise EvidenceProviderError("complete result observed scope does not match declared scope")
     return result
 
 
@@ -392,24 +668,32 @@ class EvidenceProviderRegistry:
             normalized.append(min(duplicates, key=lambda item: (0, b"") if item.description is None else (1, canonical_utf8_key(item.description, path="description"))))
         normalized.sort(key=lambda item: (canonical_utf8_key(item.provider_id, path="provider_id"), canonical_utf8_key(item.version, path="version")))
         by_key = MappingProxyType({(item.provider_id, item.version): item for item in normalized})
+
+        if not isinstance(self.runtime_providers, Mapping):
+            raise EvidenceProviderError("runtime_providers must be a mapping")
         runtime: dict[tuple[str, str], EvidenceProvider] = {}
         for key, provider in self.runtime_providers.items():
             if not isinstance(key, tuple) or len(key) != 2:
                 raise EvidenceProviderError("runtime provider keys must be (provider_id, version)")
             normalized_key = (_strict_identifier(key[0], name="provider_id"), _strict_identifier(key[1], name="version"))
-            if normalized_key not in by_key:
+            expected = by_key.get(normalized_key)
+            if expected is None:
                 raise UnknownEvidenceProviderError(f"runtime provider {normalized_key[0]} version {normalized_key[1]} has no capability")
             if not isinstance(provider, EvidenceProvider):
-                raise EvidenceProviderError("runtime provider must implement EvidenceProvider")
+                raise EvidenceProviderError("runtime provider must implement EvidenceProvider identity, version, capability, and acquire")
+            if not isinstance(provider.capability, EvidenceProviderCapability):
+                raise EvidenceProviderError("runtime provider capability must be EvidenceProviderCapability")
+            if provider.provider_id != normalized_key[0] or provider.version != normalized_key[1]:
+                raise EvidenceProviderError("runtime provider identity does not match registry key")
+            if provider.capability.fingerprint != expected.fingerprint:
+                raise EvidenceProviderError("runtime provider capability does not match registered capability")
             runtime[normalized_key] = provider
+        runtime_proxy = MappingProxyType(dict(runtime))
         object.__setattr__(self, "capabilities", tuple(normalized))
+        object.__setattr__(self, "runtime_providers", runtime_proxy)
         object.__setattr__(self, "_by_key", by_key)
-        object.__setattr__(self, "_runtime_by_key", MappingProxyType(runtime))
-        try:
-            fingerprint = canonical_fingerprint(self.semantic_definition(), fingerprint_format=EVIDENCE_PROVIDER_CAPABILITY_REGISTRY_FINGERPRINT_FORMAT)
-        except CanonicalizationError as exc:
-            raise EvidenceProviderError(str(exc)) from exc
-        object.__setattr__(self, "fingerprint", fingerprint)
+        object.__setattr__(self, "_runtime_by_key", runtime_proxy)
+        object.__setattr__(self, "fingerprint", _fingerprint(self.semantic_definition(), fingerprint_format=EVIDENCE_PROVIDER_CAPABILITY_REGISTRY_FINGERPRINT_FORMAT))
 
     def semantic_definition(self) -> dict[str, Any]:
         return {
@@ -451,17 +735,30 @@ class EvidenceProviderRegistry:
         except KeyError as exc:
             raise UnknownEvidenceProviderError(f"no runtime evidence provider for {key[0]} version {key[1]}") from exc
         try:
-            result = provider.acquire(request)
-            return validate_evidence_provider_result(result, request, capability)
+            return validate_evidence_provider_result(provider.acquire(request), request, capability)
         except Exception as exc:
             if not fail_closed:
                 raise
+            unavailable_coverage = EvidenceCoverage(
+                completeness=EvidenceCompleteness.UNKNOWN,
+                covered_evidence_kinds=(),
+                declared_scope=request.semantic_scope,
+                observed_scope={},
+                declared_bounds=request.bounds,
+                consumed={},
+                termination={"exception_type": type(exc).__name__},
+                truncated=False,
+                termination_reason="PROVIDER_EXCEPTION",
+                source_identity=request.source_context,
+                snapshot_identity=request.snapshot_context,
+            )
             return EvidenceProviderResult(
                 request_id=request.request_id,
+                request_fingerprint=request.fingerprint,
                 provider_id=request.provider_id,
                 provider_version=request.provider_version,
                 status=EvidenceAcquisitionStatus.UNAVAILABLE,
-                coverage=EvidenceCoverage(EvidenceCompleteness.UNKNOWN, (), False, {"exception_type": type(exc).__name__}),
+                coverage=unavailable_coverage,
                 evidence=(),
                 issues=(VerificationIssue("PROVIDER_EXCEPTION", str(exc), VerificationVerdict.UNKNOWN),),
                 capability_fingerprint=capability.fingerprint,

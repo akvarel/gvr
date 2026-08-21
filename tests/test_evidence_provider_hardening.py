@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import FrozenInstanceError
 from types import MappingProxyType
 from typing import Any
 
@@ -174,10 +173,12 @@ def test_request_fingerprint_covers_every_semantic_field_and_is_order_independen
     "field,value",
     [
         ("schema_version", 2),
+        ("schema_version", True),
         ("kind", "gvr.wrong"),
         ("fingerprint_format", "wrong"),
         ("request_kind", "bad kind"),
         ("requested_evidence_kinds", (QUERY_RESULT, QUERY_RESULT)),
+        ("requested_evidence_kinds", ()),
         ("subject", {1: "bad"}),
         ("spec", {"bad": float("nan")}),
         ("semantic_scope", []),
@@ -200,7 +201,11 @@ def test_coverage_is_explicit_detached_fingerprinted_and_order_independent() -> 
     assert item.declared_scope["nested"]["a"] == (1,)
     assert isinstance(item.declared_scope, MappingProxyType)
     assert item.to_dict()["fingerprint_format"] == ep.EVIDENCE_COVERAGE_FINGERPRINT_FORMAT
-    assert item.fingerprint == coverage(covered_evidence_kinds=(EDGE, QUERY_RESULT)).fingerprint
+    assert item.fingerprint == coverage(
+        covered_evidence_kinds=(EDGE, QUERY_RESULT),
+        declared_scope={"nested": {"a": [1]}, "relations": ["CALLS"]},
+        observed_scope={"nested": {"a": [1]}, "relations": ["CALLS"]},
+    ).fingerprint
     assert item.fingerprint != coverage(consumed={"nodes": 3}).fingerprint
     assert item.fingerprint != coverage(termination_reason="BOUND_REACHED", truncated=True, completeness=ep.EvidenceCompleteness.PARTIAL).fingerprint
 
@@ -243,7 +248,10 @@ def test_result_deeply_snapshots_evidence_deduplicates_identical_ids_and_is_orde
     assert item.evidence[0].payload["nested"]["values"] == (1,)
     with pytest.raises(TypeError):
         item.evidence[0].payload["new"] = True  # type: ignore[index]
-    assert item.fingerprint == result(evidence=(first, second), issues=()).fingerprint
+    assert item.fingerprint == result(
+        evidence=(evidence("ev-1", payload={"nested": {"values": [1]}}), second),
+        issues=(),
+    ).fingerprint
     assert item.to_dict()["evidence"][0]["fingerprint"] == "producer-fp-1"
 
 
@@ -260,14 +268,14 @@ def test_result_fingerprint_covers_request_provider_status_coverage_evidence_iss
         result(provider_version="2"),
         result(status=ep.EvidenceAcquisitionStatus.PARTIAL, coverage=coverage(completeness=ep.EvidenceCompleteness.PARTIAL, truncated=True, termination_reason="BOUND_REACHED")),
         result(coverage=coverage(consumed={"nodes": 9})),
-        result(evidence=(evidence("other"),)),
+        result(evidence=(evidence("other"),), issues=()),
         result(issues=()),
         result(capability_fingerprint="c" * 64),
     )
     assert all(item.fingerprint != base.fingerprint for item in mutations)
 
 
-@pytest.mark.parametrize("field,value", [("schema_version", 2), ("kind", "wrong"), ("fingerprint_format", "wrong"), ("request_fingerprint", ""), ("provider_id", "bad provider")])
+@pytest.mark.parametrize("field,value", [("schema_version", 2), ("schema_version", True), ("kind", "wrong"), ("fingerprint_format", "wrong"), ("request_fingerprint", ""), ("request_fingerprint", "short"), ("capability_fingerprint", "short"), ("provider_id", "bad provider")])
 def test_result_rejects_invalid_versioned_values(field: str, value: Any) -> None:
     with pytest.raises(ep.EvidenceProviderError):
         result(**{field: value})
@@ -407,6 +415,32 @@ def test_protocol_rejects_every_claimed_fingerprint_mismatch(target: str) -> Non
     response = safe_handle_request(wire)
     assert response["kind"] == "protocol_error"
     assert "fingerprint" in response["payload"]["message"]
+
+
+@pytest.mark.parametrize(
+    "target,field",
+    [
+        ("request", "claim_kind"),
+        ("capability", "claim_kinds"),
+        ("result", "verdict"),
+        ("coverage", "covered_scope"),
+    ],
+)
+def test_protocol_rejects_obsolete_or_unknown_nested_fields(target: str, field: str) -> None:
+    wire = validation_wire()
+    destination = wire["payload"]["result"]["coverage"] if target == "coverage" else wire["payload"][target]
+    destination[field] = "obsolete"
+    response = safe_handle_request(wire)
+    assert response["kind"] == "protocol_error"
+    assert field in response["payload"]["message"]
+
+
+def test_protocol_rejects_capability_fingerprint_domain_mismatch() -> None:
+    wire = validation_wire()
+    wire["payload"]["capability"]["fingerprint_format"] = ep.EVIDENCE_REQUEST_FINGERPRINT_FORMAT
+    response = safe_handle_request(wire)
+    assert response["kind"] == "protocol_error"
+    assert "fingerprint_format" in response["payload"]["message"]
 
 
 def test_all_provider_canonical_domains_are_distinct() -> None:

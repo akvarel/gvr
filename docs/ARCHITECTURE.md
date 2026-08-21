@@ -136,9 +136,9 @@ GVR does not secretly build another source graph in the verifier.
 
 An evidence provider is an acquisition contract, not a truth-producing verifier.
 
-`EvidenceRequest` names one exact provider ID and version, the request kind, required and accepted evidence kinds, input, and bounds. `EvidenceProviderCapability` publishes the exact request kinds and produced evidence kinds a provider can support. `EvidenceProviderResult` carries acquisition status, coverage, evidence records, issues, and the capability fingerprint used for validation.
+`EvidenceRequest` names one exact provider ID and version, a request kind, requested evidence kinds, subject/spec, semantic scope, source/snapshot context, and bounds. Its semantic fingerprint excludes only the correlation request ID. `EvidenceProviderCapability` publishes exact request kinds and produced evidence kinds. `EvidenceProviderResult` references the exact request fingerprint and carries exact provider identity, acquisition status, explicit fingerprinted coverage, deeply snapshotted evidence, issues, and the capability fingerprint used for validation.
 
-The built-in schema-v1 evidence provider registry is honestly empty. It still defines deterministic lookup, exact runtime provider dispatch, fail-closed unavailable results, canonical fingerprints, and compatibility checks against verifier capabilities.
+The built-in schema-v1 evidence provider registry is honestly empty. It still defines deterministic lookup, detached immutable runtime mappings, exact provider protocol identity and capability checks, fail-closed unavailable results, distinct canonical domains, cross-request replay protection, and provider-result compatibility checks against verifier capabilities without upgrading acquisition into truth.
 
 The schema-v1 protocol exposes `describe_evidence_provider_capabilities` with optional `request_kind` and `evidence_kind` filters, and `validate_evidence_provider_result`, which parses serialized request, capability, and result payloads and returns either a normalized `evidence_provider_result` or a machine-readable protocol error.
 

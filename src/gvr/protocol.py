@@ -9,6 +9,9 @@ from .capabilities import (
     builtin_verifier_capability_registry,
 )
 from .evidence_providers import (
+    EVIDENCE_PROVIDER_CAPABILITY_FINGERPRINT_FORMAT,
+    EVIDENCE_PROVIDER_CAPABILITY_KIND,
+    EVIDENCE_PROVIDER_CAPABILITY_SCHEMA_VERSION,
     EvidenceAcquisitionStatus,
     EvidenceCompleteness,
     EvidenceCoverage,
@@ -138,28 +141,81 @@ def _string_array(value: Any, name: str) -> tuple[str, ...]:
     return tuple(value)
 
 
+def _reject_unexpected_fields(
+    data: Mapping[str, Any],
+    allowed: set[str],
+    *,
+    code: str,
+    noun: str,
+) -> None:
+    unexpected = set(data) - allowed
+    if unexpected:
+        raise ProtocolError(
+            code,
+            f"unsupported {noun} fields: " + ", ".join(sorted(unexpected)),
+        )
+
+
 def _evidence_provider_request(data: Mapping[str, Any]) -> EvidenceRequest:
+    _reject_unexpected_fields(
+        data,
+        {
+            "schema_version", "kind", "fingerprint_format", "fingerprint",
+            "request_id", "provider_id", "provider_version", "request_kind",
+            "requested_evidence_kinds", "subject", "spec", "semantic_scope",
+            "source_context", "snapshot_context", "bounds",
+        },
+        code="INVALID_EVIDENCE_PROVIDER_REQUEST",
+        noun="evidence provider request",
+    )
     try:
-        return EvidenceRequest(
+        request = EvidenceRequest(
+            schema_version=data.get("schema_version"),
+            kind=data.get("kind"),
+            fingerprint_format=data.get("fingerprint_format"),
             request_id=str(data.get("request_id") or ""),
             provider_id=str(data.get("provider_id") or ""),
             provider_version=str(data.get("provider_version") or ""),
-            claim_kind=str(data.get("claim_kind") or ""),
-            required_evidence_kinds=_string_array(data.get("required_evidence_kinds", ()), "required_evidence_kinds"),
-            accepted_evidence_kinds=_string_array(data.get("accepted_evidence_kinds", ()), "accepted_evidence_kinds"),
-            input=decode_markers(dict(_require_mapping(data.get("input", {}), "input"))),
+            request_kind=str(data.get("request_kind") or ""),
+            requested_evidence_kinds=_string_array(data.get("requested_evidence_kinds", ()), "requested_evidence_kinds"),
+            subject=decode_markers(dict(_require_mapping(data.get("subject", {}), "subject"))),
+            spec=decode_markers(dict(_require_mapping(data.get("spec", {}), "spec"))),
+            semantic_scope=decode_markers(dict(_require_mapping(data.get("semantic_scope", {}), "semantic_scope"))),
+            source_context=decode_markers(dict(_require_mapping(data.get("source_context", {}), "source_context"))),
+            snapshot_context=decode_markers(dict(_require_mapping(data.get("snapshot_context", {}), "snapshot_context"))),
             bounds=decode_markers(dict(_require_mapping(data.get("bounds", {}), "bounds"))),
         )
     except EvidenceProviderError as exc:
         raise ProtocolError("INVALID_EVIDENCE_PROVIDER_REQUEST", str(exc)) from exc
+    supplied = data.get("fingerprint")
+    if supplied is not None and supplied != request.fingerprint:
+        raise ProtocolError("INVALID_EVIDENCE_PROVIDER_REQUEST", "request fingerprint does not match canonical content")
+    return request
 
 
 def _evidence_provider_capability(data: Mapping[str, Any]) -> EvidenceProviderCapability:
+    _reject_unexpected_fields(
+        data,
+        {
+            "schema_version", "kind", "fingerprint_format", "fingerprint",
+            "provider_id", "version", "request_kinds", "produced_evidence_kinds",
+            "input_schema", "output_schema", "determinism", "side_effect_free",
+            "cost", "bounds", "coverage", "description",
+        },
+        code="INVALID_EVIDENCE_PROVIDER_CAPABILITY",
+        noun="evidence provider capability",
+    )
+    if type(data.get("schema_version")) is not int or data.get("schema_version") != EVIDENCE_PROVIDER_CAPABILITY_SCHEMA_VERSION:
+        raise ProtocolError("INVALID_EVIDENCE_PROVIDER_CAPABILITY", "unsupported capability schema_version")
+    if data.get("kind") != EVIDENCE_PROVIDER_CAPABILITY_KIND:
+        raise ProtocolError("INVALID_EVIDENCE_PROVIDER_CAPABILITY", "unsupported capability kind")
+    if data.get("fingerprint_format") != EVIDENCE_PROVIDER_CAPABILITY_FINGERPRINT_FORMAT:
+        raise ProtocolError("INVALID_EVIDENCE_PROVIDER_CAPABILITY", "unsupported capability fingerprint_format")
     try:
         capability = EvidenceProviderCapability(
             provider_id=str(data.get("provider_id") or ""),
             version=str(data.get("version") or ""),
-            claim_kinds=_string_array(data.get("claim_kinds", ()), "claim_kinds"),
+            request_kinds=_string_array(data.get("request_kinds", ()), "request_kinds"),
             produced_evidence_kinds=_string_array(data.get("produced_evidence_kinds", ()), "produced_evidence_kinds"),
             input_schema=decode_markers(dict(_require_mapping(data.get("input_schema", {}), "input_schema"))),
             output_schema=decode_markers(dict(_require_mapping(data.get("output_schema", {}), "output_schema"))),
@@ -180,47 +236,107 @@ def _evidence_provider_capability(data: Mapping[str, Any]) -> EvidenceProviderCa
 
 def _evidence_provider_result(data: Mapping[str, Any]) -> EvidenceProviderResult:
     try:
+        _reject_unexpected_fields(
+            data,
+            {
+                "schema_version", "kind", "fingerprint_format", "fingerprint",
+                "request_id", "request_fingerprint", "provider_id",
+                "provider_version", "status", "coverage", "evidence", "issues",
+                "capability_fingerprint",
+            },
+            code="INVALID_EVIDENCE_PROVIDER_RESULT",
+            noun="evidence provider result",
+        )
         coverage_data = _require_mapping(data.get("coverage", {}), "coverage")
+        _reject_unexpected_fields(
+            coverage_data,
+            {
+                "schema_version", "kind", "fingerprint_format", "fingerprint",
+                "completeness", "covered_evidence_kinds", "declared_scope",
+                "observed_scope", "declared_bounds", "consumed", "termination",
+                "truncated", "termination_reason", "source_identity",
+                "snapshot_identity", "details",
+            },
+            code="INVALID_EVIDENCE_PROVIDER_RESULT",
+            noun="evidence coverage",
+        )
         evidence_data = data.get("evidence", ())
         issues_data = data.get("issues", ())
         if not isinstance(evidence_data, (list, tuple)) or not isinstance(issues_data, (list, tuple)):
             raise ProtocolError("INVALID_EVIDENCE_PROVIDER_RESULT", "evidence and issues must be arrays")
-        return EvidenceProviderResult(
+        coverage = EvidenceCoverage(
+            schema_version=coverage_data.get("schema_version"),
+            kind=coverage_data.get("kind"),
+            fingerprint_format=coverage_data.get("fingerprint_format"),
+            completeness=EvidenceCompleteness(str(coverage_data.get("completeness") or "")),
+            covered_evidence_kinds=_string_array(coverage_data.get("covered_evidence_kinds", ()), "covered_evidence_kinds"),
+            declared_scope=decode_markers(dict(_require_mapping(coverage_data.get("declared_scope", {}), "coverage declared_scope"))),
+            observed_scope=decode_markers(dict(_require_mapping(coverage_data.get("observed_scope", {}), "coverage observed_scope"))),
+            declared_bounds=decode_markers(dict(_require_mapping(coverage_data.get("declared_bounds", {}), "coverage declared_bounds"))),
+            consumed=decode_markers(dict(_require_mapping(coverage_data.get("consumed", {}), "coverage consumed"))),
+            termination=decode_markers(dict(_require_mapping(coverage_data.get("termination", {}), "coverage termination"))),
+            truncated=coverage_data.get("truncated"),
+            termination_reason=str(coverage_data.get("termination_reason") or ""),
+            source_identity=decode_markers(dict(_require_mapping(coverage_data.get("source_identity", {}), "coverage source_identity"))),
+            snapshot_identity=decode_markers(dict(_require_mapping(coverage_data.get("snapshot_identity", {}), "coverage snapshot_identity"))),
+            details=decode_markers(dict(_require_mapping(coverage_data.get("details", {}), "coverage details"))),
+        )
+        supplied_coverage_fingerprint = coverage_data.get("fingerprint")
+        if supplied_coverage_fingerprint is not None and supplied_coverage_fingerprint != coverage.fingerprint:
+            raise ProtocolError("INVALID_EVIDENCE_PROVIDER_RESULT", "coverage fingerprint does not match canonical content")
+        result = EvidenceProviderResult(
+            schema_version=data.get("schema_version"),
+            kind=data.get("kind"),
+            fingerprint_format=data.get("fingerprint_format"),
             request_id=str(data.get("request_id") or ""),
+            request_fingerprint=str(data.get("request_fingerprint") or ""),
             provider_id=str(data.get("provider_id") or ""),
             provider_version=str(data.get("provider_version") or ""),
             status=EvidenceAcquisitionStatus(str(data.get("status") or "")),
-            coverage=EvidenceCoverage(
-                completeness=EvidenceCompleteness(str(coverage_data.get("completeness") or "")),
-                covered_evidence_kinds=_string_array(coverage_data.get("covered_evidence_kinds", ()), "covered_evidence_kinds"),
-                truncated=coverage_data.get("truncated"),
-                details=decode_markers(dict(_require_mapping(coverage_data.get("details", {}), "coverage details"))),
-            ),
-            evidence=tuple(
-                Evidence(
-                    id=str(record.get("id") or ""),
-                    kind=str(record.get("kind") or ""),
-                    payload=decode_markers(dict(_require_mapping(record.get("payload", {}), "evidence payload"))),
-                    source=record.get("source"),
-                    fingerprint=record.get("fingerprint"),
-                )
-                for record in (_require_mapping(item, "evidence record") for item in evidence_data)
-            ),
-            issues=tuple(
-                VerificationIssue(
-                    code=str(issue.get("code") or ""),
-                    message=str(issue.get("message") or ""),
-                    verdict=VerificationVerdict(str(issue.get("verdict") or "")),
-                    evidence_ids=_string_array(issue.get("evidence_ids", ()), "issue evidence_ids"),
-                )
-                for issue in (_require_mapping(item, "issue") for item in issues_data)
-            ),
+            coverage=coverage,
+            evidence=tuple(_evidence_provider_evidence_record(_require_mapping(item, "evidence record")) for item in evidence_data),
+            issues=tuple(_evidence_provider_issue(_require_mapping(item, "issue")) for item in issues_data),
             capability_fingerprint=str(data.get("capability_fingerprint") or ""),
         )
+        supplied_result_fingerprint = data.get("fingerprint")
+        if supplied_result_fingerprint is not None and supplied_result_fingerprint != result.fingerprint:
+            raise ProtocolError("INVALID_EVIDENCE_PROVIDER_RESULT", "result fingerprint does not match canonical content")
+        return result
     except ProtocolError:
         raise
     except (EvidenceProviderError, ValueError) as exc:
         raise ProtocolError("INVALID_EVIDENCE_PROVIDER_RESULT", str(exc)) from exc
+
+
+def _evidence_provider_evidence_record(record: Mapping[str, Any]) -> Evidence:
+    _reject_unexpected_fields(
+        record,
+        {"id", "kind", "payload", "source", "fingerprint"},
+        code="INVALID_EVIDENCE_PROVIDER_RESULT",
+        noun="evidence record",
+    )
+    return Evidence(
+        id=str(record.get("id") or ""),
+        kind=str(record.get("kind") or ""),
+        payload=decode_markers(dict(_require_mapping(record.get("payload", {}), "evidence payload"))),
+        source=record.get("source"),
+        fingerprint=record.get("fingerprint"),
+    )
+
+
+def _evidence_provider_issue(issue: Mapping[str, Any]) -> VerificationIssue:
+    _reject_unexpected_fields(
+        issue,
+        {"code", "message", "verdict", "evidence_ids"},
+        code="INVALID_EVIDENCE_PROVIDER_RESULT",
+        noun="provider issue",
+    )
+    return VerificationIssue(
+        code=str(issue.get("code") or ""),
+        message=str(issue.get("message") or ""),
+        verdict=VerificationVerdict(str(issue.get("verdict") or "")),
+        evidence_ids=_string_array(issue.get("evidence_ids", ()), "issue evidence_ids"),
+    )
 
 
 def _verification_bundle(data: Mapping[str, Any]) -> VerificationBundle:
