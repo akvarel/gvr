@@ -249,6 +249,23 @@ def test_validate_atomic_claim_rejects_unsupported_claim_kind():
         registry.validate_atomic_claim(_atomic(claim_kind="UNSUPPORTED"), version="1")
 
 
+@pytest.mark.parametrize(
+    "capability",
+    (
+        _cap(authoritative=False),
+        _cap(
+            determinism=VerifierDeterminism.M1,
+            authoritative=False,
+        ),
+    ),
+)
+def test_validate_atomic_claim_rejects_non_authoritative_capabilities(capability):
+    registry = VerifierCapabilityRegistry((capability,))
+
+    with pytest.raises(ValueError, match="authoritative"):
+        registry.validate_atomic_claim(_atomic(), version="1")
+
+
 def test_builtin_snapshot_matches_runtime_verifier_ids_and_honest_contracts():
     registry = builtin_verifier_capability_registry()
     expected = {
