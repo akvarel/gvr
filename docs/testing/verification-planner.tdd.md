@@ -91,6 +91,48 @@ Additional probes exercised 16 simultaneous graph, binding, request, verifier-re
 
 The final HEAD was also built as a wheel, installed without dependencies into a fresh isolated virtual environment, and exercised from outside the repository with `PYTHONPATH` cleared. The installed package passed the complete API/protocol fingerprint equivalence flow, strict immutability, missing-required-evidence reporting, registry-substitution rejection, nested fingerprint omission rejection, normalized metadata-alias rejection, and mocked no-execution checks.
 
+## Authorized remediation 18b: exact acquisition execution identity
+
+Schema v1 now treats one `ACQUIRE_EVIDENCE` step as one executable `(request_id, request_fingerprint)` key. The singular `request_id` is part of step identity. The same exact key reused across claims shares one step, while identical request semantics under different request IDs produce distinct steps, dependency edges, request consumption, and step consumption.
+
+### RED evidence
+
+Commit: `372dce0a2ff6e0135e030c3e9c5ef243a4499a15` (`test: expose acquisition request identity conflation`)
+
+Command:
+
+```bash
+python -m pytest -q tests/test_verification_planner.py tests/test_evidence_provider_hardening.py
+```
+
+Observed result before production changes: six planner cases failed. The existing step schema had only plural `request_ids`, same-semantics requests with different IDs were merged, `max_requests=1` did not exhaust, and protocol output did not preserve singular executable identities. The mandatory provider-result guard already passed because runtime result validation compares both the exact request ID and request fingerprint.
+
+### GREEN evidence
+
+Commit: `f3e170b0ec04d8b22fc735bea86efe0c5c96afe0` (`fix: preserve exact acquisition request identities`)
+
+Validation:
+
+```bash
+python -m pytest -o addopts='' -q tests/test_verification_planner.py
+# 60 passed
+
+python -m pytest -o addopts='' -q \
+  tests/test_verification_planner.py \
+  tests/test_evidence_provider_hardening.py
+# 119 passed
+
+python -m pytest
+# 442 passed
+
+python -m compileall -q src/gvr tests
+git diff --check 89614dec74d63a48426601f2c4bdcbac864d5d7a..HEAD
+```
+
+All commands completed successfully. A post-GREEN adversarial probe exercised all four graph/binding ordering combinations for two same-semantics request IDs, exact-key sharing across claims, request and step budget exhaustion, missing or misplaced singular request IDs, and rejection of the removed plural constructor field. No additional concrete semantic-versus-executable identity conflation was found in planner accounting, dependency mapping, protocol output, or provider-result validation.
+
+The package was built as `gvr-0.2.0-py3-none-any.whl` with SHA-256 `f2c9e3619b6d8c0169a718ee2ad86092e5a1cdb0fb5deca1eb9e3a0cae24039a`, installed without dependencies into a fresh virtual environment, and exercised outside the repository with `PYTHONPATH` cleared. The installed package produced two singular acquisition identities for identical semantics under `request-A` and `request-B`, reported `requests=2` and `steps=4`, preserved both identities through schema-v1 protocol output, and exhausted `max_requests=1` with `required=2`.
+
 ## Test specification
 
 | # | Guarantee | Test target | Type | Result |
@@ -100,7 +142,7 @@ The final HEAD was also built as a wheel, installed without dependencies into a 
 | 3 | Unknown, mismatched, wrong-version, wrong-fingerprint, unsupported, or non-authoritative verifier contracts fail closed | tests 03–08 | adversarial unit | PASS |
 | 4 | Unknown or structurally invalid provider contracts, evidence kinds, and classes fail closed | tests 09–15 | adversarial unit | PASS |
 | 5 | Missing required evidence requests or kinds fail closed | tests 16–17 | adversarial unit | PASS |
-| 6 | Only identical request fingerprints share acquisition, while conflicting reused request IDs are rejected | tests 18–19 | adversarial unit | PASS |
+| 6 | Only the same exact request ID and fingerprint share acquisition, while conflicting reused request IDs are rejected | tests 18–19 | adversarial unit | PASS |
 | 7 | Request, binding, graph, and registry insertion order is non-semantic | tests 20–22 | determinism | PASS |
 | 8 | Provider, verifier, claim, request, and dependency identity changes alter plan identity | tests 23–27 | identity | PASS |
 | 9 | `AND`, `OR`, and `NOT` preserve deterministic graph order and cycles are rejected | tests 28–29 | graph integration | PASS |
@@ -109,9 +151,15 @@ The final HEAD was also built as a wheel, installed without dependencies into a 
 | 12 | Schema-v1 protocol is deterministic, strict, fingerprinted, and the API is publicly exported | test 33 | protocol integration | PASS |
 | 13 | Invalid requests cannot hide missing required evidence, exact registries reject subclass substitution, and nested protocol fingerprints are mandatory | tests 34–36 | adversarial contract | PASS |
 | 14 | Planner issues reject verdict and evidence-adequacy metadata aliases | test 37 | adversarial contract | PASS |
+| 15 | Same semantics under different request IDs produce distinct exact acquisition steps and exact consumption | test 38 | executable identity | PASS |
+| 16 | Request budgets count same-semantics request IDs as separate executions | test 39 | boundary | PASS |
+| 17 | Request-ID-only changes alter acquisition step ID and full plan identity | test 40 | identity | PASS |
+| 18 | Schema-v1 protocol preserves two same-semantics request identities | test 41 | protocol integration | PASS |
+| 19 | Reordering the exact request set remains deterministic | test 42 | determinism | PASS |
+| 20 | A provider result for request A cannot validate against same-semantics request B | `test_result_for_request_a_cannot_validate_against_same_semantics_request_b` | adversarial integration | PASS |
 
 ## Coverage and known gaps
 
-The focused file contains 37 named adversarial scenarios and 55 executed pytest cases. Budget overflow is parameterized across seven independent limits, nested fingerprint omission across two locations, and metadata aliases across twelve direct, compound, nested, case, and hyphenation forms.
+The planner-focused file contains 42 named adversarial scenarios and 60 executed pytest cases. Together with evidence-provider hardening, the remediation-focused run contains 119 cases. Budget overflow is parameterized across seven independent limits, nested fingerprint omission across two locations, and metadata aliases across twelve direct, compound, nested, case, and hyphenation forms.
 
 No provider, verifier, Graphify, network, or file-system execution path is part of the planner. Runtime acquisition and verification remain intentionally outside this task.
