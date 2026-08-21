@@ -763,3 +763,119 @@ def test_33_protocol_is_deterministic_strict_fingerprinted_and_public() -> None:
     ):
         assert name in gvr.__all__
         assert getattr(gvr, name) is not None
+
+
+def test_34_invalid_requests_cannot_hide_missing_required_evidence_kinds() -> None:
+    verifier = verifier_capability(
+        accepted_evidence_kinds=("state.audit", "state.snapshot"),
+        required_evidence_kinds=("state.audit", "state.snapshot"),
+    )
+    snapshot = evidence_request(
+        request_id="request-snapshot",
+        requested_evidence_kinds=("state.snapshot",),
+    )
+    invalid_audit = evidence_request(
+        request_id="request-audit",
+        request_kind="UNSUPPORTED_CAPTURE",
+        requested_evidence_kinds=("state.audit",),
+    )
+
+    plan = compile_verification_plan(planning_request(
+        bindings=(binding(
+            verifier=verifier,
+            requests=(snapshot, invalid_audit),
+        ),),
+        verifiers=(verifier,),
+    ))
+
+    assert issue_codes(plan) == (
+        "MISSING_REQUIRED_EVIDENCE_KIND",
+        "UNSUPPORTED_REQUEST_KIND",
+    )
+    missing = next(
+        issue
+        for issue in plan.issues
+        if issue.code == "MISSING_REQUIRED_EVIDENCE_KIND"
+    )
+    assert missing.details == {"evidence_kinds": ("state.audit",)}
+
+
+def test_35_exact_registries_reject_subclasses_that_can_substitute_contracts() -> None:
+    honest_verifier = verifier_capability()
+    substituted_verifier = verifier_capability(coverage={"mode": "SUBSTITUTED"})
+
+    class SubstitutingVerifierRegistry(VerifierCapabilityRegistry):
+        def lookup(self, verifier_id: str, version: str) -> VerifierCapability:
+            return substituted_verifier
+
+    verifier_registry = SubstitutingVerifierRegistry((honest_verifier,))
+    base = planning_request()
+    with pytest.raises(VerificationPlanningError, match="exact VerifierCapabilityRegistry"):
+        VerificationPlanningRequest(
+            claim_graph=base.claim_graph,
+            bindings=(binding(verifier=substituted_verifier),),
+            verifier_capability_registry=verifier_registry,
+            verifier_capability_registry_fingerprint=verifier_registry.fingerprint,
+            evidence_provider_capability_registry=(
+                base.evidence_provider_capability_registry
+            ),
+            evidence_provider_capability_registry_fingerprint=(
+                base.evidence_provider_capability_registry.fingerprint
+            ),
+        )
+
+    honest_provider = provider_capability()
+    substituted_provider = provider_capability(coverage={"mode": "SUBSTITUTED"})
+
+    class SubstitutingProviderRegistry(EvidenceProviderCapabilityRegistry):
+        def lookup(
+            self,
+            provider_id: str,
+            version: str,
+        ) -> EvidenceProviderCapability:
+            return substituted_provider
+
+    provider_registry = SubstitutingProviderRegistry((honest_provider,))
+    with pytest.raises(
+        VerificationPlanningError,
+        match="exact EvidenceProviderCapabilityRegistry",
+    ):
+        VerificationPlanningRequest(
+            claim_graph=base.claim_graph,
+            bindings=base.bindings,
+            verifier_capability_registry=base.verifier_capability_registry,
+            verifier_capability_registry_fingerprint=(
+                base.verifier_capability_registry.fingerprint
+            ),
+            evidence_provider_capability_registry=provider_registry,
+            evidence_provider_capability_registry_fingerprint=(
+                provider_registry.fingerprint
+            ),
+        )
+
+
+@pytest.mark.parametrize(
+    "remove_fingerprint",
+    (
+        lambda payload: payload["bindings"][0]["evidence_requests"][0].pop(
+            "fingerprint"
+        ),
+        lambda payload: payload["evidence_provider_capability_registry"][
+            "capabilities"
+        ][0].pop("fingerprint"),
+    ),
+    ids=("evidence-request", "evidence-provider-capability"),
+)
+def test_36_protocol_rejects_omitted_nested_fingerprints(
+    remove_fingerprint: Any,
+) -> None:
+    payload = planning_request().to_dict()
+    remove_fingerprint(payload)
+
+    response = safe_handle_request({
+        "schema_version": 1,
+        "op": "compile_verification_plan",
+        "payload": payload,
+    })
+
+    assert response["payload"]["code"] == "INVALID_VERIFICATION_PLANNING_REQUEST"
