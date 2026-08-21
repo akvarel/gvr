@@ -1072,3 +1072,32 @@ def test_28_capability_descriptions_are_nonsemantic_for_execution_identity() -> 
         ),
     )
     assert wire_result["kind"] == "verification_execution_result"
+
+
+def test_29_runtime_registry_fingerprints_are_revalidated() -> None:
+    fixture = execution_fixture()
+    verifier_registry = fixture.request.verifier_runtime_registry
+    original_verifier_fingerprint = verifier_registry.fingerprint
+    object.__setattr__(verifier_registry, "fingerprint", "0" * 64)
+    try:
+        with pytest.raises(VerificationExecutionError):
+            replace(fixture.request)
+    finally:
+        object.__setattr__(
+            verifier_registry,
+            "fingerprint",
+            original_verifier_fingerprint,
+        )
+
+    provider_registry = fixture.request.evidence_provider_runtime_registry
+    original_provider_fingerprint = provider_registry.fingerprint
+    object.__setattr__(provider_registry, "fingerprint", "0" * 64)
+    try:
+        with pytest.raises(VerificationExecutionError):
+            replace(fixture.request)
+    finally:
+        object.__setattr__(
+            provider_registry,
+            "fingerprint",
+            original_provider_fingerprint,
+        )
