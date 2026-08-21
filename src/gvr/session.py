@@ -430,6 +430,7 @@ class VerificationSession:
         "_semantic_versions",
         "_budget_exhausted",
         "_consumption",
+        "_sealed",
     )
 
     schema_version = VERIFICATION_SESSION_SCHEMA_VERSION
@@ -474,6 +475,7 @@ class VerificationSession:
         }
         self._budget_exhausted = False
         self._consumption = SessionConsumption()
+        self._sealed = False
 
         for node in graph.nodes:
             verifier = (
@@ -515,6 +517,20 @@ class VerificationSession:
         """Return a defensive ledger snapshot; trusted writes go through session APIs."""
 
         return deepcopy(self._ledger)
+
+    @property
+    def sealed(self) -> bool:
+        return self._sealed
+
+    def seal(self) -> VerificationSession:
+        """Prevent further mutation after publishing a final session artifact."""
+
+        self._sealed = True
+        return self
+
+    def _ensure_mutable(self) -> None:
+        if self._sealed:
+            raise VerificationSessionError("verification session is sealed")
 
     @classmethod
     def compose(
@@ -623,6 +639,7 @@ class VerificationSession:
         claim_id: str,
         bundle: VerificationBundle,
     ) -> VerificationSnapshot | None:
+        self._ensure_mutable()
         self._validate_bundle(claim_id, bundle)
         bundle_available, evidence_bytes = self._bundle_budget_available(bundle)
         if not self._step_available() or not bundle_available:
@@ -673,6 +690,7 @@ class VerificationSession:
         self,
         node: CompositeClaim,
     ) -> VerificationSnapshot | None:
+        self._ensure_mutable()
         if not self._step_available():
             self._budget_exhausted = True
             return None
@@ -713,6 +731,7 @@ class VerificationSession:
         return snapshot
 
     def recompute(self) -> None:
+        self._ensure_mutable()
         for claim_id in self.graph.evaluation_order:
             if self._budget_exhausted:
                 return
@@ -723,6 +742,7 @@ class VerificationSession:
     def compose_claim(self, claim_id: str) -> VerificationSnapshot | None:
         """Compose one exact composite claim without traversing other plan steps."""
 
+        self._ensure_mutable()
         try:
             node = self.graph.claim(claim_id)
         except KeyError as exc:
@@ -732,6 +752,7 @@ class VerificationSession:
         return self._recompute_claim(node)
 
     def remove_evidence(self, evidence_id: str) -> None:
+        self._ensure_mutable()
         self._ledger.remove_evidence(evidence_id)
 
     @property

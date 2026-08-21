@@ -125,6 +125,44 @@ The wheel was installed without dependencies into a fresh virtual environment ou
 
 Parameterized tri-state tests expand the 26 named guarantees to 32 focused pytest cases.
 
+## Separate post-GREEN adversarial review
+
+Review target: `588ad26b6992e67f0a28f004777f615543dffbdd`.
+
+The separate review found five root defects and preserved six focused RED checkpoints, including a separate protocol reproducer for description invariance:
+
+1. `9b2839eb1440313f8ec4e995f0b4ca0a8ae6c980` showed that a caller could mutate `result.session` after publication, changing root verdicts and `to_dict()` while the stored execution-result fingerprint stayed unchanged.
+2. `3cbd3f04d088d88ad282c669bf104cc7cb162056` showed that nonsemantic verifier/provider capability descriptions changed `VerificationExecutionRequest.fingerprint`.
+3. `6e01fe73ce08aeb739bfdce7988f56956a8a2f3b` extended that description-invariance failure through schema-v1 runtime-registry injection.
+4. `bac005ac52a53bdaa04a5d4277550f7d9150e149` showed that forged runtime-registry fingerprint fields were not reconstructed and rejected.
+5. `09af1ac4e7dbc261abd0664c97929b7490aa1494` showed that a composition blocked by `max_compositions=0` was still executed and could publish root `PASS`.
+6. `8c27a5a62d39f101016c9c47c5541354d4806508` showed that a non-object top-level execution payload returned generic `INVALID_PAYLOAD` instead of the dedicated strict execution error.
+
+The remediation seals final execution sessions, reconstructs exact runtime registries and their fingerprints, fingerprints only runtime-registry semantic definitions while retaining full transport descriptors, treats capability descriptions and runtime-key order as nonsemantic, prevents blocked composition work, and remaps every malformed execution payload to `INVALID_VERIFICATION_EXECUTION_REQUEST`.
+
+Final validation after remediation:
+
+```text
+tests/test_verification_execution.py: 37 passed
+focused planner/provider/session/protocol integration: 338 passed
+full suite: 484 passed
+compileall: passed
+git diff --check: passed
+PYTHONHASHSEED 1 vs 777 replay: byte-identical
+strict malformed execution protocol matrix: passed
+runtime registry key reordering probe: passed
+```
+
+The final wheel was rebuilt and installed in a fresh environment with `PYTHONPATH` removed:
+
+```text
+gvr-0.2.0-py3-none-any.whl
+SHA-256 df71e37f6952a78e269ef10a0a30a56a7232fbc529532090bd6bdb90c517fc1b
+installed API/protocol verdict: PASS
+installed CLI built-in verdict: UNKNOWN
+installed CLI execution termination: COMPLETE
+```
+
 ## Architecture and license reference review
 
 Only material public findings were recorded in [Verification execution](../VERIFICATION_EXECUTION.md): deterministic precomputed structure supports validating the complete DAG before runtime work, and GitNexus's PolyForm Noncommercial license precludes copying code into this MIT project. No external code was copied or adapted.

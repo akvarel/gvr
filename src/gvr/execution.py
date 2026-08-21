@@ -1158,6 +1158,39 @@ class VerificationExecutionRequest:
         provider_registry = _revalidate_provider_registry(
             self.evidence_provider_runtime_registry.capability_registry
         )
+        try:
+            verifier_runtime_registry = VerifierRuntimeRegistry(
+                capability_registry=verifier_registry,
+                runtime_verifiers=self.verifier_runtime_registry.runtime_verifiers,
+            )
+            provider_runtime_registry = EvidenceProviderRuntimeRegistry(
+                capability_registry=provider_registry,
+                runtime_providers=(
+                    self.evidence_provider_runtime_registry.runtime_providers
+                ),
+            )
+        except (EvidenceProviderError, VerificationExecutionError) as exc:
+            raise VerificationExecutionError(str(exc)) from exc
+        if (
+            _sha256(
+                self.verifier_runtime_registry.fingerprint,
+                name="verifier_runtime_registry fingerprint",
+            )
+            != verifier_runtime_registry.fingerprint
+        ):
+            raise VerificationExecutionError(
+                "verifier runtime registry fingerprint is inconsistent"
+            )
+        if (
+            _sha256(
+                self.evidence_provider_runtime_registry.fingerprint,
+                name="evidence_provider_runtime_registry fingerprint",
+            )
+            != provider_runtime_registry.fingerprint
+        ):
+            raise VerificationExecutionError(
+                "provider runtime registry fingerprint is inconsistent"
+            )
         verifier_fingerprint = _sha256(
             self.verifier_capability_registry_fingerprint,
             name="verifier_capability_registry_fingerprint",
@@ -1234,7 +1267,7 @@ class VerificationExecutionRequest:
             if step.kind is VerificationPlanStepKind.ACQUIRE_EVIDENCE:
                 assert step.provider_id is not None and step.provider_version is not None
                 try:
-                    self.evidence_provider_runtime_registry.validate_runtime(
+                    provider_runtime_registry.validate_runtime(
                         step.provider_id,
                         step.provider_version,
                     )
@@ -1243,7 +1276,7 @@ class VerificationExecutionRequest:
             elif step.kind is VerificationPlanStepKind.VERIFY_ATOMIC_CLAIM:
                 assert step.verifier_id is not None and step.verifier_version is not None
                 try:
-                    self.verifier_runtime_registry.validate_runtime(
+                    verifier_runtime_registry.validate_runtime(
                         step.verifier_id,
                         step.verifier_version,
                     )
@@ -1254,6 +1287,16 @@ class VerificationExecutionRequest:
         object.__setattr__(self, "claim_graph", graph)
         object.__setattr__(self, "claim_graph_fingerprint", graph_fingerprint)
         object.__setattr__(self, "roots", roots)
+        object.__setattr__(
+            self,
+            "verifier_runtime_registry",
+            verifier_runtime_registry,
+        )
+        object.__setattr__(
+            self,
+            "evidence_provider_runtime_registry",
+            provider_runtime_registry,
+        )
         object.__setattr__(
             self,
             "verifier_capability_registry_fingerprint",
@@ -1299,12 +1342,14 @@ class VerificationExecutionRequest:
             "claim_graph": self.claim_graph.to_dict(),
             "claim_graph_fingerprint": self.claim_graph_fingerprint,
             "roots": self.roots,
-            "verifier_runtime_registry": self.verifier_runtime_registry.to_dict(),
+            "verifier_runtime_registry": (
+                self.verifier_runtime_registry.semantic_definition()
+            ),
             "verifier_capability_registry_fingerprint": (
                 self.verifier_capability_registry_fingerprint
             ),
             "evidence_provider_runtime_registry": (
-                self.evidence_provider_runtime_registry.to_dict()
+                self.evidence_provider_runtime_registry.semantic_definition()
             ),
             "evidence_provider_capability_registry_fingerprint": (
                 self.evidence_provider_capability_registry_fingerprint
@@ -1315,6 +1360,12 @@ class VerificationExecutionRequest:
 
     def to_dict(self) -> dict[str, Any]:
         value = _export(self.semantic_definition())
+        value["verifier_runtime_registry"] = (
+            self.verifier_runtime_registry.to_dict()
+        )
+        value["evidence_provider_runtime_registry"] = (
+            self.evidence_provider_runtime_registry.to_dict()
+        )
         value.update({
             "fingerprint_format": self.fingerprint_format,
             "fingerprint": self.fingerprint,
@@ -1370,6 +1421,10 @@ class VerificationExecutionResult:
         if type(self.session) is not VerificationSession:
             raise VerificationExecutionError(
                 "session must be an exact VerificationSession"
+            )
+        if not self.session.sealed:
+            raise VerificationExecutionError(
+                "execution result session must be sealed"
             )
         if not isinstance(self.provider_results, Mapping):
             raise VerificationExecutionError("provider_results must be a mapping")
@@ -1730,9 +1785,7 @@ def execute_verification_plan(
                 bundle_fingerprint = bundle.fingerprint
                 verdict = VerificationVerdict.UNKNOWN
             elif step.kind is VerificationPlanStepKind.COMPOSE_CLAIM:
-                assert step.claim_id is not None
-                session.compose_claim(step.claim_id)
-                verdict = session.claim_state(step.claim_id).effective_verdict
+                verdict = VerificationVerdict.UNKNOWN
             record = VerificationExecutionStep(
                 step_id=step.step_id,
                 kind=step.kind,
@@ -2070,6 +2123,7 @@ def execute_verification_plan(
         termination = VerificationExecutionTermination.FAILED_CLOSED
     else:
         termination = VerificationExecutionTermination.COMPLETE
+    session.seal()
     return VerificationExecutionResult(
         request_fingerprint=request.fingerprint,
         plan_fingerprint=request.plan_fingerprint,

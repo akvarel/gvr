@@ -148,6 +148,8 @@ Execution issues contain stable codes and exact step, claim, or request IDs. The
 
 `VerificationExecutionLimits` can bound those deterministic dimensions. It never uses wall-clock time, random sampling, or nondeterministic scheduling.
 
+When a limit blocks a step, the provider, verifier, or composite operation is not invoked. A blocked atomic step receives an explicit `UNKNOWN` bundle; a blocked composite remains `UNKNOWN` rather than being composed to a definitive verdict.
+
 Final execution termination is:
 
 - `COMPLETE` when every step completes, including legitimate verifier `UNKNOWN` results;
@@ -169,11 +171,14 @@ These are execution states, not product decisions.
 - deterministic consumption and termination;
 - a canonical result fingerprint.
 
+Before publication, the executor seals the final `VerificationSession`. Public session mutation methods then raise `VerificationSessionError`, so a caller cannot change root verdicts or session content while leaving the already-issued execution-result fingerprint behind.
+
 The result fingerprint includes evidence and bundle identities through the provider results and session. Changing an evidence ID, payload, source, or producer fingerprint changes the applicable artifact and execution identity.
 
 The fingerprint excludes:
 
 - correlation IDs;
+- human capability descriptions;
 - clocks and timestamps;
 - random values;
 - runtime object identity;

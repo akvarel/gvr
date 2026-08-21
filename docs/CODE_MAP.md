@@ -114,7 +114,7 @@ Important public types include:
 - `SessionBudget`;
 - session termination states.
 
-This file implements exact `AND`, `OR`, and `NOT` composition, root selection, stale handling, deterministic session accounting, and session semantic identity.
+This file implements exact `AND`, `OR`, and `NOT` composition, root selection, stale handling, deterministic session accounting, session semantic identity, exact one-claim composition, and optional sealing for published execution-result sessions.
 
 It uses `ClaimLedger`; it does not replace the ledger's evidence-version logic.
 

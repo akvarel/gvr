@@ -198,6 +198,8 @@ Runtime or prerequisite failures materialize explicit `UNKNOWN` atomic bundles b
 
 The execution-result fingerprint includes the final session fingerprint but excludes the optional nonsemantic correlation ID. See [Verification execution](VERIFICATION_EXECUTION.md).
 
+The executor seals that final session before returning it. Directly composed sessions remain mutable unless a caller explicitly calls `seal()`, preserving existing incremental workflows while making published execution results stable.
+
 ## JSON protocol
 
 Schema version 1 exposes both direct composition and exact plan execution:

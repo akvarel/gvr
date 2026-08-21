@@ -1233,11 +1233,11 @@ def _verifier_runtime_registry(
         data.get("runtime_keys"),
         noun="verifier runtime registry",
     )
-    if registry.capability_registry.to_dict() != capability_registry.to_dict():
+    if registry.capability_registry.fingerprint != capability_registry.fingerprint:
         raise _execution_protocol_error(
             "verifier runtime capability registry does not match payload"
         )
-    if expected_keys != registry.runtime_keys:
+    if set(expected_keys) != set(registry.runtime_keys):
         raise _execution_protocol_error(
             "verifier runtime keys do not match exact runtime registry"
         )
@@ -1301,11 +1301,11 @@ def _provider_runtime_registry(
         data.get("runtime_keys"),
         noun="evidence provider runtime registry",
     )
-    if registry.capability_registry.to_dict() != capability_registry.to_dict():
+    if registry.capability_registry.fingerprint != capability_registry.fingerprint:
         raise _execution_protocol_error(
             "provider runtime capability registry does not match payload"
         )
-    if expected_keys != registry.runtime_keys:
+    if set(expected_keys) != set(registry.runtime_keys):
         raise _execution_protocol_error(
             "provider runtime keys do not match exact runtime registry"
         )
@@ -1536,7 +1536,15 @@ def handle_request(
             f"expected schema_version={SCHEMA_VERSION}",
         )
     op = str(request.get("op") or "")
-    payload = _require_mapping(request.get("payload", {}), "payload")
+    try:
+        payload = _require_mapping(request.get("payload", {}), "payload")
+    except ProtocolError as exc:
+        if op == "execute_verification_plan":
+            raise ProtocolError(
+                "INVALID_VERIFICATION_EXECUTION_REQUEST",
+                exc.message,
+            ) from exc
+        raise
 
     if op == "execute_verification_plan":
         unexpected_request_fields = set(request) - {
