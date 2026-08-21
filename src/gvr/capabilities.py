@@ -572,7 +572,9 @@ BUILTIN_VERIFIER_CAPABILITY_REGISTRY = VerifierCapabilityRegistry((
         accepted_evidence_kinds=(
             "graphify.data_flow_edge",
             "graphify.data_flow_boundary",
+            "graphify.data_flow_query_result",
         ),
+        required_evidence_kinds=(),
         description="Checks captured Graphify traversal observations without reparsing source.",
     ),
     _builtin(

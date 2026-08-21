@@ -24,8 +24,8 @@ Its semantic fields are:
 | `verifier_id` | Exact value emitted in `VerificationReport.verifier`. |
 | `version` | Exact capability contract version used for lookup. |
 | `claim_kinds` | Published `AtomicClaim.claim_kind` values this verifier supports. |
-| `accepted_evidence_kinds` | Published `Evidence.kind` values the verifier can consume. |
-| `required_evidence_kinds` | Evidence kinds required by every invocation. This must be a subset of accepted kinds. |
+| `accepted_evidence_kinds` | Published `Evidence.kind` values that may appear in a verifier result. |
+| `required_evidence_kinds` | Evidence kinds that must appear every time. This must be a subset of accepted kinds. |
 | `input_schema` | Canonical structured input contract, when GVR has published one. |
 | `output_schema` | Canonical structured output contract, when GVR has published one. |
 | `determinism` | `D0`, `D1`, `O1`, or `M1`. |
@@ -132,10 +132,18 @@ Unknown verifier IDs, unknown versions, unsupported claim kinds, and ambiguous o
 | `registry` | `1` | `D1` | `MEDIUM` | Combines the three goal/action reports. No atomic claim contract. |
 | `text_search` | `1` | `D0` | `LOW` | No stable `AtomicClaim` or `Evidence.kind` contract yet. |
 | `functional_regression` | `1` | `D1` | `MEDIUM` | Uses functional snapshots, but no stable `Evidence.kind` contract is emitted. |
-| `gvr.graphify.data_flow.v1` | `1` | `O1` | `EXTERNAL` | Claims: `CAN_FLOW_TO`, `NO_SUPPORTED_PATH`. Evidence: `graphify.data_flow_edge`, `graphify.data_flow_boundary`. |
+| `gvr.graphify.data_flow.v1` | `1` | `O1` | `EXTERNAL` | Claims: `CAN_FLOW_TO`, `NO_SUPPORTED_PATH`. Evidence may be an edge, a query result, or a blocking boundary. |
 | `gvr.claim_graph.composite.v1` | `1` | `D1` | `MEDIUM` | Operates on composite nodes and bundles, not `AtomicClaim.claim_kind`. |
 
 The snapshot uses the verifier IDs the runtime actually emits. It does not invent claim kinds, evidence kinds, or formal schemas for APIs that do not yet publish them.
+
+The data-flow verifier publishes these evidence kinds:
+
+- `graphify.data_flow_edge` for a direct step in a proven path;
+- `graphify.data_flow_query_result` for a complete no-path result or a zero-step identity path;
+- `graphify.data_flow_boundary` when a blocking boundary keeps the answer unknown.
+
+Its `required_evidence_kinds` list is empty because these proof paths are conditional. No single evidence kind appears in every result.
 
 ## Schema-v1 discovery operation
 
