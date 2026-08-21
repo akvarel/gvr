@@ -101,6 +101,25 @@ It deals with details such as:
 
 Most users do not need this file. It matters when implementing another language client or checking fingerprint compatibility.
 
+## `src/gvr/session.py`
+
+This contains the multi-claim composition layer.
+
+Important public types include:
+
+- `AtomicClaim`;
+- `CompositeClaim`;
+- `ClaimGraph`;
+- `VerificationSession`;
+- `SessionBudget`;
+- session termination states.
+
+This file implements exact `AND`, `OR`, and `NOT` composition, root selection, stale handling, deterministic session accounting, and session semantic identity.
+
+It uses `ClaimLedger`; it does not replace the ledger's evidence-version logic.
+
+Read [Verification sessions](VERIFICATION_SESSIONS.md) before changing this file.
+
 ## `src/gvr/adapters/graphify.py`
 
 This converts Graphify traversal output into evidence structures GVR can check.
@@ -151,7 +170,10 @@ Current operations include:
 - `verify_functional_regression`;
 - `verify_text_search`;
 - `verify_data_flow_claim`;
-- `verify_data_flow_claim_bundle`.
+- `verify_data_flow_claim_bundle`;
+- `compose_verification_session`.
+
+The session wire path also validates the explicit bundle fingerprint format before accepting a materialized bundle.
 
 ## `src/gvr/wire.py`
 
@@ -174,6 +196,8 @@ The tests are part of the specification.
 GVR uses many adversarial tests because the most dangerous bugs are often not normal crashes. They are false definitive answers such as a wrong PASS or a wrong absence result.
 
 When changing verifier semantics, add tests that try to make GVR produce a false definitive verdict.
+
+Session tests also check that different operation histories cannot change semantic identity when the final semantic state is the same.
 
 ## Where should a new verifier go?
 
