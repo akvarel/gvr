@@ -10,8 +10,10 @@ You do not need to know AI research terms to read it. You do not need to know gr
 2. [Core concepts](CORE_CONCEPTS.md) — claim, evidence, verifier, verdict, bundle, ledger, and freshness.
 3. [How GVR works](HOW_GVR_WORKS.md) — what happens from a claim to a final result.
 4. [Examples](EXAMPLES.md) — small examples with text, program behavior, and data flow.
-5. [CLI and JSON protocol](CLI_AND_PROTOCOL.md) — how another program can call GVR.
-6. [Design rules](DESIGN_RULES.md) — the safety rules GVR follows and why they exist.
+5. [Architecture](ARCHITECTURE.md) — how the current GVR pieces fit together.
+6. [CLI and JSON protocol](CLI_AND_PROTOCOL.md) — how another program can call GVR.
+7. [Code map](CODE_MAP.md) — where the main pieces live in the repository.
+8. [Design rules](DESIGN_RULES.md) — the safety rules GVR follows and why they exist.
 
 ## The shortest explanation
 
@@ -55,3 +57,13 @@ ClaimLedger
 The bundle keeps the result together with the evidence used for that result.
 
 The ledger remembers which result depends on which evidence. If the evidence changes, the old result becomes stale and must not be treated as current truth.
+
+## If you want to contribute
+
+Read [the code map](CODE_MAP.md) first.
+
+Then read the tests next to the area you want to change. In GVR, adversarial tests are part of the design: they try to make the runtime produce a false definitive PASS or FAIL.
+
+When adding or changing a verifier, keep the main rule:
+
+> If the verifier cannot safely prove PASS or FAIL under its contract, return UNKNOWN.
