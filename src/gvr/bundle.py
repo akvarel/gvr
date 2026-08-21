@@ -10,6 +10,8 @@ from .canonical import (
     BUNDLE_FINGERPRINT_FORMAT,
     CanonicalizationError,
     canonical_transport_fingerprint,
+    canonical_transport_json,
+    canonical_utf8_key,
 )
 from .model import (
     INDETERMINATE,
@@ -50,7 +52,7 @@ class _FrozenDict(dict[str, Any]):
 
 
 def _canonical_value(value: Any, *, path: str) -> Any:
-    """Return strict JSON-compatible semantic content with sorted mapping keys."""
+    """Return strict JSON-compatible semantic content with stable mappings."""
 
     if value is MISSING:
         return {"$gvr": "MISSING"}
@@ -70,7 +72,7 @@ def _canonical_value(value: Any, *, path: str) -> Any:
             if not isinstance(key, str):
                 raise BundleValidationError(f"{path} contains a non-string mapping key")
             normalized[key] = _canonical_value(value[key], path=f"{path}.{key}")
-        return {key: normalized[key] for key in sorted(normalized)}
+        return normalized
     if isinstance(value, (list, tuple)):
         return [
             _canonical_value(item, path=f"{path}[{index}]")
@@ -106,13 +108,20 @@ def _canonical_json(value: Any) -> str:
     )
 
 
+def _utf8_sort(values: Iterable[str]) -> tuple[str, ...]:
+    try:
+        return tuple(sorted(values, key=lambda value: canonical_utf8_key(value)))
+    except CanonicalizationError as exc:
+        raise BundleValidationError(str(exc)) from exc
+
+
 def _normalize_ids(values: Iterable[str], *, name: str) -> tuple[str, ...]:
     ids = tuple(values)
     if any(not isinstance(item, str) or not item for item in ids):
         raise BundleValidationError(f"{name} must contain non-empty strings")
     if len(set(ids)) != len(ids):
         raise BundleValidationError(f"{name} contains duplicate IDs")
-    return tuple(sorted(ids))
+    return _utf8_sort(ids)
 
 
 def _canonical_issue(issue: VerificationIssue) -> dict[str, Any]:
@@ -120,7 +129,7 @@ def _canonical_issue(issue: VerificationIssue) -> dict[str, Any]:
         "code": issue.code,
         "message": issue.message,
         "verdict": issue.verdict.value,
-        "evidence_ids": list(issue.evidence_ids),
+        "evidence_ids": list(_utf8_sort(issue.evidence_ids)),
     }
 
 
@@ -151,7 +160,7 @@ def _normalize_report(report: VerificationReport) -> VerificationReport:
         if unrelated:
             raise BundleValidationError(
                 "issue evidence must also be present in report evidence_ids: "
-                + ", ".join(sorted(unrelated))
+                + ", ".join(_utf8_sort(unrelated))
             )
         normalized_issues.append(
             VerificationIssue(
@@ -161,7 +170,12 @@ def _normalize_report(report: VerificationReport) -> VerificationReport:
                 evidence_ids=issue_ids,
             )
         )
-    normalized_issues.sort(key=lambda item: _canonical_json(_canonical_issue(item)))
+    try:
+        normalized_issues.sort(
+            key=lambda item: canonical_transport_json(_canonical_issue(item))
+        )
+    except CanonicalizationError as exc:
+        raise BundleValidationError(str(exc)) from exc
     return VerificationReport(
         verdict=report.verdict,
         verifier=report.verifier,
@@ -219,28 +233,37 @@ def _normalize_evidence(
             )
         semantics_by_id[evidence.id] = semantic
         by_id.setdefault(evidence.id, normalized)
-    return tuple(by_id[evidence_id] for evidence_id in sorted(by_id))
+    return tuple(by_id[evidence_id] for evidence_id in _utf8_sort(by_id))
 
 
 def _canonical_report(report: VerificationReport) -> dict[str, Any]:
+    issues = [_canonical_issue(issue) for issue in report.issues]
+    try:
+        issues.sort(key=canonical_transport_json)
+    except CanonicalizationError as exc:
+        raise BundleValidationError(str(exc)) from exc
     return {
         "verdict": report.verdict.value,
         "verifier": report.verifier,
-        "issues": [_canonical_issue(issue) for issue in report.issues],
-        "evidence_ids": list(report.evidence_ids),
+        "issues": issues,
+        "evidence_ids": list(_utf8_sort(report.evidence_ids)),
         "metadata": _canonical_value(report.metadata, path="report.metadata"),
     }
 
 
 def _bundle_content(bundle: VerificationBundle) -> dict[str, Any]:
+    evidence = sorted(
+        bundle.evidence,
+        key=lambda item: canonical_utf8_key(item.id, path="evidence id"),
+    )
     return {
         "schema_version": bundle.schema_version,
         "kind": bundle.kind,
         "fingerprint_format": bundle.fingerprint_format,
         "verifier": bundle.verifier,
         "report": _canonical_report(bundle.report),
-        "evidence": [_canonical_evidence(item) for item in bundle.evidence],
-        "claim_dependency_ids": list(bundle.claim_dependency_ids),
+        "evidence": [_canonical_evidence(item) for item in evidence],
+        "claim_dependency_ids": list(_utf8_sort(bundle.claim_dependency_ids)),
     }
 
 
@@ -282,12 +305,12 @@ class VerificationBundle:
         if missing:
             raise BundleValidationError(
                 "missing evidence records for report dependencies: "
-                + ", ".join(sorted(missing))
+                + ", ".join(_utf8_sort(missing))
             )
         if extra:
             raise BundleValidationError(
                 "unreferenced evidence records are not allowed: "
-                + ", ".join(sorted(extra))
+                + ", ".join(_utf8_sort(extra))
             )
 
         object.__setattr__(self, "verifier", report.verifier)
