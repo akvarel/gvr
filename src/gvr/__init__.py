@@ -84,7 +84,7 @@ from .model import (
 )
 from .adapters.graphify import GraphifyTraversalEvidence, ingest_traversal_result
 from .evidence_providers import (
-    BUILTIN_EVIDENCE_PROVIDER_REGISTRY,
+    BUILTIN_EVIDENCE_PROVIDER_CAPABILITY_REGISTRY,
     EVIDENCE_COVERAGE_FINGERPRINT_FORMAT,
     EVIDENCE_COVERAGE_KIND,
     EVIDENCE_COVERAGE_SCHEMA_VERSION,
@@ -105,16 +105,19 @@ from .evidence_providers import (
     EvidenceCoverage,
     EvidenceProvider,
     EvidenceProviderCapability,
+    EvidenceProviderCapabilityRegistry,
     EvidenceProviderCompatibility,
     EvidenceProviderError,
-    EvidenceProviderRegistry,
+    EvidenceProviderIssue,
     EvidenceProviderResult,
+    EvidenceProviderRuntimeRegistry,
     EvidenceProviderVerifierInput,
     EvidenceRequest,
     UnknownEvidenceProviderError,
-    builtin_evidence_provider_registry,
+    builtin_evidence_provider_capability_registry,
     provider_capability_is_compatible_with_verifier,
     provider_result_for_verifier,
+    validate_evidence_provider_request,
     validate_evidence_provider_result,
 )
 from .protocol import ProtocolError, handle_request, safe_handle_request
@@ -186,13 +189,16 @@ __all__ = [
     "EVIDENCE_PROVIDER_RESULT_FINGERPRINT_FORMAT",
     "EvidenceAcquisitionStatus", "EvidenceCompleteness", "EvidenceCoverage",
     "EvidenceProvider", "EvidenceProviderCapability",
+    "EvidenceProviderCapabilityRegistry", "EvidenceProviderRuntimeRegistry",
     "EvidenceProviderCompatibility", "EvidenceProviderError",
-    "EvidenceProviderRegistry", "EvidenceProviderResult", "EvidenceRequest",
+    "EvidenceProviderIssue", "EvidenceProviderResult", "EvidenceRequest",
     "EvidenceProviderVerifierInput",
-    "UnknownEvidenceProviderError", "BUILTIN_EVIDENCE_PROVIDER_REGISTRY",
-    "builtin_evidence_provider_registry",
+    "UnknownEvidenceProviderError",
+    "BUILTIN_EVIDENCE_PROVIDER_CAPABILITY_REGISTRY",
+    "builtin_evidence_provider_capability_registry",
     "provider_capability_is_compatible_with_verifier",
     "provider_result_for_verifier",
+    "validate_evidence_provider_request",
     "validate_evidence_provider_result",
 ]
 

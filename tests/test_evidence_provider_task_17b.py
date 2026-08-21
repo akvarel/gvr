@@ -183,6 +183,12 @@ def test_runtime_rechecks_mutable_provider_identity_and_capability_before_each_c
         runtime.acquire(request())
     assert provider.calls == []
 
+    provider.capability = capability()
+    provider.acquire = None  # type: ignore[method-assign]
+    with pytest.raises(ep.EvidenceProviderError, match="acquire must be callable"):
+        runtime.acquire(request(), fail_closed=True)
+    assert provider.calls == []
+
 
 def test_fail_closed_only_converts_provider_execution_exceptions() -> None:
     execution_failure = Provider(RuntimeError("token=super-secret"))

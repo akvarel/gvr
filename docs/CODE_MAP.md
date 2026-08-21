@@ -179,13 +179,14 @@ This contains the evidence acquisition contract layer:
 
 - `EvidenceRequest`;
 - `EvidenceCoverage`;
-- `EvidenceProviderResult`;
-- `EvidenceProviderCapability`;
-- `EvidenceProviderRegistry`;
-- provider-to-verifier compatibility checks;
-- result validation against the exact request and capability.
+- `EvidenceProviderResult` and verdict-free `EvidenceProviderIssue`;
+- `EvidenceProviderCapability` with source/snapshot class metadata;
+- pure `EvidenceProviderCapabilityRegistry`;
+- executable `EvidenceProviderRuntimeRegistry`;
+- provider-to-verifier structural compatibility checks;
+- pre-invocation request validation and post-result validation against the exact request and capability.
 
-The registry is deterministic and exact. It queries descriptors by optional `request_kind` and `evidence_kind` filters, dispatches runtime providers only by exact `(provider_id, version)`, and can fail closed to an unavailable result. The built-in schema-v1 registry is intentionally empty until GVR ships stable acquisition providers.
+The capability registry is deterministic, fingerprinted, and has no runtime objects. The runtime registry dispatches only an exact `(provider_id, version)` binding and rechecks mutable provider identity immediately before invocation. Fail-closed conversion applies only to an exception from provider execution and emits deterministic diagnostics with no raw exception text. The built-in schema-v1 capability registry is intentionally empty until GVR ships stable acquisition providers.
 
 ## `src/gvr/protocol.py`
 

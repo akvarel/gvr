@@ -119,7 +119,7 @@ See [Verifier capabilities](VERIFIER_CAPABILITIES.md) for field and fingerprint 
 
 ### `describe_evidence_provider_capabilities`
 
-Returns the immutable built-in evidence provider capability snapshot. The schema-v1 built-in registry is honestly empty because no runtime acquisition providers ship with GVR yet.
+Returns the immutable built-in `EvidenceProviderCapabilityRegistry` snapshot. It is a pure descriptor registry with no runtime bindings. The schema-v1 built-in snapshot is honestly empty because no runtime acquisition providers ship with GVR yet.
 
 ```json
 {
@@ -133,7 +133,7 @@ Optional filters are `request_kind` and `evidence_kind`. Both match exact publis
 
 ### `validate_evidence_provider_result`
 
-Parses strict serialized `request`, `capability`, and `result` objects, including complete coverage, source/snapshot identities, schema/kind fields, fingerprint formats, and fingerprints. It validates the result against the exact request fingerprint and provider capability, rejects cross-request replay and claimed fingerprint mismatches, and returns a normalized `evidence_provider_result`.
+Parses strict serialized `request`, `capability`, and `result` objects, including capability `source_classes` and `snapshot_classes`, complete coverage, source/snapshot identities, verdict-free provider issues, schema/kind fields, fingerprint formats, and fingerprints. It validates the result against the exact request fingerprint and provider capability, rejects cross-request replay, uncovered emitted evidence, contradictory partial coverage, truth-like control metadata, issue `verdict` fields, and claimed fingerprint mismatches, then returns a normalized `evidence_provider_result`.
 
 Unknown or obsolete nested fields and invalid values return machine-readable `protocol_error` responses through the safe handler, including `INVALID_EVIDENCE_PROVIDER_REQUEST`, `INVALID_EVIDENCE_PROVIDER_CAPABILITY`, and `INVALID_EVIDENCE_PROVIDER_RESULT`.
 

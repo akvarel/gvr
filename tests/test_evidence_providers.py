@@ -16,7 +16,7 @@ from gvr import (
     safe_handle_request,
 )
 from gvr.evidence_providers import (
-    BUILTIN_EVIDENCE_PROVIDER_REGISTRY,
+    BUILTIN_EVIDENCE_PROVIDER_CAPABILITY_REGISTRY,
     EVIDENCE_PROVIDER_CAPABILITY_FINGERPRINT_FORMAT,
     EVIDENCE_PROVIDER_CAPABILITY_REGISTRY_FINGERPRINT_FORMAT,
     EvidenceAcquisitionStatus,
@@ -24,12 +24,14 @@ from gvr.evidence_providers import (
     EvidenceCoverage,
     EvidenceProvider,
     EvidenceProviderCapability,
+    EvidenceProviderCapabilityRegistry,
     EvidenceProviderError,
-    EvidenceProviderRegistry,
+
     EvidenceProviderResult,
+    EvidenceProviderRuntimeRegistry,
     EvidenceRequest,
     UnknownEvidenceProviderError,
-    builtin_evidence_provider_registry,
+    builtin_evidence_provider_capability_registry,
     provider_capability_is_compatible_with_verifier,
     validate_evidence_provider_result,
 )
@@ -59,6 +61,8 @@ def capability(**overrides: Any) -> EvidenceProviderCapability:
         "version": "1",
         "request_kinds": ("CAN_FLOW_TO",),
         "produced_evidence_kinds": ("graphify.data_flow_query_result", "graphify.data_flow_edge"),
+        "source_classes": ("git.repository",),
+        "snapshot_classes": ("git.commit",),
         "input_schema": {},
         "output_schema": {},
         "determinism": VerifierDeterminism.O1,
@@ -200,18 +204,18 @@ def test_capability_rejects_invalid_values(field: str, value: Any) -> None:
 def test_registry_is_deterministic_exact_and_rejects_conflicting_duplicates() -> None:
     a = capability(provider_id="provider.b")
     b = capability(provider_id="provider.a")
-    reg = EvidenceProviderRegistry((a, b, a))
+    reg = EvidenceProviderCapabilityRegistry((a, b, a))
     assert [c.provider_id for c in reg.list()] == ["provider.a", "provider.b"]
     assert reg.lookup("provider.a", "1") is b
     with pytest.raises(UnknownEvidenceProviderError):
         reg.lookup("provider.a", "2")
     with pytest.raises(EvidenceProviderError):
-        EvidenceProviderRegistry((a, capability(provider_id="provider.b", request_kinds=("NO_SUPPORTED_PATH",))))
+        EvidenceProviderCapabilityRegistry((a, capability(provider_id="provider.b", request_kinds=("NO_SUPPORTED_PATH",))))
 
 
 def test_builtin_provider_registry_is_honestly_empty_and_exported() -> None:
-    assert builtin_evidence_provider_registry().list() == ()
-    assert BUILTIN_EVIDENCE_PROVIDER_REGISTRY.to_dict()["capabilities"] == []
+    assert builtin_evidence_provider_capability_registry().list() == ()
+    assert BUILTIN_EVIDENCE_PROVIDER_CAPABILITY_REGISTRY.to_dict()["capabilities"] == []
     response = handle_request({"schema_version": 1, "op": "describe_evidence_provider_capabilities", "payload": {}})
     assert response["kind"] == "evidence_provider_capability_registry"
     assert response["payload"]["capabilities"] == []
@@ -238,7 +242,8 @@ def test_runtime_registry_invokes_exact_provider_without_fallback_and_fails_clos
     fallback_cap = capability(provider_id="provider.fallback")
     provider = Provider(result(request_id=req.request_id), alpha_cap)
     fallback = Provider(result(provider_id="provider.fallback"), fallback_cap)
-    reg = EvidenceProviderRegistry((alpha_cap, fallback_cap), runtime_providers={("provider.alpha", "1"): provider, ("provider.fallback", "1"): fallback})
+    capability_registry = EvidenceProviderCapabilityRegistry((alpha_cap, fallback_cap))
+    reg = EvidenceProviderRuntimeRegistry(capability_registry, {("provider.alpha", "1"): provider, ("provider.fallback", "1"): fallback})
     assert isinstance(provider, EvidenceProvider)
     acquired = reg.acquire(req)
     assert acquired.request_id == req.request_id
@@ -249,11 +254,12 @@ def test_runtime_registry_invokes_exact_provider_without_fallback_and_fails_clos
         reg.acquire(request(provider_version="2"))
 
     failing_cap = capability()
-    failing = EvidenceProviderRegistry((failing_cap,), runtime_providers={("provider.alpha", "1"): Provider(RuntimeError("boom"), failing_cap)})
+    failing = EvidenceProviderRuntimeRegistry(EvidenceProviderCapabilityRegistry((failing_cap,)), {("provider.alpha", "1"): Provider(RuntimeError("boom"), failing_cap)})
     closed = failing.acquire(request(), fail_closed=True)
     assert closed.status is EvidenceAcquisitionStatus.UNAVAILABLE
     assert closed.evidence == ()
-    assert closed.issues[0].code == "PROVIDER_EXCEPTION"
+    assert closed.issues[0].code == "PROVIDER_EXECUTION_EXCEPTION"
+    assert closed.issues[0].message == "evidence provider execution raised an exception"
 
 
 def test_validate_result_catches_request_provider_capability_and_kind_mismatches() -> None:
@@ -290,17 +296,28 @@ def test_provider_to_verifier_compatibility_is_exact_and_never_upgrades_truth() 
         coverage={},
         authoritative=True,
     )
-    compatibility = provider_capability_is_compatible_with_verifier(provider_cap, verifier_cap, claim_kind="CAN_FLOW_TO")
+    compatibility = provider_capability_is_compatible_with_verifier(
+        provider_cap,
+        verifier_cap,
+        request_kind="CAN_FLOW_TO",
+        claim_kind="CAN_FLOW_TO",
+    )
     assert compatibility.compatible is True
-    assert compatibility.truth_upgraded is False
+    assert compatibility.unsupported_request_kind is False
+    assert compatibility.unsupported_claim_kind is False
     assert compatibility.evidence_kinds == ("graphify.data_flow_edge", "graphify.data_flow_query_result")
-    assert provider_capability_is_compatible_with_verifier(provider_cap, verifier_cap, claim_kind="NO_SUPPORTED_PATH").compatible is False
+    assert provider_capability_is_compatible_with_verifier(
+        provider_cap,
+        verifier_cap,
+        request_kind="CAN_FLOW_TO",
+        claim_kind="NO_SUPPORTED_PATH",
+    ).compatible is False
 
 
 def test_registry_queries_by_request_and_evidence_kind_not_claim_kind() -> None:
     alpha = capability(provider_id="provider.alpha", request_kinds=("CAN_FLOW_TO",), produced_evidence_kinds=("graphify.data_flow_query_result",))
     beta = capability(provider_id="provider.beta", request_kinds=("NO_SUPPORTED_PATH",), produced_evidence_kinds=("graphify.data_flow_edge",))
-    reg = EvidenceProviderRegistry((beta, alpha))
+    reg = EvidenceProviderCapabilityRegistry((beta, alpha))
 
     assert reg.query(request_kind="CAN_FLOW_TO") == (alpha,)
     assert reg.query(evidence_kind="graphify.data_flow_edge") == (beta,)

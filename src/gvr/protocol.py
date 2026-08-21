@@ -17,10 +17,11 @@ from .evidence_providers import (
     EvidenceCoverage,
     EvidenceProviderError,
     EvidenceProviderCapability,
-    EvidenceProviderRegistry,
+    EvidenceProviderCapabilityRegistry,
+    EvidenceProviderIssue,
     EvidenceProviderResult,
     EvidenceRequest,
-    builtin_evidence_provider_registry,
+    builtin_evidence_provider_capability_registry,
     validate_evidence_provider_result,
 )
 from .core import Action, Goal, Predicate, Proposal, StateEffect, VerificationContext, default_registry
@@ -199,6 +200,7 @@ def _evidence_provider_capability(data: Mapping[str, Any]) -> EvidenceProviderCa
         {
             "schema_version", "kind", "fingerprint_format", "fingerprint",
             "provider_id", "version", "request_kinds", "produced_evidence_kinds",
+            "source_classes", "snapshot_classes",
             "input_schema", "output_schema", "determinism", "side_effect_free",
             "cost", "bounds", "coverage", "description",
         },
@@ -217,6 +219,8 @@ def _evidence_provider_capability(data: Mapping[str, Any]) -> EvidenceProviderCa
             version=str(data.get("version") or ""),
             request_kinds=_string_array(data.get("request_kinds", ()), "request_kinds"),
             produced_evidence_kinds=_string_array(data.get("produced_evidence_kinds", ()), "produced_evidence_kinds"),
+            source_classes=_string_array(data.get("source_classes", ()), "source_classes"),
+            snapshot_classes=_string_array(data.get("snapshot_classes", ()), "snapshot_classes"),
             input_schema=decode_markers(dict(_require_mapping(data.get("input_schema", {}), "input_schema"))),
             output_schema=decode_markers(dict(_require_mapping(data.get("output_schema", {}), "output_schema"))),
             determinism=str(data.get("determinism") or ""),
@@ -324,17 +328,16 @@ def _evidence_provider_evidence_record(record: Mapping[str, Any]) -> Evidence:
     )
 
 
-def _evidence_provider_issue(issue: Mapping[str, Any]) -> VerificationIssue:
+def _evidence_provider_issue(issue: Mapping[str, Any]) -> EvidenceProviderIssue:
     _reject_unexpected_fields(
         issue,
-        {"code", "message", "verdict", "evidence_ids"},
+        {"code", "message", "evidence_ids"},
         code="INVALID_EVIDENCE_PROVIDER_RESULT",
         noun="provider issue",
     )
-    return VerificationIssue(
-        code=str(issue.get("code") or ""),
-        message=str(issue.get("message") or ""),
-        verdict=VerificationVerdict(str(issue.get("verdict") or "")),
+    return EvidenceProviderIssue(
+        code=issue.get("code"),
+        message=issue.get("message"),
         evidence_ids=_string_array(issue.get("evidence_ids", ()), "issue evidence_ids"),
     )
 
@@ -590,11 +593,11 @@ def handle_request(request: Mapping[str, Any]) -> dict[str, Any]:
         if evidence_kind is not None and not isinstance(evidence_kind, str):
             raise ProtocolError("INVALID_PAYLOAD", "evidence_kind must be a string")
         try:
-            capabilities = builtin_evidence_provider_registry().query(
+            capabilities = builtin_evidence_provider_capability_registry().query(
                 request_kind=request_kind,
                 evidence_kind=evidence_kind,
             )
-            registry = EvidenceProviderRegistry(capabilities)
+            registry = EvidenceProviderCapabilityRegistry(capabilities)
         except EvidenceProviderError as exc:
             raise ProtocolError("INVALID_PAYLOAD", str(exc)) from exc
         return envelope("evidence_provider_capability_registry", registry.to_dict())

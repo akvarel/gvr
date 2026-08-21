@@ -6,11 +6,12 @@ It is metadata about a verifier contract. It does not run the verifier, acquire 
 
 ## Two different registries
 
-GVR now has three intentionally separate registry types:
+GVR has four intentionally separate registry types:
 
 - `VerifierRegistry` in `core.py` contains executable goal/action verifier objects and combines their reports.
 - `VerifierCapabilityRegistry` in `capabilities.py` contains immutable descriptions of verifier contracts.
-- `EvidenceProviderRegistry` in `evidence_providers.py` contains immutable evidence acquisition descriptors plus optional exact runtime provider bindings.
+- `EvidenceProviderCapabilityRegistry` in `evidence_providers.py` contains immutable, fingerprinted evidence acquisition descriptors only.
+- `EvidenceProviderRuntimeRegistry` in `evidence_providers.py` separately binds exact runtime providers to one capability registry and performs validated acquisition.
 
 Keeping these separate prevents descriptive metadata from becoming a hidden execution, acquisition, or selection mechanism.
 

@@ -65,7 +65,7 @@ The ledger remembers which result depends on which evidence. If the evidence cha
 
 A verification session can combine several current claims with exact `AND`, `OR`, and `NOT` rules. Missing or stale required claims stay `UNKNOWN`.
 
-A verifier capability registry describes the exact verifier IDs and contracts GVR currently publishes. An evidence provider registry separately describes exact `(provider_id, version)` acquisition contracts and can be queried by deterministic `request_kind` and `evidence_kind` filters. Neither registry silently ranks, substitutes, or executes entries.
+A verifier capability registry describes the exact verifier IDs and contracts GVR currently publishes. A pure evidence provider capability registry separately describes exact `(provider_id, version)` acquisition contracts, including source and snapshot classes, and can be queried by deterministic `request_kind` and `evidence_kind` filters. Runtime provider bindings live in another exact registry. None of these registries silently ranks or substitutes entries, and only the runtime provider registry executes acquisition.
 
 ## If you want to contribute
 

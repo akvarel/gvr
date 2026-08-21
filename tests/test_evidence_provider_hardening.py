@@ -5,7 +5,7 @@ from typing import Any
 
 import pytest
 
-from gvr import Evidence, VerificationIssue, VerificationVerdict, VerifierCapability, VerifierCost, VerifierDeterminism, handle_request, safe_handle_request
+from gvr import Evidence, VerifierCapability, VerifierCost, VerifierDeterminism, handle_request, safe_handle_request
 from gvr import evidence_providers as ep
 
 
@@ -57,6 +57,8 @@ def capability(**overrides: Any) -> ep.EvidenceProviderCapability:
         "version": "1",
         "request_kinds": (REQUEST_KIND,),
         "produced_evidence_kinds": (QUERY_RESULT, EDGE),
+        "source_classes": ("git.repository",),
+        "snapshot_classes": ("git.commit",),
         "input_schema": {},
         "output_schema": {},
         "determinism": VerifierDeterminism.O1,
@@ -91,7 +93,7 @@ def result(**overrides: Any) -> ep.EvidenceProviderResult:
         "status": ep.EvidenceAcquisitionStatus.COMPLETE,
         "coverage": coverage(),
         "evidence": (evidence("ev-b", kind=EDGE), evidence("ev-a")),
-        "issues": (VerificationIssue("OBSERVATION_NOTE", "captured", VerificationVerdict.UNKNOWN, ("ev-a",)),),
+        "issues": (ep.EvidenceProviderIssue("OBSERVATION_NOTE", "captured", ("ev-a",)),),
         "capability_fingerprint": cap.fingerprint,
     }
     values.update(overrides)
@@ -341,7 +343,8 @@ def test_registry_runtime_mappings_are_detached_immutable_and_exact() -> None:
             return result(request_id=req.request_id, request_fingerprint=req.fingerprint)
 
     runtime: dict[tuple[str, str], Any] = {(cap.provider_id, cap.version): Provider()}
-    registry = ep.EvidenceProviderRegistry((cap,), runtime_providers=runtime)
+    capability_registry = ep.EvidenceProviderCapabilityRegistry((cap,))
+    registry = ep.EvidenceProviderRuntimeRegistry(capability_registry, runtime)
     runtime.clear()
     assert registry.acquire(request()).request_fingerprint == request().fingerprint
     assert isinstance(registry.runtime_providers, MappingProxyType)
@@ -352,7 +355,10 @@ def test_registry_runtime_mappings_are_detached_immutable_and_exact() -> None:
     wrong = Provider()
     wrong.capability = wrong_capability
     with pytest.raises(ep.EvidenceProviderError, match="capability"):
-        ep.EvidenceProviderRegistry((cap,), runtime_providers={(cap.provider_id, cap.version): wrong})
+        ep.EvidenceProviderRuntimeRegistry(
+            ep.EvidenceProviderCapabilityRegistry((cap,)),
+            {(cap.provider_id, cap.version): wrong},
+        )
 
 
 def test_provider_result_to_verifier_helper_preserves_acquisition_and_never_upgrades_truth() -> None:
@@ -362,8 +368,9 @@ def test_provider_result_to_verifier_helper_preserves_acquisition_and_never_upgr
     assert adapted.coverage is res.coverage
     assert adapted.evidence is res.evidence
     assert adapted.compatible is True
-    assert adapted.sufficient is True
-    assert adapted.truth_upgraded is False
+    assert adapted.emitted_evidence_kinds == (EDGE, QUERY_RESULT)
+    assert adapted.present_required_evidence_kinds == (QUERY_RESULT,)
+    assert adapted.missing_required_evidence_kinds == ()
     assert adapted.result_fingerprint == res.fingerprint
 
     with pytest.raises(ep.EvidenceProviderError, match="not accepted"):
@@ -386,8 +393,8 @@ def test_provider_result_to_verifier_helper_allows_empty_only_as_compatibility()
     )
     adapted = ep.provider_result_for_verifier(empty, verifier())
     assert adapted.compatible is True
-    assert adapted.sufficient is False
-    assert adapted.truth_upgraded is False
+    assert adapted.present_required_evidence_kinds == ()
+    assert adapted.missing_required_evidence_kinds == (QUERY_RESULT,)
     assert adapted.evidence == ()
 
 

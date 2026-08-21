@@ -42,16 +42,16 @@ Coverage is deeply snapshotted, immutable, versioned, and independently fingerpr
 - exact provider ID and version;
 - acquisition status and full coverage;
 - deeply snapshotted immutable `Evidence` records;
-- provider issues, all with `UNKNOWN` verdict;
+- provider-specific `EvidenceProviderIssue` diagnostics with no verdict field;
 - the exact provider capability fingerprint.
 
-Evidence payloads are recursively detached and frozen. `Evidence.source` and the producer-supplied `Evidence.fingerprint` remain part of the result semantics. Evidence order does not affect the result fingerprint. Identical duplicate evidence IDs are deterministically deduplicated. Duplicate IDs with conflicting kind, payload, source, or producer fingerprint are rejected.
+`EvidenceProviderIssue` is a separate acquisition diagnostic contract with only `code`, `message`, and `evidence_ids`. It cannot carry a verifier verdict. Evidence payloads are recursively detached and frozen. `Evidence.source` and the producer-supplied `Evidence.fingerprint` remain part of the result semantics. Evidence order does not affect the result fingerprint. Identical duplicate evidence IDs are deterministically deduplicated. Duplicate IDs with conflicting kind, payload, source, or producer fingerprint are rejected.
 
 `EvidenceAcquisitionStatus` is `COMPLETE`, `PARTIAL`, `UNAVAILABLE`, or `UNSUPPORTED`. Unavailable and unsupported results contain no evidence and use unknown coverage. Provider results never contain a claim verdict.
 
 ### Provider capability and runtime protocol
 
-`EvidenceProviderCapability` describes one exact provider implementation, including `request_kinds` and `produced_evidence_kinds`, with deterministic canonical identity.
+`EvidenceProviderCapability` describes one exact provider implementation. Its fingerprint includes `request_kinds`, `produced_evidence_kinds`, and explicit `source_classes` and `snapshot_classes`, as well as schemas, bounds, coverage, determinism, side-effect, and cost metadata.
 
 The runtime `EvidenceProvider` protocol declares:
 
@@ -60,32 +60,34 @@ The runtime `EvidenceProvider` protocol declares:
 - exact `capability`;
 - `acquire(request)`.
 
-`EvidenceProviderRegistry` snapshots capability and runtime mappings into detached immutable mappings. Runtime registration and dispatch require exact key, provider identity, version, and capability fingerprint matches. There is no fallback to another provider or version.
+`EvidenceProviderCapabilityRegistry` is a pure, immutable, fingerprinted descriptor registry. It never stores or executes runtime provider objects. `EvidenceProviderRuntimeRegistry` separately binds exact `(provider_id, version)` keys to runtime providers and references one capability registry. Registration and every dispatch recheck the runtime provider ID, version, exact capability identity, and callable protocol. There is no fallback to another provider or version.
 
 ## Validation
 
-`validate_evidence_provider_result(result, request, capability)` checks:
+`validate_evidence_provider_request(request, capability)` runs before invocation and checks exact request type, provider identity and version, supported `request_kind`, and requested evidence kinds. `validate_evidence_provider_result(result, request, capability)` then checks:
 
 - exact request ID and request fingerprint;
 - exact provider identity and version across request, result, and capability;
 - request-kind support;
 - requested, produced, emitted, and covered evidence-kind compatibility;
 - exact capability fingerprint;
+- emitted evidence kinds are included in the provider's reported coverage;
 - exact declared scope, bounds, source identity, and snapshot identity;
 - complete coverage of every requested evidence kind for `COMPLETE` results;
-- equality of declared and observed scope for `COMPLETE` results.
+- equality of declared and observed scope for `COMPLETE` results;
+- rejection of contradictory `PARTIAL` results that claim every requested kind, the full declared scope, and no truncation.
 
 These checks prevent cross-request replay, including replay where the attacker preserves the same correlation ID.
 
 ## Fail-closed behavior
 
-`EvidenceProviderRegistry.acquire(request, fail_closed=True)` converts provider exceptions into an `UNAVAILABLE` result with no evidence, explicit unknown coverage, the original request fingerprint, and an `UNKNOWN` issue. This preserves safety at acquisition boundaries. It is not a verifier result and does not prove or disprove a claim.
+`EvidenceProviderRuntimeRegistry.acquire(request, fail_closed=True)` converts only exceptions raised by `provider.acquire(request)` into an `UNAVAILABLE` result. Pre-invocation validation failures and post-result contract violations still raise. The unavailable result contains no evidence, uses unknown coverage, and emits deterministic diagnostics (`PROVIDER_EXECUTION_EXCEPTION`) with no exception class, message, stack, or other raw exception text. This preserves safety without leaking credentials or making malformed provider output look like ordinary unavailability.
 
 ## Compatibility with verifiers
 
-`provider_capability_is_compatible_with_verifier(provider, verifier, request_kind=...)` checks exact request-kind support, verifier required evidence kinds, and the intersection between produced and accepted evidence kinds.
+`provider_capability_is_compatible_with_verifier(provider, verifier, request_kind=..., claim_kind=...)` takes both dimensions explicitly. Provider request support and verifier claim support are reported separately, alongside accepted evidence intersections and missing required evidence kinds.
 
-`provider_result_for_verifier(result, verifier)` validates every emitted evidence kind against the exact verifier capability and preserves the provider result's status, coverage, evidence, issues, and fingerprint. Empty evidence is permitted as a compatible transport state, but is always `sufficient=False`. The helper reports `truth_upgraded=False` by construction. Provider metadata and acquisition completeness never become verification truth.
+`provider_result_for_verifier(result, verifier)` validates every emitted evidence kind against the exact verifier capability and preserves the provider result's status, coverage, evidence, issues, and fingerprint. It exposes only structural compatibility facts: emitted evidence kinds, present required evidence kinds, and missing required evidence kinds. It has no generic `sufficient` or truth-upgrade field. Acquisition status and coverage never become verification truth.
 
 Graphify materialized evidence kinds remain the stable data-flow evidence surface:
 
@@ -109,11 +111,11 @@ These are intentionally distinct from verifier capability and verification bundl
 
 ## JSON protocol
 
-`validate_evidence_provider_result` parses full request, capability, coverage, evidence, issue, and result fields. Nested objects are strict. Obsolete or unknown fields are rejected. Claimed request, capability, coverage, and result fingerprints are recomputed and rejected when they do not match canonical content. Successful output is normalized and includes every schema, kind, format, and fingerprint field.
+`validate_evidence_provider_result` parses full request, capability, coverage, evidence, provider issue, and result fields. Nested objects are strict. Provider issues reject `verdict`, including `UNKNOWN`. Capability payloads require explicit `source_classes` and `snapshot_classes`. Obsolete, unknown, or truth-like control fields are rejected. Claimed request, capability, coverage, and result fingerprints are recomputed and rejected when they do not match canonical content. Successful output is normalized and includes every schema, kind, format, and fingerprint field.
 
 ## Built-in registry
 
-The schema-v1 built-in evidence provider registry is honestly empty. GVR currently ships verifier contracts and Graphify evidence adapters, but no built-in runtime evidence acquisition provider is registered.
+The schema-v1 built-in evidence provider capability registry is honestly empty. GVR currently ships verifier contracts and Graphify evidence adapters, but no built-in runtime evidence acquisition provider is registered.
 
 Discovery uses the JSON protocol operation:
 

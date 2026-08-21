@@ -3,11 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 from types import MappingProxyType
-from typing import Any, Iterable, Mapping, Protocol, runtime_checkable
+from typing import Any, Callable, Iterable, Mapping, Protocol, runtime_checkable
 
 from .canonical import CanonicalizationError, canonical_fingerprint, canonical_transport_value, canonical_utf8_key
 from .capabilities import VerifierCapability, VerifierCost, VerifierDeterminism
-from .model import Evidence, VerificationIssue, VerificationVerdict
+from .model import Evidence
 
 EVIDENCE_REQUEST_SCHEMA_VERSION = 1
 EVIDENCE_REQUEST_KIND = "gvr.evidence_request"
@@ -45,6 +45,30 @@ class EvidenceCompleteness(str, Enum):
     COMPLETE = "COMPLETE"
     PARTIAL = "PARTIAL"
     UNKNOWN = "UNKNOWN"
+
+
+_TRUTH_LIKE_PROVIDER_FIELDS = frozenset({
+    "claim_verdict",
+    "fail",
+    "failed",
+    "pass",
+    "passed",
+    "sufficient",
+    "truth",
+    "verdict",
+    "verified",
+})
+
+_TRUTH_LIKE_PROVIDER_TOKENS = frozenset({
+    "fail",
+    "failed",
+    "pass",
+    "passed",
+    "sufficient",
+    "truth",
+    "verdict",
+    "verified",
+})
 
 
 def _strict_identifier(value: Any, *, name: str) -> str:
@@ -100,6 +124,27 @@ def _strict_mapping(value: Any, *, name: str) -> Mapping[str, Any]:
     except CanonicalizationError as exc:
         raise EvidenceProviderError(str(exc)) from exc
     return _freeze_validated(value)
+
+
+def _reject_truth_like_fields(value: Mapping[str, Any], *, name: str) -> None:
+    def visit(item: Any, path: str) -> None:
+        if isinstance(item, Mapping):
+            for key, nested in item.items():
+                normalized = key.casefold().replace("-", "_")
+                tokens = frozenset(normalized.split("_"))
+                if (
+                    normalized in _TRUTH_LIKE_PROVIDER_FIELDS
+                    or tokens & _TRUTH_LIKE_PROVIDER_TOKENS
+                ):
+                    raise EvidenceProviderError(
+                        f"{name} contains truth-like field {key!r} at {path}"
+                    )
+                visit(nested, f"{path}.{key}")
+        elif isinstance(item, (list, tuple)):
+            for index, nested in enumerate(item):
+                visit(nested, f"{path}[{index}]")
+
+    visit(value, name)
 
 
 def _export_value(value: Any) -> Any:
@@ -252,6 +297,8 @@ class EvidenceCoverage:
         object.__setattr__(self, "termination_reason", _strict_identifier(self.termination_reason, name="termination_reason"))
         for name in ("declared_scope", "observed_scope", "declared_bounds", "consumed", "termination", "source_identity", "snapshot_identity", "details"):
             object.__setattr__(self, name, _strict_mapping(getattr(self, name), name=name))
+        _reject_truth_like_fields(self.termination, name="termination")
+        _reject_truth_like_fields(self.details, name="details")
         if self.completeness is EvidenceCompleteness.COMPLETE and self.truncated:
             raise EvidenceProviderError("complete coverage cannot be truncated")
         if self.completeness is EvidenceCompleteness.UNKNOWN and self.covered_evidence_kinds:
@@ -306,26 +353,43 @@ def _evidence_definition(record: Evidence) -> dict[str, Any]:
     }
 
 
-def _normalize_issue(issue: VerificationIssue) -> VerificationIssue:
-    if not isinstance(issue, VerificationIssue):
-        raise EvidenceProviderError("issues must contain VerificationIssue records")
-    code = _strict_identifier(issue.code, name="issue code")
-    if not isinstance(issue.message, str):
-        raise EvidenceProviderError("issue message must be a string")
-    try:
-        canonical_utf8_key(issue.message, path="issue message")
-    except CanonicalizationError as exc:
-        raise EvidenceProviderError(str(exc)) from exc
-    if issue.verdict is not VerificationVerdict.UNKNOWN:
-        raise EvidenceProviderError("provider issues must not carry PASS or FAIL verdicts")
-    return VerificationIssue(code, issue.message, issue.verdict, _string_tuple(issue.evidence_ids, name="issue evidence_ids"))
+@dataclass(frozen=True)
+class EvidenceProviderIssue:
+    code: str
+    message: str
+    evidence_ids: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "code", _strict_identifier(self.code, name="issue code"))
+        if not isinstance(self.message, str):
+            raise EvidenceProviderError("issue message must be a string")
+        try:
+            canonical_utf8_key(self.message, path="issue message")
+        except CanonicalizationError as exc:
+            raise EvidenceProviderError(str(exc)) from exc
+        object.__setattr__(
+            self,
+            "evidence_ids",
+            _string_tuple(self.evidence_ids, name="issue evidence_ids"),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return _export_value(_issue_definition(self))
+
+    def export(self) -> dict[str, Any]:
+        return self.to_dict()
 
 
-def _issue_definition(issue: VerificationIssue) -> dict[str, Any]:
+def _normalize_issue(issue: EvidenceProviderIssue) -> EvidenceProviderIssue:
+    if not isinstance(issue, EvidenceProviderIssue):
+        raise EvidenceProviderError("issues must contain EvidenceProviderIssue records")
+    return EvidenceProviderIssue(issue.code, issue.message, issue.evidence_ids)
+
+
+def _issue_definition(issue: EvidenceProviderIssue) -> dict[str, Any]:
     return {
         "code": issue.code,
         "message": issue.message,
-        "verdict": issue.verdict.value,
         "evidence_ids": issue.evidence_ids,
     }
 
@@ -339,7 +403,7 @@ class EvidenceProviderResult:
     status: EvidenceAcquisitionStatus
     coverage: EvidenceCoverage
     evidence: tuple[Evidence, ...] = ()
-    issues: tuple[VerificationIssue, ...] = ()
+    issues: tuple[EvidenceProviderIssue, ...] = ()
     capability_fingerprint: str
     schema_version: int = EVIDENCE_PROVIDER_RESULT_SCHEMA_VERSION
     kind: str = EVIDENCE_PROVIDER_RESULT_KIND
@@ -438,6 +502,8 @@ class EvidenceProviderCapability:
     version: str
     request_kinds: tuple[str, ...]
     produced_evidence_kinds: tuple[str, ...]
+    source_classes: tuple[str, ...]
+    snapshot_classes: tuple[str, ...]
     input_schema: Mapping[str, Any]
     output_schema: Mapping[str, Any]
     determinism: VerifierDeterminism
@@ -453,10 +519,16 @@ class EvidenceProviderCapability:
         object.__setattr__(self, "version", _strict_identifier(self.version, name="version"))
         object.__setattr__(self, "request_kinds", _string_tuple(self.request_kinds, name="request_kinds"))
         object.__setattr__(self, "produced_evidence_kinds", _string_tuple(self.produced_evidence_kinds, name="produced_evidence_kinds"))
+        object.__setattr__(self, "source_classes", _string_tuple(self.source_classes, name="source_classes"))
+        object.__setattr__(self, "snapshot_classes", _string_tuple(self.snapshot_classes, name="snapshot_classes"))
         if not self.request_kinds:
             raise EvidenceProviderError("request_kinds must not be empty")
         if not self.produced_evidence_kinds:
             raise EvidenceProviderError("produced_evidence_kinds must not be empty")
+        if not self.source_classes:
+            raise EvidenceProviderError("source_classes must not be empty")
+        if not self.snapshot_classes:
+            raise EvidenceProviderError("snapshot_classes must not be empty")
         object.__setattr__(self, "input_schema", _strict_mapping(self.input_schema, name="input_schema"))
         object.__setattr__(self, "output_schema", _strict_mapping(self.output_schema, name="output_schema"))
         object.__setattr__(self, "determinism", _enum_value(self.determinism, VerifierDeterminism, name="determinism"))
@@ -482,6 +554,8 @@ class EvidenceProviderCapability:
             "version": self.version,
             "request_kinds": self.request_kinds,
             "produced_evidence_kinds": self.produced_evidence_kinds,
+            "source_classes": self.source_classes,
+            "snapshot_classes": self.snapshot_classes,
             "input_schema": self.input_schema,
             "output_schema": self.output_schema,
             "determinism": self.determinism.value,
@@ -512,12 +586,7 @@ class EvidenceProviderCompatibility:
     evidence_kinds: tuple[str, ...] = ()
     missing_required_evidence_kinds: tuple[str, ...] = ()
     unsupported_request_kind: bool = False
-    truth_upgraded: bool = False
-
-    @property
-    def unsupported_claim_kind(self) -> bool:
-        """Compatibility alias for schema-v1 callers."""
-        return self.unsupported_request_kind
+    unsupported_claim_kind: bool = False
 
 
 def provider_capability_is_compatible_with_verifier(
@@ -527,19 +596,20 @@ def provider_capability_is_compatible_with_verifier(
     request_kind: str | None = None,
     claim_kind: str | None = None,
 ) -> EvidenceProviderCompatibility:
-    selected = request_kind if request_kind is not None else claim_kind
-    if selected is None or (request_kind is not None and claim_kind is not None and request_kind != claim_kind):
-        raise EvidenceProviderError("one exact request_kind is required")
-    selected = _strict_identifier(selected, name="request_kind")
-    unsupported = selected not in provider.request_kinds or selected not in verifier.claim_kinds
+    if request_kind is None or claim_kind is None:
+        raise EvidenceProviderError("request_kind and claim_kind are both required")
+    request_kind = _strict_identifier(request_kind, name="request_kind")
+    claim_kind = _strict_identifier(claim_kind, name="claim_kind")
+    unsupported_request = request_kind not in provider.request_kinds
+    unsupported_claim = claim_kind not in verifier.claim_kinds
     intersection = tuple(sorted(set(provider.produced_evidence_kinds) & set(verifier.accepted_evidence_kinds), key=lambda item: canonical_utf8_key(item, path="evidence_kind")))
     missing = tuple(sorted(set(verifier.required_evidence_kinds) - set(provider.produced_evidence_kinds), key=lambda item: canonical_utf8_key(item, path="evidence_kind")))
     return EvidenceProviderCompatibility(
-        compatible=not unsupported and not missing and bool(intersection),
+        compatible=not unsupported_request and not unsupported_claim and not missing and bool(intersection),
         evidence_kinds=intersection,
         missing_required_evidence_kinds=missing,
-        unsupported_request_kind=unsupported,
-        truth_upgraded=False,
+        unsupported_request_kind=unsupported_request,
+        unsupported_claim_kind=unsupported_claim,
     )
 
 
@@ -557,12 +627,13 @@ class EvidenceProviderVerifierInput:
     status: EvidenceAcquisitionStatus
     coverage: EvidenceCoverage
     evidence: tuple[Evidence, ...]
-    issues: tuple[VerificationIssue, ...]
+    issues: tuple[EvidenceProviderIssue, ...]
     result_fingerprint: str
     verifier_capability_fingerprint: str
     compatible: bool
-    sufficient: bool
-    truth_upgraded: bool = False
+    emitted_evidence_kinds: tuple[str, ...]
+    present_required_evidence_kinds: tuple[str, ...]
+    missing_required_evidence_kinds: tuple[str, ...]
 
 
 def provider_result_for_verifier(result: EvidenceProviderResult, verifier: VerifierCapability) -> EvidenceProviderVerifierInput:
@@ -576,13 +647,9 @@ def provider_result_for_verifier(result: EvidenceProviderResult, verifier: Verif
     if unsupported:
         kind = min(unsupported, key=lambda item: canonical_utf8_key(item, path="evidence kind"))
         raise EvidenceProviderError(f"evidence kind {kind} is not accepted by verifier capability")
-    present_required = set(verifier.required_evidence_kinds) <= emitted
-    sufficient = (
-        bool(result.evidence)
-        and result.status is EvidenceAcquisitionStatus.COMPLETE
-        and result.coverage.completeness is EvidenceCompleteness.COMPLETE
-        and present_required
-    )
+    required = set(verifier.required_evidence_kinds)
+    present_required = required & emitted
+    missing_required = required - emitted
     return EvidenceProviderVerifierInput(
         status=result.status,
         coverage=result.coverage,
@@ -590,19 +657,36 @@ def provider_result_for_verifier(result: EvidenceProviderResult, verifier: Verif
         issues=result.issues,
         result_fingerprint=result.fingerprint,
         verifier_capability_fingerprint=verifier.fingerprint,
-        compatible=True,
-        sufficient=sufficient,
-        truth_upgraded=False,
+        compatible=not unsupported,
+        emitted_evidence_kinds=tuple(sorted(emitted, key=lambda item: canonical_utf8_key(item, path="evidence kind"))),
+        present_required_evidence_kinds=tuple(sorted(present_required, key=lambda item: canonical_utf8_key(item, path="evidence kind"))),
+        missing_required_evidence_kinds=tuple(sorted(missing_required, key=lambda item: canonical_utf8_key(item, path="evidence kind"))),
     )
+
+
+def validate_evidence_provider_request(
+    request: EvidenceRequest,
+    capability: EvidenceProviderCapability,
+) -> EvidenceRequest:
+    if not isinstance(request, EvidenceRequest):
+        raise EvidenceProviderError("request must be EvidenceRequest")
+    if not isinstance(capability, EvidenceProviderCapability):
+        raise EvidenceProviderError("capability must be EvidenceProviderCapability")
+    if request.provider_id != capability.provider_id:
+        raise EvidenceProviderError("request provider_id does not match capability")
+    if request.provider_version != capability.version:
+        raise EvidenceProviderError("request provider_version does not match capability")
+    if request.request_kind not in capability.request_kinds:
+        raise EvidenceProviderError("request kind is not supported by provider capability")
+    if not set(request.requested_evidence_kinds) <= set(capability.produced_evidence_kinds):
+        raise EvidenceProviderError("requested evidence kinds are not all produced by provider capability")
+    return request
 
 
 def validate_evidence_provider_result(result: EvidenceProviderResult, request: EvidenceRequest, capability: EvidenceProviderCapability) -> EvidenceProviderResult:
     if not isinstance(result, EvidenceProviderResult):
         raise EvidenceProviderError("result must be EvidenceProviderResult")
-    if not isinstance(request, EvidenceRequest):
-        raise EvidenceProviderError("request must be EvidenceRequest")
-    if not isinstance(capability, EvidenceProviderCapability):
-        raise EvidenceProviderError("capability must be EvidenceProviderCapability")
+    validate_evidence_provider_request(request, capability)
     if result.request_id != request.request_id:
         raise EvidenceProviderError("result request_id does not match request")
     if result.request_fingerprint != request.fingerprint:
@@ -611,12 +695,8 @@ def validate_evidence_provider_result(result: EvidenceProviderResult, request: E
         raise EvidenceProviderError("result provider_id does not match request and capability")
     if result.provider_version != request.provider_version or result.provider_version != capability.version:
         raise EvidenceProviderError("result provider_version does not match request and capability")
-    if request.request_kind not in capability.request_kinds:
-        raise EvidenceProviderError("request kind is not supported by provider capability")
     produced = set(capability.produced_evidence_kinds)
     requested = set(request.requested_evidence_kinds)
-    if not requested <= produced:
-        raise EvidenceProviderError("requested evidence kinds are not all produced by provider capability")
     if result.capability_fingerprint != capability.fingerprint:
         raise EvidenceProviderError("result capability fingerprint does not match capability")
     for item in result.evidence:
@@ -625,8 +705,11 @@ def validate_evidence_provider_result(result: EvidenceProviderResult, request: E
         if item.kind not in requested:
             raise EvidenceProviderError(f"evidence kind {item.kind} was not requested")
     covered = set(result.coverage.covered_evidence_kinds)
+    emitted = {item.kind for item in result.evidence}
     if not covered <= produced or not covered <= requested:
         raise EvidenceProviderError("coverage includes an unrequested or unsupported evidence kind")
+    if not emitted <= covered:
+        raise EvidenceProviderError("emitted evidence kinds are not included in coverage")
     if result.coverage.declared_scope != request.semantic_scope:
         raise EvidenceProviderError("coverage declared scope does not match request semantic scope")
     if result.coverage.declared_bounds != request.bounds:
@@ -640,16 +723,23 @@ def validate_evidence_provider_result(result: EvidenceProviderResult, request: E
             raise EvidenceProviderError("complete result does not cover all requested evidence kinds")
         if result.coverage.observed_scope != result.coverage.declared_scope:
             raise EvidenceProviderError("complete result observed scope does not match declared scope")
+    if (
+        result.status is EvidenceAcquisitionStatus.PARTIAL
+        and not result.coverage.truncated
+        and requested <= covered
+        and result.coverage.observed_scope == result.coverage.declared_scope
+    ):
+        raise EvidenceProviderError(
+            "partial result contradicts complete structural coverage"
+        )
     return result
 
 
 @dataclass(frozen=True)
-class EvidenceProviderRegistry:
+class EvidenceProviderCapabilityRegistry:
     capabilities: tuple[EvidenceProviderCapability, ...] = ()
-    runtime_providers: Mapping[tuple[str, str], EvidenceProvider] = field(default_factory=dict, compare=False, repr=False)
     fingerprint: str = field(init=False)
     _by_key: Mapping[tuple[str, str], EvidenceProviderCapability] = field(init=False, repr=False, compare=False)
-    _runtime_by_key: Mapping[tuple[str, str], EvidenceProvider] = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         try:
@@ -669,30 +759,8 @@ class EvidenceProviderRegistry:
         normalized.sort(key=lambda item: (canonical_utf8_key(item.provider_id, path="provider_id"), canonical_utf8_key(item.version, path="version")))
         by_key = MappingProxyType({(item.provider_id, item.version): item for item in normalized})
 
-        if not isinstance(self.runtime_providers, Mapping):
-            raise EvidenceProviderError("runtime_providers must be a mapping")
-        runtime: dict[tuple[str, str], EvidenceProvider] = {}
-        for key, provider in self.runtime_providers.items():
-            if not isinstance(key, tuple) or len(key) != 2:
-                raise EvidenceProviderError("runtime provider keys must be (provider_id, version)")
-            normalized_key = (_strict_identifier(key[0], name="provider_id"), _strict_identifier(key[1], name="version"))
-            expected = by_key.get(normalized_key)
-            if expected is None:
-                raise UnknownEvidenceProviderError(f"runtime provider {normalized_key[0]} version {normalized_key[1]} has no capability")
-            if not isinstance(provider, EvidenceProvider):
-                raise EvidenceProviderError("runtime provider must implement EvidenceProvider identity, version, capability, and acquire")
-            if not isinstance(provider.capability, EvidenceProviderCapability):
-                raise EvidenceProviderError("runtime provider capability must be EvidenceProviderCapability")
-            if provider.provider_id != normalized_key[0] or provider.version != normalized_key[1]:
-                raise EvidenceProviderError("runtime provider identity does not match registry key")
-            if provider.capability.fingerprint != expected.fingerprint:
-                raise EvidenceProviderError("runtime provider capability does not match registered capability")
-            runtime[normalized_key] = provider
-        runtime_proxy = MappingProxyType(dict(runtime))
         object.__setattr__(self, "capabilities", tuple(normalized))
-        object.__setattr__(self, "runtime_providers", runtime_proxy)
         object.__setattr__(self, "_by_key", by_key)
-        object.__setattr__(self, "_runtime_by_key", runtime_proxy)
         object.__setattr__(self, "fingerprint", _fingerprint(self.semantic_definition(), fingerprint_format=EVIDENCE_PROVIDER_CAPABILITY_REGISTRY_FINGERPRINT_FORMAT))
 
     def semantic_definition(self) -> dict[str, Any]:
@@ -727,43 +795,6 @@ class EvidenceProviderRegistry:
             and (evidence_kind is None or cap.produces_evidence_kind(evidence_kind))
         )
 
-    def acquire(self, request: EvidenceRequest, *, fail_closed: bool = False) -> EvidenceProviderResult:
-        capability = self.lookup(request.provider_id, request.provider_version)
-        key = (request.provider_id, request.provider_version)
-        try:
-            provider = self._runtime_by_key[key]
-        except KeyError as exc:
-            raise UnknownEvidenceProviderError(f"no runtime evidence provider for {key[0]} version {key[1]}") from exc
-        try:
-            return validate_evidence_provider_result(provider.acquire(request), request, capability)
-        except Exception as exc:
-            if not fail_closed:
-                raise
-            unavailable_coverage = EvidenceCoverage(
-                completeness=EvidenceCompleteness.UNKNOWN,
-                covered_evidence_kinds=(),
-                declared_scope=request.semantic_scope,
-                observed_scope={},
-                declared_bounds=request.bounds,
-                consumed={},
-                termination={"exception_type": type(exc).__name__},
-                truncated=False,
-                termination_reason="PROVIDER_EXCEPTION",
-                source_identity=request.source_context,
-                snapshot_identity=request.snapshot_context,
-            )
-            return EvidenceProviderResult(
-                request_id=request.request_id,
-                request_fingerprint=request.fingerprint,
-                provider_id=request.provider_id,
-                provider_version=request.provider_version,
-                status=EvidenceAcquisitionStatus.UNAVAILABLE,
-                coverage=unavailable_coverage,
-                evidence=(),
-                issues=(VerificationIssue("PROVIDER_EXCEPTION", str(exc), VerificationVerdict.UNKNOWN),),
-                capability_fingerprint=capability.fingerprint,
-            )
-
     def to_dict(self) -> dict[str, Any]:
         return {
             "schema_version": EVIDENCE_PROVIDER_CAPABILITY_REGISTRY_SCHEMA_VERSION,
@@ -777,8 +808,144 @@ class EvidenceProviderRegistry:
         return self.to_dict()
 
 
-BUILTIN_EVIDENCE_PROVIDER_REGISTRY = EvidenceProviderRegistry(())
+def _validate_runtime_provider(
+    provider: EvidenceProvider,
+    key: tuple[str, str],
+    capability: EvidenceProviderCapability,
+) -> Callable[[EvidenceRequest], EvidenceProviderResult]:
+    acquire = getattr(provider, "acquire", None)
+    if not callable(acquire):
+        raise EvidenceProviderError("runtime provider acquire must be callable")
+    provider_id = getattr(provider, "provider_id", None)
+    provider_version = getattr(provider, "version", None)
+    provider_capability = getattr(provider, "capability", None)
+    if provider_id != key[0] or provider_version != key[1]:
+        raise EvidenceProviderError("runtime provider identity does not match registry key")
+    if not isinstance(provider_capability, EvidenceProviderCapability):
+        raise EvidenceProviderError(
+            "runtime provider capability must be EvidenceProviderCapability"
+        )
+    if (
+        provider_capability.provider_id != provider_id
+        or provider_capability.version != provider_version
+        or provider_capability.fingerprint != capability.fingerprint
+    ):
+        raise EvidenceProviderError(
+            "runtime provider capability does not match registered capability"
+        )
+    return acquire
 
 
-def builtin_evidence_provider_registry() -> EvidenceProviderRegistry:
-    return BUILTIN_EVIDENCE_PROVIDER_REGISTRY
+def _execution_exception_result(
+    request: EvidenceRequest,
+    capability: EvidenceProviderCapability,
+) -> EvidenceProviderResult:
+    return EvidenceProviderResult(
+        request_id=request.request_id,
+        request_fingerprint=request.fingerprint,
+        provider_id=request.provider_id,
+        provider_version=request.provider_version,
+        status=EvidenceAcquisitionStatus.UNAVAILABLE,
+        coverage=EvidenceCoverage(
+            completeness=EvidenceCompleteness.UNKNOWN,
+            covered_evidence_kinds=(),
+            declared_scope=request.semantic_scope,
+            observed_scope={},
+            declared_bounds=request.bounds,
+            consumed={},
+            termination={
+                "outcome": "exception",
+                "phase": "provider_execution",
+            },
+            truncated=False,
+            termination_reason="PROVIDER_EXECUTION_EXCEPTION",
+            source_identity=request.source_context,
+            snapshot_identity=request.snapshot_context,
+        ),
+        evidence=(),
+        issues=(EvidenceProviderIssue(
+            "PROVIDER_EXECUTION_EXCEPTION",
+            "evidence provider execution raised an exception",
+        ),),
+        capability_fingerprint=capability.fingerprint,
+    )
+
+
+@dataclass(frozen=True)
+class EvidenceProviderRuntimeRegistry:
+    capability_registry: EvidenceProviderCapabilityRegistry
+    runtime_providers: Mapping[tuple[str, str], EvidenceProvider]
+    _runtime_by_key: Mapping[tuple[str, str], EvidenceProvider] = field(
+        init=False,
+        repr=False,
+        compare=False,
+    )
+
+    def __post_init__(self) -> None:
+        if not isinstance(
+            self.capability_registry, EvidenceProviderCapabilityRegistry
+        ):
+            raise EvidenceProviderError(
+                "capability_registry must be EvidenceProviderCapabilityRegistry"
+            )
+        if not isinstance(self.runtime_providers, Mapping):
+            raise EvidenceProviderError("runtime_providers must be a mapping")
+        runtime: dict[tuple[str, str], EvidenceProvider] = {}
+        for key, provider in self.runtime_providers.items():
+            if not isinstance(key, tuple) or len(key) != 2:
+                raise EvidenceProviderError(
+                    "runtime provider keys must be (provider_id, version)"
+                )
+            normalized_key = (
+                _strict_identifier(key[0], name="provider_id"),
+                _strict_identifier(key[1], name="version"),
+            )
+            capability = self.capability_registry.lookup(*normalized_key)
+            _validate_runtime_provider(provider, normalized_key, capability)
+            runtime[normalized_key] = provider
+        runtime_proxy = MappingProxyType(dict(runtime))
+        object.__setattr__(self, "runtime_providers", runtime_proxy)
+        object.__setattr__(self, "_runtime_by_key", runtime_proxy)
+
+    def acquire(
+        self,
+        request: EvidenceRequest,
+        *,
+        fail_closed: bool = False,
+    ) -> EvidenceProviderResult:
+        if not isinstance(request, EvidenceRequest):
+            raise EvidenceProviderError("request must be EvidenceRequest")
+        capability = self.capability_registry.lookup(
+            request.provider_id,
+            request.provider_version,
+        )
+        validate_evidence_provider_request(request, capability)
+        key = (request.provider_id, request.provider_version)
+        try:
+            provider = self._runtime_by_key[key]
+        except KeyError as exc:
+            raise UnknownEvidenceProviderError(
+                f"no runtime evidence provider for {key[0]} version {key[1]}"
+            ) from exc
+
+        # Runtime provider objects can be mutable. Recheck the full identity
+        # immediately before every invocation instead of trusting registration.
+        acquire = _validate_runtime_provider(provider, key, capability)
+        try:
+            result = acquire(request)
+        except Exception:
+            if not fail_closed:
+                raise
+            return _execution_exception_result(request, capability)
+
+        # Contract validation is deliberately outside the exception conversion.
+        # A provider that executes but returns an invalid result is a protocol bug,
+        # not an availability event.
+        return validate_evidence_provider_result(result, request, capability)
+
+
+BUILTIN_EVIDENCE_PROVIDER_CAPABILITY_REGISTRY = EvidenceProviderCapabilityRegistry(())
+
+
+def builtin_evidence_provider_capability_registry() -> EvidenceProviderCapabilityRegistry:
+    return BUILTIN_EVIDENCE_PROVIDER_CAPABILITY_REGISTRY
