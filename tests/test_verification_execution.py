@@ -1141,3 +1141,14 @@ def test_30_composition_limit_blocks_work_and_keeps_root_unknown() -> None:
     )
     assert compose_step.status is VerificationExecutionStepStatus.BLOCKED
     assert compose_step.verdict is VerificationVerdict.UNKNOWN
+
+
+def test_31_non_object_execution_payload_uses_dedicated_protocol_error() -> None:
+    result = safe_handle_request({
+        "schema_version": 1,
+        "op": "execute_verification_plan",
+        "payload": [],
+    })
+
+    assert result["kind"] == "protocol_error"
+    assert result["payload"]["code"] == "INVALID_VERIFICATION_EXECUTION_REQUEST"
