@@ -1,0 +1,37 @@
+{
+  "corpus": [
+    "pirmdiena",
+    "otrdiena",
+    "trešdiena",
+    "ceturtdiena",
+    "piektdiena",
+    "sestdiena",
+    "svētdiena"
+  ],
+  "plain_e": {
+    "needle": "e",
+    "expected_count": 7,
+    "expected_members": [
+      "pirmdiena",
+      "otrdiena",
+      "trešdiena",
+      "ceturtdiena",
+      "piektdiena",
+      "sestdiena",
+      "svētdiena"
+    ]
+  },
+  "long_e": {
+    "needle": "ē",
+    "nfd_needle": "ē",
+    "expected_count": 1,
+    "expected_members": ["svētdiena"]
+  },
+  "historical_wrong_candidate": [
+    "trešdiena",
+    "ceturtdiena",
+    "piektdiena",
+    "sestdiena"
+  ],
+  "duplicates": ["sestdiena", "sestdiena", "svētdiena"]
+}
