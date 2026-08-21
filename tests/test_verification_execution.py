@@ -33,6 +33,7 @@ from gvr import (
     VerificationIssue,
     VerificationPlanningRequest,
     VerificationReport,
+    VerificationSessionError,
     VerificationVerdict,
     VerifierCapability,
     VerifierCapabilityRegistry,
@@ -1021,3 +1022,15 @@ def test_26_schema_v1_protocol_cli_strict_errors_and_backward_compatibility() ->
     })
     assert legacy["kind"] == "verification_report"
     assert legacy["payload"]["verdict"] == "PASS"
+
+
+def test_27_execution_result_seals_session_and_preserves_fingerprint() -> None:
+    fixture = execution_fixture()
+    result = execute_verification_plan(fixture.request)
+    before = result.to_dict()
+
+    with pytest.raises(VerificationSessionError):
+        result.session.remove_evidence("evidence:request-A")
+
+    assert result.to_dict() == before
+    assert result.session.root_verdicts == {"A": VerificationVerdict.PASS}
