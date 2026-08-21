@@ -386,7 +386,7 @@ def test_18_identical_request_fingerprint_is_acquired_once_and_shared() -> None:
         if step.kind is VerificationPlanStepKind.VERIFY_ATOMIC_CLAIM
     )
     assert len(acquisitions) == 1
-    assert acquisitions[0].request_ids == ("request-A",)
+    assert acquisitions[0].request_id == "request-A"
     assert all(acquisitions[0].step_id in step.dependency_step_ids for step in verifications)
 
 
@@ -921,3 +921,124 @@ def test_37_planner_issues_reject_verdict_and_sufficiency_metadata_aliases(
 ) -> None:
     with pytest.raises(VerificationPlanningError, match="unsupported field"):
         gvr.VerificationPlannerIssue(code="TEST_ISSUE", details=details)
+
+
+def same_semantics_different_ids_request(
+    *,
+    reverse: bool = False,
+    budget: VerificationPlanningBudget | None = None,
+) -> VerificationPlanningRequest:
+    graph = ClaimGraph(nodes=(atomic_claim("A"), atomic_claim("B")))
+    request_a = evidence_request(request_id="request-A")
+    request_b = evidence_request(request_id="request-B")
+    assert request_a.fingerprint == request_b.fingerprint
+    bindings = (
+        binding("A", requests=(request_a,)),
+        binding("B", requests=(request_b,)),
+    )
+    if reverse:
+        graph = ClaimGraph(nodes=tuple(reversed(graph.nodes)))
+        bindings = tuple(reversed(bindings))
+    return planning_request(graph=graph, bindings=bindings, budget=budget)
+
+
+def acquisition_steps(plan: gvr.VerificationPlan) -> tuple[gvr.VerificationPlanStep, ...]:
+    return tuple(
+        step
+        for step in plan.steps
+        if step.kind is VerificationPlanStepKind.ACQUIRE_EVIDENCE
+    )
+
+
+def test_38_same_semantics_different_request_ids_are_exact_executions() -> None:
+    plan = compile_verification_plan(same_semantics_different_ids_request())
+    acquisitions = acquisition_steps(plan)
+
+    assert tuple(step.request_id for step in acquisitions) == (
+        "request-A",
+        "request-B",
+    )
+    assert len({step.request_fingerprint for step in acquisitions}) == 1
+    assert plan.consumption.requests == 2
+    assert plan.consumption.steps == 4
+    assert len(plan.steps) == plan.consumption.steps
+
+    dependencies_by_claim = {
+        step.claim_id: step.dependency_step_ids
+        for step in plan.steps
+        if step.kind is VerificationPlanStepKind.VERIFY_ATOMIC_CLAIM
+    }
+    assert dependencies_by_claim == {
+        "A": (acquisitions[0].step_id,),
+        "B": (acquisitions[1].step_id,),
+    }
+
+
+def test_39_request_budget_counts_same_semantics_different_ids() -> None:
+    plan = compile_verification_plan(same_semantics_different_ids_request(
+        budget=VerificationPlanningBudget(max_requests=1),
+    ))
+
+    assert plan.termination is VerificationPlanTermination.BUDGET_EXHAUSTED
+    assert plan.consumption.requests == 2
+    assert plan.steps == ()
+    assert tuple(issue.to_dict() for issue in plan.issues) == ({
+        "code": "BUDGET_EXHAUSTED",
+        "claim_id": None,
+        "request_id": None,
+        "details": {
+            "budget": "max_requests",
+            "limit": 1,
+            "required": 2,
+        },
+    },)
+
+
+def test_40_request_id_only_changes_acquisition_and_plan_identity() -> None:
+    first = compile_verification_plan(planning_request())
+    second = compile_verification_plan(planning_request(
+        bindings=(binding(requests=(evidence_request(request_id="request-B"),)),),
+    ))
+    first_acquisition = acquisition_steps(first)[0]
+    second_acquisition = acquisition_steps(second)[0]
+
+    assert first_acquisition.request_fingerprint == second_acquisition.request_fingerprint
+    assert first_acquisition.request_id == "request-A"
+    assert second_acquisition.request_id == "request-B"
+    assert first_acquisition.step_id != second_acquisition.step_id
+    assert first.fingerprint != second.fingerprint
+
+
+def test_41_protocol_preserves_same_semantics_different_request_identities() -> None:
+    request = same_semantics_different_ids_request()
+    response = handle_request({
+        "schema_version": 1,
+        "op": "compile_verification_plan",
+        "payload": request.to_dict(),
+    })
+    acquisitions = tuple(
+        step
+        for step in response["payload"]["steps"]
+        if step["kind"] == VerificationPlanStepKind.ACQUIRE_EVIDENCE.value
+    )
+
+    assert tuple(step["request_id"] for step in acquisitions) == (
+        "request-A",
+        "request-B",
+    )
+    assert len({step["request_fingerprint"] for step in acquisitions}) == 1
+    assert "request_ids" not in acquisitions[0]
+    assert response["payload"] == compile_verification_plan(request).to_dict()
+
+
+def test_42_reordering_exact_request_set_remains_deterministic() -> None:
+    first = compile_verification_plan(same_semantics_different_ids_request())
+    second = compile_verification_plan(
+        same_semantics_different_ids_request(reverse=True)
+    )
+
+    assert first.to_dict() == second.to_dict()
+    assert tuple(step.request_id for step in acquisition_steps(first)) == (
+        "request-A",
+        "request-B",
+    )

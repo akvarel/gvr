@@ -303,6 +303,23 @@ def test_validate_prevents_same_id_cross_request_replay_and_checks_capability_re
         ep.validate_evidence_provider_result(result(), original, capability(produced_evidence_kinds=(QUERY_RESULT,)))
 
 
+def test_result_for_request_a_cannot_validate_against_same_semantics_request_b() -> None:
+    request_a = request(request_id="req-A")
+    request_b = request(request_id="req-B")
+    provider_result = result(
+        request_id=request_a.request_id,
+        request_fingerprint=request_a.fingerprint,
+    )
+
+    assert request_a.fingerprint == request_b.fingerprint
+    with pytest.raises(ep.EvidenceProviderError, match="request_id"):
+        ep.validate_evidence_provider_result(
+            provider_result,
+            request_b,
+            capability(),
+        )
+
+
 def test_validate_requires_exact_coverage_scope_bounds_source_snapshot_and_complete_kinds() -> None:
     req = request()
     cap = capability()
