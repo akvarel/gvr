@@ -182,6 +182,7 @@ def _verification_bundle(data: Mapping[str, Any]) -> VerificationBundle:
         bundle = VerificationBundle(
             schema_version=data.get("schema_version", 1),
             kind=data.get("kind", "gvr.verification_bundle"),
+            fingerprint_format=str(data.get("fingerprint_format") or ""),
             report=report,
             evidence=tuple(evidence),
             claim_dependency_ids=_string_array(
