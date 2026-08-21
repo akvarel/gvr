@@ -6,7 +6,7 @@ from typing import Iterable, Mapping
 
 from .bundle import VerificationBundle, validate_verification_bundle
 from .dependencies import ClaimDependencyGraph
-from .model import Freshness, VerificationReport, VerificationVerdict
+from .model import Evidence, Freshness, VerificationReport, VerificationVerdict
 
 
 @dataclass(frozen=True)
@@ -55,6 +55,9 @@ class ClaimLedger:
 
     def put_evidence(self, evidence_id: str, payload: Mapping[str, object]) -> None:
         self.dependencies.put_evidence(evidence_id, payload)
+
+    def put_evidence_record(self, evidence: Evidence) -> None:
+        self.dependencies.put_evidence_record(evidence)
 
     def remove_evidence(self, evidence_id: str) -> None:
         self.dependencies.remove_evidence(evidence_id)
@@ -117,7 +120,7 @@ class ClaimLedger:
         validate_verification_bundle(bundle)
         trial = deepcopy(self)
         for evidence in bundle.evidence:
-            trial.put_evidence(evidence.id, evidence.payload)
+            trial.put_evidence_record(evidence)
         snapshot = trial.record_verification(
             claim_id,
             bundle.report,

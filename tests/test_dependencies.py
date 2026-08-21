@@ -1,5 +1,12 @@
 import pytest
-from gvr import ClaimDependencyGraph, DependencyCycleError, EvidenceState, Freshness, VerificationVerdict
+from gvr import (
+    ClaimDependencyGraph,
+    DependencyCycleError,
+    Evidence,
+    EvidenceState,
+    Freshness,
+    VerificationVerdict,
+)
 
 
 def _fresh_claim(g, cid, verdict=VerificationVerdict.PASS):
@@ -28,6 +35,48 @@ def test_identical_evidence_does_not_stale_claim():
     second = g.put_evidence("E1", {"a": 1, "b": 2})
     assert second.version == first.version
     assert g.is_fresh("C1")
+
+
+def test_full_evidence_record_semantics_drive_typed_versions():
+    g = ClaimDependencyGraph()
+    first = g.put_evidence_record(Evidence(
+        "E1",
+        "provider.v1",
+        {"value": 1},
+        "revision-A",
+        "producer-A",
+    ))
+    identical = g.put_evidence_record(Evidence(
+        "E1",
+        "provider.v1",
+        {"value": 1},
+        "revision-A",
+        "producer-A",
+    ))
+    changed = g.put_evidence_record(Evidence(
+        "E1",
+        "provider.v1",
+        {"value": 1},
+        "revision-B",
+        "producer-A",
+    ))
+
+    assert identical.version == first.version
+    assert changed.version != first.version
+    assert changed.kind == "provider.v1"
+    assert changed.source == "revision-B"
+    assert changed.producer_fingerprint == "producer-A"
+
+
+def test_legacy_payload_only_evidence_keeps_explicit_default_semantics():
+    g = ClaimDependencyGraph()
+    first = g.put_evidence("E1", {"b": 2, "a": 1})
+    second = g.put_evidence("E1", {"a": 1, "b": 2})
+
+    assert second.version == first.version
+    assert second.kind is None
+    assert second.source is None
+    assert second.producer_fingerprint is None
 
 
 def test_removed_evidence_stales_claim_and_prevents_freshening():

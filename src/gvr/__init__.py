@@ -19,6 +19,7 @@ from .dependencies import (
     DependencyCycleError,
     EvidenceRecord,
     UnknownDependencyError,
+    evidence_semantic_fingerprint,
     stable_fingerprint,
 )
 from .bundle import (
@@ -67,7 +68,8 @@ __all__ = [
     "VerificationIssue", "VerificationReport", "VerificationVerdict",
     "VerifierRegistry", "combine_verdicts", "decode_markers", "default_registry",
     "envelope", "evaluate_predicate", "evaluate_text_search", "simulate",
-    "stable_fingerprint", "GraphifyTraversalEvidence", "ingest_traversal_result",
+    "stable_fingerprint", "evidence_semantic_fingerprint",
+    "GraphifyTraversalEvidence", "ingest_traversal_result",
     "BLOCKING_RESOLUTIONS", "COMPLETE_COVERAGE", "DATA_FLOW_VERIFIER",
     "SUPPORTED_DATA_FLOW_RELATIONS", "DataFlowClaim", "DataFlowClaimKind",
     "DataFlowQueryScope", "build_query_result_evidence", "verify_data_flow_claim",

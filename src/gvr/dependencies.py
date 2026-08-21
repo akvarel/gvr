@@ -5,12 +5,24 @@ import hashlib
 import json
 from typing import Any, Iterable, Mapping
 
-from .model import EvidenceState, Freshness, VerificationVerdict
+from .model import Evidence, EvidenceState, Freshness, VerificationVerdict
 
 
 def stable_fingerprint(payload: Mapping[str, Any]) -> str:
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=repr)
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def evidence_semantic_fingerprint(evidence: Evidence) -> str:
+    """Fingerprint every producer-defined field that gives Evidence its meaning."""
+
+    return stable_fingerprint({
+        "id": evidence.id,
+        "kind": evidence.kind,
+        "payload": evidence.payload,
+        "source": evidence.source,
+        "fingerprint": evidence.fingerprint,
+    })
 
 
 @dataclass(frozen=True)
@@ -20,6 +32,9 @@ class EvidenceRecord:
     fingerprint: str
     version: int
     state: EvidenceState = EvidenceState.ACTIVE
+    kind: str | None = None
+    source: str | None = None
+    producer_fingerprint: str | None = None
 
 
 @dataclass
@@ -67,12 +82,59 @@ class ClaimDependencyGraph:
         }
 
     def put_evidence(self, evidence_id: str, payload: Mapping[str, Any]) -> EvidenceRecord:
-        fp = stable_fingerprint(payload)
+        """Version legacy payload-only evidence with explicit default semantics."""
+
+        return self._put_evidence_record(
+            evidence_id=evidence_id,
+            payload=payload,
+            semantic_fingerprint=stable_fingerprint(payload),
+            kind=None,
+            source=None,
+            producer_fingerprint=None,
+        )
+
+    def put_evidence_record(self, evidence: Evidence) -> EvidenceRecord:
+        """Version and retain the complete semantic Evidence record."""
+
+        if not isinstance(evidence, Evidence):
+            raise TypeError("evidence must be an Evidence record")
+        return self._put_evidence_record(
+            evidence_id=evidence.id,
+            payload=evidence.payload,
+            semantic_fingerprint=evidence_semantic_fingerprint(evidence),
+            kind=evidence.kind,
+            source=evidence.source,
+            producer_fingerprint=evidence.fingerprint,
+        )
+
+    def _put_evidence_record(
+        self,
+        *,
+        evidence_id: str,
+        payload: Mapping[str, Any],
+        semantic_fingerprint: str,
+        kind: str | None,
+        source: str | None,
+        producer_fingerprint: str | None,
+    ) -> EvidenceRecord:
         current = self._evidence.get(evidence_id)
-        if current and current.state is EvidenceState.ACTIVE and current.fingerprint == fp:
+        if (
+            current
+            and current.state is EvidenceState.ACTIVE
+            and current.fingerprint == semantic_fingerprint
+        ):
             return current
         self._clock += 1
-        rec = EvidenceRecord(evidence_id, dict(payload), fp, self._clock, EvidenceState.ACTIVE)
+        rec = EvidenceRecord(
+            evidence_id,
+            dict(payload),
+            semantic_fingerprint,
+            self._clock,
+            EvidenceState.ACTIVE,
+            kind,
+            source,
+            producer_fingerprint,
+        )
         self._evidence[evidence_id] = rec
         if current is not None:
             self._invalidate_dependents(evidence_id)
@@ -87,6 +149,9 @@ class ClaimDependencyGraph:
             "" if current is None else current.fingerprint,
             self._clock,
             EvidenceState.REMOVED,
+            None if current is None else current.kind,
+            None if current is None else current.source,
+            None if current is None else current.producer_fingerprint,
         )
         self._evidence[evidence_id] = rec
         self._invalidate_dependents(evidence_id)
