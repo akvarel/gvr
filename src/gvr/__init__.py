@@ -23,6 +23,7 @@ from .dependencies import (
     stable_fingerprint,
 )
 from .bundle import (
+    VERIFICATION_BUNDLE_FINGERPRINT_FORMAT,
     VERIFICATION_BUNDLE_KIND,
     VERIFICATION_BUNDLE_SCHEMA_VERSION,
     BundleValidationError,
@@ -74,8 +75,8 @@ __all__ = [
     "SUPPORTED_DATA_FLOW_RELATIONS", "DataFlowClaim", "DataFlowClaimKind",
     "DataFlowQueryScope", "build_query_result_evidence", "verify_data_flow_claim",
     "verify_data_flow_claim_bundle", "VERIFICATION_BUNDLE_KIND",
-    "VERIFICATION_BUNDLE_SCHEMA_VERSION", "BundleValidationError",
-    "VerificationBundle", "build_verification_bundle",
+    "VERIFICATION_BUNDLE_SCHEMA_VERSION", "VERIFICATION_BUNDLE_FINGERPRINT_FORMAT",
+    "BundleValidationError", "VerificationBundle", "build_verification_bundle",
     "validate_verification_bundle",
 ]
 
