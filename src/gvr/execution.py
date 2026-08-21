@@ -14,10 +14,23 @@ from .canonical import (
     canonical_utf8_key,
 )
 from .capabilities import (
+    FalsificationRequirement,
     VerifierCapability,
     VerifierCapabilityError,
     VerifierCapabilityRegistry,
     builtin_verifier_capability_registry,
+)
+from .falsification import (
+    FalsificationDependency,
+    FalsificationExecutionInput,
+    FalsificationOutcome,
+    FalsificationResult,
+    FalsificationStrategyCapabilityRegistry,
+    FalsificationStrategyDescriptor,
+    FalsificationStrategyError,
+    FalsificationStrategyRuntimeRegistry,
+    UnknownFalsificationStrategyError,
+    validate_falsification_result,
 )
 from .evidence_providers import (
     EvidenceAcquisitionStatus,
@@ -43,6 +56,7 @@ from .planning import (
     ATOMIC_CLAIM_FINGERPRINT_FORMAT,
     COMPOSITE_CLAIM_FINGERPRINT_FORMAT,
     AtomicClaimBinding,
+    FalsificationStrategyBinding,
     VerificationPlan,
     VerificationPlannerIssue,
     VerificationPlanningBudget,
@@ -222,6 +236,7 @@ def _evidence_bytes(evidence: Iterable[Evidence]) -> int:
 class VerificationExecutionLimits:
     max_steps: int | None = None
     max_acquisitions: int | None = None
+    max_falsification_invocations: int | None = None
     max_verifier_invocations: int | None = None
     max_compositions: int | None = None
     max_evidence_records: int | None = None
@@ -231,6 +246,7 @@ class VerificationExecutionLimits:
         for name in (
             "max_steps",
             "max_acquisitions",
+            "max_falsification_invocations",
             "max_verifier_invocations",
             "max_compositions",
             "max_evidence_records",
@@ -239,7 +255,7 @@ class VerificationExecutionLimits:
             object.__setattr__(self, name, _limit(getattr(self, name), name=name))
 
     def to_dict(self) -> dict[str, int | None]:
-        return {
+        value = {
             "max_steps": self.max_steps,
             "max_acquisitions": self.max_acquisitions,
             "max_verifier_invocations": self.max_verifier_invocations,
@@ -247,6 +263,11 @@ class VerificationExecutionLimits:
             "max_evidence_records": self.max_evidence_records,
             "max_evidence_bytes": self.max_evidence_bytes,
         }
+        if self.max_falsification_invocations is not None:
+            value["max_falsification_invocations"] = (
+                self.max_falsification_invocations
+            )
+        return value
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -256,6 +277,7 @@ class VerificationExecutionConsumption:
     failed_steps: int = 0
     blocked_steps: int = 0
     acquisitions: int = 0
+    falsification_invocations: int = 0
     verifier_invocations: int = 0
     compositions: int = 0
     evidence_records: int = 0
@@ -268,6 +290,7 @@ class VerificationExecutionConsumption:
             "failed_steps",
             "blocked_steps",
             "acquisitions",
+            "falsification_invocations",
             "verifier_invocations",
             "compositions",
             "evidence_records",
@@ -279,7 +302,7 @@ class VerificationExecutionConsumption:
                 )
 
     def to_dict(self) -> dict[str, int]:
-        return {
+        value = {
             "steps_started": self.steps_started,
             "completed_steps": self.completed_steps,
             "failed_steps": self.failed_steps,
@@ -290,6 +313,9 @@ class VerificationExecutionConsumption:
             "evidence_records": self.evidence_records,
             "evidence_bytes": self.evidence_bytes,
         }
+        if self.falsification_invocations:
+            value["falsification_invocations"] = self.falsification_invocations
+        return value
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -328,6 +354,7 @@ class VerificationExecutionStep:
     issue_codes: tuple[str, ...] = ()
     verdict: VerificationVerdict | None = None
     provider_result_fingerprint: str | None = None
+    falsification_result_fingerprint: str | None = None
     bundle_fingerprint: str | None = None
 
     def __post_init__(self) -> None:
@@ -351,13 +378,17 @@ class VerificationExecutionStep:
             raise VerificationExecutionError(
                 "execution step verdict must be an exact VerificationVerdict"
             )
-        for name in ("provider_result_fingerprint", "bundle_fingerprint"):
+        for name in (
+            "provider_result_fingerprint",
+            "falsification_result_fingerprint",
+            "bundle_fingerprint",
+        ):
             value = getattr(self, name)
             if value is not None:
                 object.__setattr__(self, name, _sha256(value, name=name))
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        value = {
             "step_id": self.step_id,
             "kind": self.kind.value,
             "status": self.status.value,
@@ -366,6 +397,11 @@ class VerificationExecutionStep:
             "provider_result_fingerprint": self.provider_result_fingerprint,
             "bundle_fingerprint": self.bundle_fingerprint,
         }
+        if self.falsification_result_fingerprint is not None:
+            value["falsification_result_fingerprint"] = (
+                self.falsification_result_fingerprint
+            )
+        return value
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -401,6 +437,7 @@ class VerifierExecutionInput:
     acquisitions: tuple[EvidenceProviderVerifierInput, ...]
     evidence: tuple[Evidence, ...]
     dependencies: tuple[VerifierDependency, ...]
+    falsification_results: tuple[FalsificationResult, ...] = ()
 
     def __post_init__(self) -> None:
         if type(self.claim) is not AtomicClaim:
@@ -414,6 +451,7 @@ class VerifierExecutionInput:
         acquisitions = tuple(self.acquisitions)
         evidence = tuple(self.evidence)
         dependencies = tuple(self.dependencies)
+        falsification_results = tuple(self.falsification_results)
         if any(type(item) is not EvidenceProviderVerifierInput for item in acquisitions):
             raise VerificationExecutionError(
                 "verifier acquisitions must contain exact EvidenceProviderVerifierInput records"
@@ -426,9 +464,14 @@ class VerifierExecutionInput:
             raise VerificationExecutionError(
                 "verifier dependencies must contain exact VerifierDependency records"
             )
+        if any(type(item) is not FalsificationResult for item in falsification_results):
+            raise VerificationExecutionError(
+                "verifier falsification_results must contain exact FalsificationResult records"
+            )
         object.__setattr__(self, "acquisitions", acquisitions)
         object.__setattr__(self, "evidence", evidence)
         object.__setattr__(self, "dependencies", dependencies)
+        object.__setattr__(self, "falsification_results", falsification_results)
 
 
 @runtime_checkable
@@ -733,6 +776,10 @@ def _revalidate_verifier_capability(
             bounds=capability.bounds,
             coverage=capability.coverage,
             authoritative=capability.authoritative,
+            accepted_falsification_strategy_kinds=(
+                capability.accepted_falsification_strategy_kinds
+            ),
+            falsification_requirement=capability.falsification_requirement,
             description=capability.description,
         )
     except VerifierCapabilityError as exc:
@@ -819,6 +866,61 @@ def _revalidate_provider_registry(
     return rebuilt
 
 
+def _revalidate_falsification_descriptor(
+    descriptor: FalsificationStrategyDescriptor,
+) -> FalsificationStrategyDescriptor:
+    if type(descriptor) is not FalsificationStrategyDescriptor:
+        raise VerificationExecutionError(
+            "falsification descriptor must be an exact FalsificationStrategyDescriptor"
+        )
+    try:
+        rebuilt = FalsificationStrategyDescriptor(
+            strategy_id=descriptor.strategy_id,
+            version=descriptor.version,
+            strategy_kind=descriptor.strategy_kind,
+            claim_kinds=descriptor.claim_kinds,
+            input_schema=descriptor.input_schema,
+            output_schema=descriptor.output_schema,
+            determinism=descriptor.determinism,
+            side_effect_free=descriptor.side_effect_free,
+            cost=descriptor.cost,
+            bounds=descriptor.bounds,
+            coverage=descriptor.coverage,
+            description=descriptor.description,
+            schema_version=descriptor.schema_version,
+            kind=descriptor.kind,
+            fingerprint_format=descriptor.fingerprint_format,
+        )
+    except FalsificationStrategyError as exc:
+        raise VerificationExecutionError(str(exc)) from exc
+    if rebuilt.to_dict() != descriptor.to_dict():
+        raise VerificationExecutionError(
+            "falsification descriptor content or fingerprint is inconsistent"
+        )
+    return rebuilt
+
+
+def _revalidate_falsification_registry(
+    registry: FalsificationStrategyCapabilityRegistry,
+) -> FalsificationStrategyCapabilityRegistry:
+    if type(registry) is not FalsificationStrategyCapabilityRegistry:
+        raise VerificationExecutionError(
+            "falsification capability registry must be exact"
+        )
+    try:
+        rebuilt = FalsificationStrategyCapabilityRegistry(tuple(
+            _revalidate_falsification_descriptor(item)
+            for item in registry.capabilities
+        ))
+    except FalsificationStrategyError as exc:
+        raise VerificationExecutionError(str(exc)) from exc
+    if rebuilt.to_dict() != registry.to_dict():
+        raise VerificationExecutionError(
+            "falsification capability registry content or fingerprint is inconsistent"
+        )
+    return rebuilt
+
+
 def _revalidate_evidence_request(request: EvidenceRequest) -> EvidenceRequest:
     if type(request) is not EvidenceRequest:
         raise VerificationExecutionError(
@@ -875,6 +977,14 @@ def _revalidate_plan_step(step: VerificationPlanStep) -> VerificationPlanStep:
             verifier_id=step.verifier_id,
             verifier_version=step.verifier_version,
             verifier_capability_fingerprint=step.verifier_capability_fingerprint,
+            binding_id=step.binding_id,
+            strategy_id=step.strategy_id,
+            strategy_version=step.strategy_version,
+            strategy_kind=step.strategy_kind,
+            strategy_capability_fingerprint=(
+                step.strategy_capability_fingerprint
+            ),
+            strategy_parameters=step.strategy_parameters,
         )
     except VerificationPlanningError as exc:
         raise VerificationExecutionError(str(exc)) from exc
@@ -909,6 +1019,9 @@ def _revalidate_plan(plan: VerificationPlan) -> VerificationPlan:
             evidence_provider_capability_registry_fingerprint=(
                 plan.evidence_provider_capability_registry_fingerprint
             ),
+            falsification_strategy_capability_registry_fingerprint=(
+                plan.falsification_strategy_capability_registry_fingerprint
+            ),
             budget=budget,
             consumption=consumption,
             termination=plan.termination,
@@ -933,6 +1046,7 @@ def _derive_exact_planning_request(
     graph: ClaimGraph,
     verifier_registry: VerifierCapabilityRegistry,
     provider_registry: EvidenceProviderCapabilityRegistry,
+    falsification_registry: FalsificationStrategyCapabilityRegistry | None,
     evidence_requests: Mapping[tuple[str, str], EvidenceRequest],
 ) -> VerificationPlanningRequest:
     if plan.termination is not VerificationPlanTermination.COMPLETE:
@@ -946,7 +1060,12 @@ def _derive_exact_planning_request(
         if step.kind is VerificationPlanStepKind.ACQUIRE_EVIDENCE
     }
     final_by_claim: dict[str, VerificationPlanStep] = {}
+    falsification_by_claim: dict[str, list[VerificationPlanStep]] = {}
     for step in plan.steps:
+        if step.kind is VerificationPlanStepKind.RUN_FALSIFICATION:
+            assert step.claim_id is not None
+            falsification_by_claim.setdefault(step.claim_id, []).append(step)
+            continue
         if step.kind is VerificationPlanStepKind.ACQUIRE_EVIDENCE:
             continue
         assert step.claim_id is not None
@@ -1005,6 +1124,7 @@ def _derive_exact_planning_request(
             )
         request_dependencies: list[EvidenceRequest] = []
         claim_dependency_steps: list[str] = []
+        falsification_dependency_steps: list[VerificationPlanStep] = []
         for dependency_id in step.dependency_step_ids:
             dependency = steps_by_id.get(dependency_id)
             if dependency is None:
@@ -1019,6 +1139,8 @@ def _derive_exact_planning_request(
                 request_dependencies.append(evidence_requests[
                     (dependency.request_id, dependency.request_fingerprint)
                 ])
+            elif dependency.kind is VerificationPlanStepKind.RUN_FALSIFICATION:
+                falsification_dependency_steps.append(dependency)
             else:
                 claim_dependency_steps.append(dependency_id)
         expected_claim_dependencies = tuple(
@@ -1027,6 +1149,16 @@ def _derive_exact_planning_request(
         if set(claim_dependency_steps) != set(expected_claim_dependencies):
             raise VerificationExecutionError(
                 f"verifier dependencies for claim {claim.claim_id} do not match ClaimGraph"
+            )
+        expected_falsification_steps = tuple(
+            falsification_by_claim.get(claim.claim_id, ())
+        )
+        if {
+            item.step_id for item in falsification_dependency_steps
+        } != {item.step_id for item in expected_falsification_steps}:
+            raise VerificationExecutionError(
+                f"verifier falsification dependencies for claim {claim.claim_id} "
+                "do not match exact plan bindings"
             )
         if (
             step.claim_kind != claim.claim_kind
@@ -1041,12 +1173,74 @@ def _derive_exact_planning_request(
             and step.verifier_version is not None
             and step.verifier_capability_fingerprint is not None
         )
+        exact_falsification_bindings: list[FalsificationStrategyBinding] = []
+        prerequisite_step_ids = {
+            dependency_id
+            for dependency_id in step.dependency_step_ids
+            if steps_by_id[dependency_id].kind
+            is VerificationPlanStepKind.ACQUIRE_EVIDENCE
+        } | set(expected_claim_dependencies)
+        for falsification_step in expected_falsification_steps:
+            if falsification_registry is None:
+                raise VerificationExecutionError(
+                    "falsification plan steps require an exact capability registry"
+                )
+            if set(falsification_step.dependency_step_ids) != prerequisite_step_ids:
+                raise VerificationExecutionError(
+                    f"falsification step {falsification_step.step_id} has invalid prerequisites"
+                )
+            if (
+                falsification_step.claim_id != claim.claim_id
+                or falsification_step.claim_kind != claim.claim_kind
+                or falsification_step.claim_fingerprint != _claim_fingerprint(claim)
+                or falsification_step.verifier_id != step.verifier_id
+                or falsification_step.verifier_version != step.verifier_version
+                or falsification_step.verifier_capability_fingerprint
+                != step.verifier_capability_fingerprint
+            ):
+                raise VerificationExecutionError(
+                    f"falsification step for claim {claim.claim_id} does not match exact claim/verifier"
+                )
+            assert (
+                falsification_step.binding_id is not None
+                and falsification_step.strategy_id is not None
+                and falsification_step.strategy_version is not None
+                and falsification_step.strategy_kind is not None
+                and falsification_step.strategy_capability_fingerprint is not None
+                and falsification_step.strategy_parameters is not None
+            )
+            try:
+                descriptor = falsification_registry.lookup(
+                    falsification_step.strategy_id,
+                    falsification_step.strategy_version,
+                )
+            except UnknownFalsificationStrategyError as exc:
+                raise VerificationExecutionError(str(exc)) from exc
+            if (
+                descriptor.strategy_kind is not falsification_step.strategy_kind
+                or descriptor.fingerprint
+                != falsification_step.strategy_capability_fingerprint
+            ):
+                raise VerificationExecutionError(
+                    f"falsification step {falsification_step.step_id} capability mismatch"
+                )
+            exact_falsification_bindings.append(FalsificationStrategyBinding(
+                binding_id=falsification_step.binding_id,
+                verifier_id=falsification_step.verifier_id,
+                strategy_id=falsification_step.strategy_id,
+                strategy_version=falsification_step.strategy_version,
+                strategy_capability_fingerprint=(
+                    falsification_step.strategy_capability_fingerprint
+                ),
+                parameters=falsification_step.strategy_parameters,
+            ))
         bindings.append(AtomicClaimBinding(
             claim_id=claim.claim_id,
             verifier_id=step.verifier_id,
             verifier_version=step.verifier_version,
             verifier_capability_fingerprint=step.verifier_capability_fingerprint,
             evidence_requests=tuple(request_dependencies),
+            falsification_bindings=tuple(exact_falsification_bindings),
         ))
 
     for claim in graph.composite_claims:
@@ -1070,6 +1264,12 @@ def _derive_exact_planning_request(
             verifier_capability_registry_fingerprint=verifier_registry.fingerprint,
             evidence_provider_capability_registry=provider_registry,
             evidence_provider_capability_registry_fingerprint=provider_registry.fingerprint,
+            falsification_strategy_capability_registry=falsification_registry,
+            falsification_strategy_capability_registry_fingerprint=(
+                None
+                if falsification_registry is None
+                else falsification_registry.fingerprint
+            ),
             budget=plan.budget,
         )
     except VerificationPlanningError as exc:
@@ -1098,6 +1298,10 @@ class VerificationExecutionRequest:
     evidence_provider_runtime_registry: EvidenceProviderRuntimeRegistry
     evidence_provider_capability_registry_fingerprint: str
     evidence_requests: Mapping[tuple[str, str], EvidenceRequest]
+    falsification_strategy_runtime_registry: (
+        FalsificationStrategyRuntimeRegistry | None
+    ) = None
+    falsification_strategy_capability_registry_fingerprint: str | None = None
     limits: VerificationExecutionLimits = field(
         default_factory=VerificationExecutionLimits
     )
@@ -1171,6 +1375,69 @@ class VerificationExecutionRequest:
             )
         except (EvidenceProviderError, VerificationExecutionError) as exc:
             raise VerificationExecutionError(str(exc)) from exc
+
+        falsification_runtime_registry: FalsificationStrategyRuntimeRegistry | None
+        falsification_registry: FalsificationStrategyCapabilityRegistry | None
+        falsification_fingerprint: str | None
+        if self.falsification_strategy_runtime_registry is None:
+            if self.falsification_strategy_capability_registry_fingerprint is not None:
+                raise VerificationExecutionError(
+                    "falsification registry fingerprint requires an exact runtime registry"
+                )
+            if plan.falsification_strategy_capability_registry_fingerprint is not None:
+                raise VerificationExecutionError(
+                    "plan falsification steps require an exact runtime registry"
+                )
+            falsification_runtime_registry = None
+            falsification_registry = None
+            falsification_fingerprint = None
+        else:
+            if (
+                type(self.falsification_strategy_runtime_registry)
+                is not FalsificationStrategyRuntimeRegistry
+            ):
+                raise VerificationExecutionError(
+                    "falsification_strategy_runtime_registry must be exact"
+                )
+            if self.falsification_strategy_capability_registry_fingerprint is None:
+                raise VerificationExecutionError(
+                    "falsification capability registry fingerprint is required"
+                )
+            falsification_registry = _revalidate_falsification_registry(
+                self.falsification_strategy_runtime_registry.capability_registry
+            )
+            try:
+                falsification_runtime_registry = FalsificationStrategyRuntimeRegistry(
+                    capability_registry=falsification_registry,
+                    runtime_strategies=(
+                        self.falsification_strategy_runtime_registry.runtime_strategies
+                    ),
+                )
+            except FalsificationStrategyError as exc:
+                raise VerificationExecutionError(str(exc)) from exc
+            supplied_runtime_fingerprint = _sha256(
+                self.falsification_strategy_runtime_registry.fingerprint,
+                name="falsification_strategy_runtime_registry fingerprint",
+            )
+            if supplied_runtime_fingerprint != falsification_runtime_registry.fingerprint:
+                raise VerificationExecutionError(
+                    "falsification runtime registry fingerprint is inconsistent"
+                )
+            falsification_fingerprint = _sha256(
+                self.falsification_strategy_capability_registry_fingerprint,
+                name="falsification_strategy_capability_registry_fingerprint",
+            )
+            if falsification_fingerprint != falsification_registry.fingerprint:
+                raise VerificationExecutionError(
+                    "falsification capability registry fingerprint does not match runtime registry"
+                )
+            if (
+                plan.falsification_strategy_capability_registry_fingerprint
+                != falsification_fingerprint
+            ):
+                raise VerificationExecutionError(
+                    "plan falsification capability registry fingerprint mismatch"
+                )
         if (
             _sha256(
                 self.verifier_runtime_registry.fingerprint,
@@ -1261,6 +1528,7 @@ class VerificationExecutionRequest:
             graph=graph,
             verifier_registry=verifier_registry,
             provider_registry=provider_registry,
+            falsification_registry=falsification_registry,
             evidence_requests=exact_proxy,
         )
         for step in plan.steps:
@@ -1281,6 +1549,22 @@ class VerificationExecutionRequest:
                         step.verifier_version,
                     )
                 except (VerificationExecutionError, UnknownVerifierRuntimeError) as exc:
+                    raise VerificationExecutionError(str(exc)) from exc
+            elif step.kind is VerificationPlanStepKind.RUN_FALSIFICATION:
+                assert (
+                    step.strategy_id is not None
+                    and step.strategy_version is not None
+                    and falsification_runtime_registry is not None
+                )
+                try:
+                    falsification_runtime_registry.validate_runtime(
+                        step.strategy_id,
+                        step.strategy_version,
+                    )
+                except (
+                    FalsificationStrategyError,
+                    UnknownFalsificationStrategyError,
+                ) as exc:
                     raise VerificationExecutionError(str(exc)) from exc
         object.__setattr__(self, "plan", plan)
         object.__setattr__(self, "plan_fingerprint", plan_fingerprint)
@@ -1308,6 +1592,16 @@ class VerificationExecutionRequest:
             provider_fingerprint,
         )
         object.__setattr__(self, "evidence_requests", exact_proxy)
+        object.__setattr__(
+            self,
+            "falsification_strategy_runtime_registry",
+            falsification_runtime_registry,
+        )
+        object.__setattr__(
+            self,
+            "falsification_strategy_capability_registry_fingerprint",
+            falsification_fingerprint,
+        )
         object.__setattr__(self, "correlation_id", _optional_correlation(self.correlation_id))
         object.__setattr__(self, "_planning_request", planning)
         object.__setattr__(
@@ -1334,7 +1628,7 @@ class VerificationExecutionRequest:
                 ),
             )
         )
-        return {
+        definition = {
             "schema_version": self.schema_version,
             "kind": self.kind,
             "plan": self.plan.to_dict(),
@@ -1357,6 +1651,14 @@ class VerificationExecutionRequest:
             "evidence_requests": request_items,
             "limits": self.limits.to_dict(),
         }
+        if self.falsification_strategy_runtime_registry is not None:
+            definition["falsification_strategy_runtime_registry"] = (
+                self.falsification_strategy_runtime_registry.semantic_definition()
+            )
+            definition[
+                "falsification_strategy_capability_registry_fingerprint"
+            ] = self.falsification_strategy_capability_registry_fingerprint
+        return definition
 
     def to_dict(self) -> dict[str, Any]:
         value = _export(self.semantic_definition())
@@ -1366,6 +1668,10 @@ class VerificationExecutionRequest:
         value["evidence_provider_runtime_registry"] = (
             self.evidence_provider_runtime_registry.to_dict()
         )
+        if self.falsification_strategy_runtime_registry is not None:
+            value["falsification_strategy_runtime_registry"] = (
+                self.falsification_strategy_runtime_registry.to_dict()
+            )
         value.update({
             "fingerprint_format": self.fingerprint_format,
             "fingerprint": self.fingerprint,
@@ -1391,6 +1697,10 @@ class VerificationExecutionResult:
     issues: tuple[VerificationExecutionIssue, ...]
     consumption: VerificationExecutionConsumption
     termination: VerificationExecutionTermination
+    falsification_strategy_capability_registry_fingerprint: str | None = None
+    falsification_results: Mapping[str, FalsificationResult] = field(
+        default_factory=dict
+    )
     correlation_id: str | None = None
     schema_version: int = VERIFICATION_EXECUTION_RESULT_SCHEMA_VERSION
     kind: str = VERIFICATION_EXECUTION_RESULT_KIND
@@ -1418,6 +1728,17 @@ class VerificationExecutionResult:
             "evidence_provider_capability_registry_fingerprint",
         ):
             object.__setattr__(self, name, _sha256(getattr(self, name), name=name))
+        if self.falsification_strategy_capability_registry_fingerprint is not None:
+            object.__setattr__(
+                self,
+                "falsification_strategy_capability_registry_fingerprint",
+                _sha256(
+                    self.falsification_strategy_capability_registry_fingerprint,
+                    name=(
+                        "falsification_strategy_capability_registry_fingerprint"
+                    ),
+                ),
+            )
         if type(self.session) is not VerificationSession:
             raise VerificationExecutionError(
                 "session must be an exact VerificationSession"
@@ -1457,6 +1778,24 @@ class VerificationExecutionResult:
                     "bundles must contain exact VerificationBundle records"
                 )
             bundles[normalized_id] = bundle
+        if not isinstance(self.falsification_results, Mapping):
+            raise VerificationExecutionError(
+                "falsification_results must be a mapping"
+            )
+        falsification_results: dict[str, FalsificationResult] = {}
+        binding_ids: set[str] = set()
+        for step_id, result in self.falsification_results.items():
+            normalized_step_id = _identifier(step_id, name="falsification step_id")
+            if type(result) is not FalsificationResult:
+                raise VerificationExecutionError(
+                    "falsification_results must contain exact FalsificationResult records"
+                )
+            if result.binding_id in binding_ids:
+                raise VerificationExecutionError(
+                    "falsification_results contain a duplicate binding identity"
+                )
+            binding_ids.add(result.binding_id)
+            falsification_results[normalized_step_id] = result
         steps = tuple(self.steps)
         issues = tuple(self.issues)
         if any(type(item) is not VerificationExecutionStep for item in steps):
@@ -1477,6 +1816,11 @@ class VerificationExecutionResult:
             )
         object.__setattr__(self, "provider_results", MappingProxyType(provider_results))
         object.__setattr__(self, "bundles", MappingProxyType(bundles))
+        object.__setattr__(
+            self,
+            "falsification_results",
+            MappingProxyType(falsification_results),
+        )
         object.__setattr__(self, "steps", steps)
         object.__setattr__(self, "issues", issues)
         object.__setattr__(self, "correlation_id", _optional_correlation(self.correlation_id))
@@ -1514,7 +1858,7 @@ class VerificationExecutionResult:
                 key=lambda item: canonical_utf8_key(item, path="claim_id"),
             )
         )
-        return {
+        definition = {
             "schema_version": self.schema_version,
             "kind": self.kind,
             "request_fingerprint": self.request_fingerprint,
@@ -1534,6 +1878,25 @@ class VerificationExecutionResult:
             "consumption": self.consumption.to_dict(),
             "termination": self.termination.value,
         }
+        if self.falsification_strategy_capability_registry_fingerprint is not None:
+            definition[
+                "falsification_strategy_capability_registry_fingerprint"
+            ] = self.falsification_strategy_capability_registry_fingerprint
+        if self.falsification_results:
+            definition["falsification_results"] = tuple(
+                {
+                    "step_id": step_id,
+                    "result": self.falsification_results[step_id].to_dict(),
+                }
+                for step_id in sorted(
+                    self.falsification_results,
+                    key=lambda item: canonical_utf8_key(
+                        item,
+                        path="falsification step_id",
+                    ),
+                )
+            )
+        return definition
 
     def to_dict(self) -> dict[str, Any]:
         value = _export(self.semantic_definition())
@@ -1557,6 +1920,12 @@ _REPORT_MESSAGES = {
     ),
     "INVALID_VERIFICATION_PREREQUISITE": (
         "An exact verification prerequisite is unavailable or invalid."
+    ),
+    "REQUIRED_FALSIFICATION_INCOMPLETE": (
+        "Required falsification coverage is absent or incomplete."
+    ),
+    "VERIFIER_IGNORED_FALSIFICATION_COUNTEREXAMPLE": (
+        "The verifier returned PASS while a declared counterexample was present."
     ),
     "VERIFIER_EXECUTION_ERROR": (
         "The exact verifier runtime failed during execution."
@@ -1663,6 +2032,12 @@ def _runtime_request_copy(request: VerificationExecutionRequest) -> Verification
             request.evidence_provider_capability_registry_fingerprint
         ),
         evidence_requests=request.evidence_requests,
+        falsification_strategy_runtime_registry=(
+            request.falsification_strategy_runtime_registry
+        ),
+        falsification_strategy_capability_registry_fingerprint=(
+            request.falsification_strategy_capability_registry_fingerprint
+        ),
         limits=request.limits,
         correlation_id=request.correlation_id,
         schema_version=request.schema_version,
@@ -1691,6 +2066,13 @@ def _limit_blocks(
         step.kind is VerificationPlanStepKind.ACQUIRE_EVIDENCE
         and limits.max_acquisitions is not None
         and consumption.acquisitions + 1 > limits.max_acquisitions
+    ):
+        return True
+    if (
+        step.kind is VerificationPlanStepKind.RUN_FALSIFICATION
+        and limits.max_falsification_invocations is not None
+        and consumption.falsification_invocations + 1
+        > limits.max_falsification_invocations
     ):
         return True
     if (
@@ -1753,10 +2135,12 @@ def execute_verification_plan(
     request = _runtime_request_copy(request)
     session = VerificationSession(graph=request.claim_graph, roots=request.roots)
     provider_results: dict[tuple[str, str], EvidenceProviderResult] = {}
+    falsification_results: dict[str, FalsificationResult] = {}
     bundles: dict[str, VerificationBundle] = {}
     step_results: list[VerificationExecutionStep] = []
     issues: list[VerificationExecutionIssue] = []
     results_by_step: dict[str, VerificationExecutionStep] = {}
+    plan_steps_by_id = {item.step_id: item for item in request.plan.steps}
     consumption = VerificationExecutionConsumption()
     limit_exhausted = False
 
@@ -1878,6 +2262,173 @@ def execute_verification_plan(
             consumption = _status_consumption(consumption, status)
             continue
 
+        if step.kind is VerificationPlanStepKind.RUN_FALSIFICATION:
+            assert (
+                step.claim_id is not None
+                and step.claim_fingerprint is not None
+                and step.verifier_id is not None
+                and step.verifier_version is not None
+                and step.binding_id is not None
+                and step.strategy_id is not None
+                and step.strategy_version is not None
+                and step.strategy_parameters is not None
+                and request.falsification_strategy_runtime_registry is not None
+            )
+            claim = request.claim_graph.claim(step.claim_id)
+            assert isinstance(claim, AtomicClaim)
+            capability = request.verifier_runtime_registry.capability_registry.lookup(
+                step.verifier_id,
+                step.verifier_version,
+            )
+            direct = tuple(results_by_step[item] for item in step.dependency_step_ids)
+            invalid_prerequisite = any(
+                item.status is not VerificationExecutionStepStatus.COMPLETED
+                for item in direct
+            )
+            acquisition_inputs: list[EvidenceProviderVerifierInput] = []
+            evidence_by_id: dict[str, Evidence] = {}
+            for dependency_id in step.dependency_step_ids:
+                dependency_step = plan_steps_by_id[dependency_id]
+                if dependency_step.kind is not VerificationPlanStepKind.ACQUIRE_EVIDENCE:
+                    continue
+                assert (
+                    dependency_step.request_id is not None
+                    and dependency_step.request_fingerprint is not None
+                )
+                provider_result = provider_results.get((
+                    dependency_step.request_id,
+                    dependency_step.request_fingerprint,
+                ))
+                if provider_result is None:
+                    invalid_prerequisite = True
+                    continue
+                try:
+                    acquisition_input = provider_result_for_verifier(
+                        provider_result,
+                        capability,
+                    )
+                except EvidenceProviderError:
+                    invalid_prerequisite = True
+                    continue
+                acquisition_inputs.append(acquisition_input)
+                if (
+                    provider_result.status
+                    in (
+                        EvidenceAcquisitionStatus.UNAVAILABLE,
+                        EvidenceAcquisitionStatus.UNSUPPORTED,
+                    )
+                    or acquisition_input.missing_required_evidence_kinds
+                ):
+                    invalid_prerequisite = True
+                for evidence in provider_result.evidence:
+                    previous = evidence_by_id.get(evidence.id)
+                    if previous is not None and previous != evidence:
+                        invalid_prerequisite = True
+                    else:
+                        evidence_by_id.setdefault(evidence.id, evidence)
+            reachable_evidence = tuple(
+                evidence_by_id[key]
+                for key in sorted(
+                    evidence_by_id,
+                    key=lambda item: canonical_utf8_key(item, path="evidence id"),
+                )
+            )
+            if invalid_prerequisite:
+                code = "FALSIFICATION_PREREQUISITE_INVALID"
+                _add_issue(issues, code=code, step=step)
+                record = VerificationExecutionStep(
+                    step_id=step.step_id,
+                    kind=step.kind,
+                    status=VerificationExecutionStepStatus.BLOCKED,
+                    issue_codes=(code,),
+                )
+                step_results.append(record)
+                results_by_step[step.step_id] = record
+                consumption = _status_consumption(
+                    consumption,
+                    VerificationExecutionStepStatus.BLOCKED,
+                )
+                continue
+
+            descriptor = (
+                request.falsification_strategy_runtime_registry.capability_registry.lookup(
+                    step.strategy_id,
+                    step.strategy_version,
+                )
+            )
+            dependencies = tuple(
+                FalsificationDependency(
+                    claim_id=dependency_id,
+                    claim_fingerprint=_claim_fingerprint(
+                        request.claim_graph.claim(dependency_id)
+                    ),
+                    outcome=session.claim_state(
+                        dependency_id
+                    ).effective_verdict.value,
+                )
+                for dependency_id in claim.dependencies
+            )
+            consumption = replace(
+                consumption,
+                steps_started=consumption.steps_started + 1,
+                falsification_invocations=(
+                    consumption.falsification_invocations + 1
+                ),
+            )
+            try:
+                strategy_input = FalsificationExecutionInput(
+                    binding_id=step.binding_id,
+                    declared_verifier_id=step.verifier_id,
+                    claim=claim,
+                    claim_fingerprint=step.claim_fingerprint,
+                    descriptor=descriptor,
+                    parameters=step.strategy_parameters,
+                    acquisitions=tuple(acquisition_inputs),
+                    evidence=reachable_evidence,
+                    dependencies=dependencies,
+                )
+                falsification_result = (
+                    request.falsification_strategy_runtime_registry.run(
+                        strategy_input
+                    )
+                )
+                falsification_result = validate_falsification_result(
+                    falsification_result,
+                    strategy_input,
+                    descriptor,
+                )
+            except (FalsificationStrategyError, UnknownFalsificationStrategyError):
+                code = "FALSIFICATION_RESULT_INVALID"
+                status = VerificationExecutionStepStatus.FAILED
+                falsification_result = None
+            except BaseException as exc:
+                if isinstance(exc, (KeyboardInterrupt, SystemExit)):
+                    raise
+                code = "FALSIFICATION_EXECUTION_ERROR"
+                status = VerificationExecutionStepStatus.FAILED
+                falsification_result = None
+            else:
+                code = ""
+                status = VerificationExecutionStepStatus.COMPLETED
+                falsification_results[step.step_id] = falsification_result
+            if code:
+                _add_issue(issues, code=code, step=step)
+            record = VerificationExecutionStep(
+                step_id=step.step_id,
+                kind=step.kind,
+                status=status,
+                issue_codes=(() if not code else (code,)),
+                falsification_result_fingerprint=(
+                    None
+                    if falsification_result is None
+                    else falsification_result.fingerprint
+                ),
+            )
+            step_results.append(record)
+            results_by_step[step.step_id] = record
+            consumption = _status_consumption(consumption, status)
+            continue
+
         if step.kind is VerificationPlanStepKind.VERIFY_ATOMIC_CLAIM:
             assert (
                 step.claim_id is not None
@@ -1892,15 +2443,19 @@ def execute_verification_plan(
                 for item in direct
             )
             acquisition_inputs: list[EvidenceProviderVerifierInput] = []
+            reachable_falsification_results: list[FalsificationResult] = []
             evidence_by_id: dict[str, Evidence] = {}
             conflicting_evidence = False
             invalid_acquisition = False
             for dependency_id in step.dependency_step_ids:
-                dependency_step = next(
-                    item
-                    for item in request.plan.steps
-                    if item.step_id == dependency_id
-                )
+                dependency_step = plan_steps_by_id[dependency_id]
+                if dependency_step.kind is VerificationPlanStepKind.RUN_FALSIFICATION:
+                    result = falsification_results.get(dependency_id)
+                    if result is None or result.declared_verifier_id != step.verifier_id:
+                        invalid_acquisition = True
+                    else:
+                        reachable_falsification_results.append(result)
+                    continue
                 if dependency_step.kind is not VerificationPlanStepKind.ACQUIRE_EVIDENCE:
                     continue
                 assert (
@@ -2021,6 +2576,7 @@ def execute_verification_plan(
                 acquisitions=tuple(acquisition_inputs),
                 evidence=reachable_evidence,
                 dependencies=dependencies,
+                falsification_results=tuple(reachable_falsification_results),
             )
             consumption = replace(
                 consumption,
@@ -2043,8 +2599,33 @@ def execute_verification_plan(
                 code = "VERIFIER_RESULT_INVALID"
                 status = VerificationExecutionStepStatus.FAILED
                 if type(report) is VerificationReport and report.verifier == step.verifier_id:
+                    gate_code = ""
+                    if report.verdict is VerificationVerdict.PASS:
+                        if any(
+                            result.has_counterexample
+                            for result in reachable_falsification_results
+                        ):
+                            gate_code = (
+                                "VERIFIER_IGNORED_FALSIFICATION_COUNTEREXAMPLE"
+                            )
+                        elif (
+                            capability.falsification_requirement
+                            is FalsificationRequirement.REQUIRED_BEFORE_PASS
+                            and (
+                                not reachable_falsification_results
+                                or any(
+                                    not result.is_complete
+                                    or result.outcome
+                                    is FalsificationOutcome.INCOMPLETE
+                                    for result in reachable_falsification_results
+                                )
+                            )
+                        ):
+                            gate_code = "REQUIRED_FALSIFICATION_INCOMPLETE"
                     reachable_by_id = {item.id: item for item in reachable_evidence}
-                    if set(report.evidence_ids) <= set(reachable_by_id):
+                    if gate_code:
+                        code = gate_code
+                    elif set(report.evidence_ids) <= set(reachable_by_id):
                         try:
                             selected = tuple(
                                 reachable_by_id[item]
@@ -2134,8 +2715,12 @@ def execute_verification_plan(
         evidence_provider_capability_registry_fingerprint=(
             request.evidence_provider_capability_registry_fingerprint
         ),
+        falsification_strategy_capability_registry_fingerprint=(
+            request.falsification_strategy_capability_registry_fingerprint
+        ),
         session=session,
         provider_results=provider_results,
+        falsification_results=falsification_results,
         bundles=bundles,
         steps=tuple(step_results),
         issues=tuple(issues),

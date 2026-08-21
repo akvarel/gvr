@@ -12,7 +12,7 @@ A caller may know what it wants to verify before it has acquired evidence.
 
 The planner answers a narrower question:
 
-> Which exact acquisitions, atomic checks, and composite operations would be needed under these published contracts?
+> Which exact acquisitions, falsification probes, atomic checks, and composite operations would be needed under these published contracts?
 
 It does not answer whether a claim is correct. A plan therefore contains no claim result, no free-text diagnostic field, and no generic evidence adequacy field.
 
@@ -26,10 +26,13 @@ An `AtomicClaimBinding` connects one exact atomic claim to:
 - one exact verifier version;
 - the exact verifier capability fingerprint;
 - zero or more immutable `EvidenceRequest` objects.
+- zero or more explicit immutable `FalsificationStrategyBinding` objects.
 
 Every atomic claim has exactly one binding. Composite claims do not have bindings.
 
 Evidence request order is not semantic. Duplicate request IDs inside one binding are rejected. Reusing the same exact `(request_id, request_fingerprint)` across claims is allowed so acquisition can be shared. Requests with identical semantic fingerprints but different request IDs remain distinct executable requests, including when they belong to the same claim.
+
+A falsification binding fixes one unique binding ID, the same declared verifier ID, exact strategy ID and version, exact strategy capability fingerprint, and canonical parameters. Binding order is not semantic. The planner never creates one automatically.
 
 ### `VerificationPlanningRequest`
 
@@ -39,6 +42,7 @@ A planning request contains:
 - exactly one `AtomicClaimBinding` per atomic claim;
 - an exact `VerifierCapabilityRegistry` and its fingerprint;
 - an exact `EvidenceProviderCapabilityRegistry` and its fingerprint;
+- an optional exact `FalsificationStrategyCapabilityRegistry` and its fingerprint when explicit bindings are present;
 - deterministic planning budgets.
 
 Binding order is not semantic. Missing, extra, or duplicate bindings are rejected.
@@ -53,7 +57,7 @@ A plan contains:
 
 - the planning request fingerprint;
 - the claim graph fingerprint;
-- both exact capability registry fingerprints;
+- the exact capability registry fingerprints used by the request;
 - budget and consumption values;
 - stable termination;
 - zero or more canonical steps;
@@ -66,7 +70,7 @@ Each `VerificationPlanStep` has a `VerificationPlanStepKind`, a stable step ID, 
 
 ## Canonical step kinds
 
-A complete plan uses only three step kinds.
+A complete plan uses only four step kinds.
 
 ### `ACQUIRE_EVIDENCE`
 
@@ -80,6 +84,18 @@ This step identifies:
 
 One acquisition step represents one executable key: `(request_id, request_fingerprint)`. Reusing that same exact key across claims shares the step. Requests with identical canonical semantics but different request IDs remain separate executions and produce separate step IDs.
 
+### `RUN_FALSIFICATION`
+
+This step identifies:
+
+- the exact binding ID;
+- atomic claim and declared verifier identity;
+- exact strategy ID, version, kind, and capability fingerprint;
+- canonical strategy parameters and their fingerprint;
+- the claim's acquisition and earlier claim prerequisites.
+
+Every declared falsification step runs after the same prerequisites that feed its verifier. The corresponding `VERIFY_ATOMIC_CLAIM` step directly depends on every declared falsification step. No registry lookup causes automatic strategy selection.
+
 ### `VERIFY_ATOMIC_CLAIM`
 
 This step identifies:
@@ -89,6 +105,7 @@ This step identifies:
 - the exact verifier capability fingerprint;
 - acquisition steps required by the binding;
 - earlier claim steps named by `AtomicClaim.dependencies`.
+- every explicitly declared falsification step for the claim.
 
 The planner never substitutes another verifier or version.
 
@@ -115,11 +132,17 @@ For every atomic claim, the planner checks:
 7. the provider produces every requested evidence kind;
 8. source and snapshot classes match the provider contract exactly;
 9. requested evidence has a structural intersection with evidence accepted by the verifier;
-10. the combined valid requests include every required verifier evidence kind.
+10. the combined valid requests include every required verifier evidence kind;
+11. every falsification binding names the same declared verifier;
+12. the exact strategy descriptor exists and its fingerprint matches;
+13. the strategy supports the claim kind and its kind is accepted by the verifier;
+14. a verifier declaring `REQUIRED_BEFORE_PASS` has at least one explicit binding.
 
 Provider `request_kind` and verifier `claim_kind` are different contract dimensions. They do not need the same text.
 
 If a verifier requires evidence and the binding contains no request, planning fails closed with a stable issue.
+
+If a verifier requires falsification and the binding contains no strategy binding, planning fails closed with `MISSING_REQUIRED_FALSIFICATION_BINDING`.
 
 ## Stable issues and termination
 
@@ -167,9 +190,11 @@ A non-complete plan contains no executable steps. This prevents callers from acc
 - `max_requests`;
 - `max_dependency_edges`;
 - `max_requests_per_claim`;
-- `max_depth`.
+- `max_depth`;
+- `max_falsification_steps`;
+- `max_falsifications_per_claim`.
 
-`max_requests` counts unique executable `(request_id, request_fingerprint)` keys after exact sharing. Reusing the same exact request across claims consumes one request, while identical semantics under different request IDs consume separate requests. `max_steps` counts those acquisition executions plus all atomic and composite claim steps. `max_depth` counts claim nodes on the longest dependency path, so an independent claim has depth 1.
+`max_requests` counts unique executable `(request_id, request_fingerprint)` keys after exact sharing. Reusing the same exact request across claims consumes one request, while identical semantics under different request IDs consume separate requests. `max_steps` counts acquisitions, falsification runs, atomic checks, and composite steps. `max_depth` counts claim nodes on the longest dependency path, so an independent claim has depth 1.
 
 `VerificationPlanningConsumption` is the immutable output record for the corresponding measured counts.
 
@@ -181,6 +206,7 @@ Planner artifacts use the canonical cross-language implementation in `canonical.
 
 ```text
 gvr.atomic_claim_binding.ieee754-json.v1
+gvr.falsification_strategy_binding.ieee754-json.v1
 gvr.verification_planning_request.ieee754-json.v1
 gvr.verification_plan_step.ieee754-json.v1
 gvr.verification_plan.ieee754-json.v1
@@ -223,7 +249,7 @@ request = VerificationPlanningRequest(
 plan = compile_verification_plan(request)
 ```
 
-`compile_verification_plan` performs no acquisition and no verification.
+`compile_verification_plan` performs no acquisition, falsification, or verification.
 
 ## JSON protocol
 
@@ -233,7 +259,7 @@ Schema v1 exposes:
 compile_verification_plan
 ```
 
-The payload is the exact serialized `VerificationPlanningRequest`, including the claim graph, bindings, evidence requests, capability registries, registry fingerprints, budget, fingerprint formats, and fingerprints.
+The payload is the exact serialized `VerificationPlanningRequest`, including the claim graph, explicit evidence and falsification bindings, capability registries, registry fingerprints, budget, fingerprint formats, and fingerprints.
 
 The parser rejects unknown fields, malformed arrays or mappings, unsupported schema or kind values, duplicate bindings, conflicting request IDs, omitted required nested fingerprints, and every claimed fingerprint mismatch. A successful response has kind `verification_plan`.
 
@@ -243,4 +269,4 @@ See [CLI and JSON protocol](CLI_AND_PROTOCOL.md) for the wire shape.
 
 A complete plan can be passed to `execute_verification_plan` only through an exact `VerificationExecutionRequest`. The executor revalidates and deterministically recompiles the plan from the exact graph, request keys, capability registries, and plan budget before invoking any runtime.
 
-Planning still has no runtime behavior. Execution adds no discovery or repair policy: it runs the exact `ACQUIRE_EVIDENCE`, `VERIFY_ATOMIC_CLAIM`, and `COMPOSE_CLAIM` steps or fails closed. See [Verification execution](VERIFICATION_EXECUTION.md).
+Planning still has no runtime behavior. Execution adds no discovery or repair policy: it runs the exact `ACQUIRE_EVIDENCE`, `RUN_FALSIFICATION`, `VERIFY_ATOMIC_CLAIM`, and `COMPOSE_CLAIM` steps or fails closed. See [Verification execution](VERIFICATION_EXECUTION.md).

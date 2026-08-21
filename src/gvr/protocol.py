@@ -10,12 +10,31 @@ from .capabilities import (
     VERIFIER_CAPABILITY_REGISTRY_KIND,
     VERIFIER_CAPABILITY_REGISTRY_SCHEMA_VERSION,
     VERIFIER_CAPABILITY_SCHEMA_VERSION,
+    FalsificationRequirement,
+    FalsificationStrategyKind,
     VerifierCapability,
     VerifierCapabilityError,
     VerifierCapabilityRegistry,
     VerifierCost,
     VerifierDeterminism,
     builtin_verifier_capability_registry,
+)
+from .falsification import (
+    FALSIFICATION_STRATEGY_CAPABILITY_REGISTRY_FINGERPRINT_FORMAT,
+    FALSIFICATION_STRATEGY_CAPABILITY_REGISTRY_KIND,
+    FALSIFICATION_STRATEGY_CAPABILITY_REGISTRY_SCHEMA_VERSION,
+    FALSIFICATION_STRATEGY_DESCRIPTOR_FINGERPRINT_FORMAT,
+    FALSIFICATION_STRATEGY_DESCRIPTOR_KIND,
+    FALSIFICATION_STRATEGY_DESCRIPTOR_SCHEMA_VERSION,
+    FALSIFICATION_STRATEGY_RUNTIME_REGISTRY_FINGERPRINT_FORMAT,
+    FALSIFICATION_STRATEGY_RUNTIME_REGISTRY_KIND,
+    FALSIFICATION_STRATEGY_RUNTIME_REGISTRY_SCHEMA_VERSION,
+    FalsificationStrategyCapabilityRegistry,
+    FalsificationStrategyDescriptor,
+    FalsificationStrategyError,
+    FalsificationStrategyRuntimeRegistry,
+    builtin_falsification_strategy_capability_registry,
+    builtin_falsification_strategy_runtime_registry,
 )
 from .evidence_providers import (
     EVIDENCE_PROVIDER_CAPABILITY_FINGERPRINT_FORMAT,
@@ -44,6 +63,9 @@ from .planning import (
     ATOMIC_CLAIM_BINDING_FINGERPRINT_FORMAT,
     ATOMIC_CLAIM_BINDING_KIND,
     ATOMIC_CLAIM_BINDING_SCHEMA_VERSION,
+    FALSIFICATION_STRATEGY_BINDING_FINGERPRINT_FORMAT,
+    FALSIFICATION_STRATEGY_BINDING_KIND,
+    FALSIFICATION_STRATEGY_BINDING_SCHEMA_VERSION,
     VERIFICATION_PLANNING_REQUEST_FINGERPRINT_FORMAT,
     VERIFICATION_PLANNING_REQUEST_KIND,
     VERIFICATION_PLANNING_REQUEST_SCHEMA_VERSION,
@@ -51,6 +73,7 @@ from .planning import (
     VERIFICATION_PLAN_KIND,
     VERIFICATION_PLAN_SCHEMA_VERSION,
     AtomicClaimBinding,
+    FalsificationStrategyBinding,
     VerificationPlan,
     VerificationPlannerIssue,
     VerificationPlanningConsumption,
@@ -593,6 +616,8 @@ def _verifier_capability(data: Mapping[str, Any]) -> VerifierCapability:
             "input_schema", "output_schema", "determinism",
             "side_effect_free", "cost", "bounds", "coverage",
             "authoritative", "description",
+            "accepted_falsification_strategy_kinds",
+            "falsification_requirement",
         },
         code="INVALID_VERIFICATION_PLANNING_REQUEST",
         noun="verifier capability",
@@ -645,6 +670,16 @@ def _verifier_capability(data: Mapping[str, Any]) -> VerifierCapability:
                 "verifier coverage",
             ))),
             authoritative=data.get("authoritative"),
+            accepted_falsification_strategy_kinds=tuple(
+                FalsificationStrategyKind(item)
+                for item in _string_array(
+                    data.get("accepted_falsification_strategy_kinds", ()),
+                    "accepted_falsification_strategy_kinds",
+                )
+            ),
+            falsification_requirement=FalsificationRequirement(
+                data.get("falsification_requirement", "NONE")
+            ),
             description=data.get("description"),
         )
     except (ProtocolError, VerifierCapabilityError, TypeError, ValueError) as exc:
@@ -787,11 +822,136 @@ def _provider_capability_registry(
     return registry
 
 
+def _falsification_strategy_descriptor(
+    data: Mapping[str, Any],
+) -> FalsificationStrategyDescriptor:
+    _reject_unexpected_fields(
+        data,
+        {
+            "schema_version", "kind", "fingerprint_format", "fingerprint",
+            "strategy_id", "version", "strategy_kind", "claim_kinds",
+            "input_schema", "output_schema", "determinism", "side_effect_free",
+            "cost", "bounds", "coverage", "description",
+        },
+        code="INVALID_VERIFICATION_PLANNING_REQUEST",
+        noun="falsification strategy descriptor",
+    )
+    if data.get("schema_version") != FALSIFICATION_STRATEGY_DESCRIPTOR_SCHEMA_VERSION:
+        raise ProtocolError(
+            "INVALID_VERIFICATION_PLANNING_REQUEST",
+            "unsupported falsification strategy descriptor schema_version",
+        )
+    if data.get("kind") != FALSIFICATION_STRATEGY_DESCRIPTOR_KIND:
+        raise ProtocolError(
+            "INVALID_VERIFICATION_PLANNING_REQUEST",
+            "unsupported falsification strategy descriptor kind",
+        )
+    if (
+        data.get("fingerprint_format")
+        != FALSIFICATION_STRATEGY_DESCRIPTOR_FINGERPRINT_FORMAT
+    ):
+        raise ProtocolError(
+            "INVALID_VERIFICATION_PLANNING_REQUEST",
+            "unsupported falsification strategy descriptor fingerprint format",
+        )
+    try:
+        descriptor = FalsificationStrategyDescriptor(
+            strategy_id=data.get("strategy_id"),
+            version=data.get("version"),
+            strategy_kind=FalsificationStrategyKind(data.get("strategy_kind")),
+            claim_kinds=_string_array(data.get("claim_kinds"), "claim_kinds"),
+            input_schema=decode_markers(dict(_require_mapping(
+                data.get("input_schema"),
+                "falsification input_schema",
+            ))),
+            output_schema=decode_markers(dict(_require_mapping(
+                data.get("output_schema"),
+                "falsification output_schema",
+            ))),
+            determinism=VerifierDeterminism(data.get("determinism")),
+            side_effect_free=data.get("side_effect_free"),
+            cost=VerifierCost(data.get("cost")),
+            bounds=decode_markers(dict(_require_mapping(
+                data.get("bounds"),
+                "falsification bounds",
+            ))),
+            coverage=decode_markers(dict(_require_mapping(
+                data.get("coverage"),
+                "falsification coverage",
+            ))),
+            description=data.get("description"),
+            schema_version=data.get("schema_version"),
+            kind=data.get("kind"),
+            fingerprint_format=data.get("fingerprint_format"),
+        )
+    except (ProtocolError, FalsificationStrategyError, TypeError, ValueError) as exc:
+        message = exc.message if isinstance(exc, ProtocolError) else str(exc)
+        raise ProtocolError(
+            "INVALID_VERIFICATION_PLANNING_REQUEST",
+            message,
+        ) from exc
+    if data.get("fingerprint") != descriptor.fingerprint:
+        raise ProtocolError(
+            "INVALID_VERIFICATION_PLANNING_REQUEST",
+            "falsification descriptor fingerprint does not match canonical content",
+        )
+    return descriptor
+
+
+def _falsification_capability_registry(
+    data: Mapping[str, Any],
+) -> FalsificationStrategyCapabilityRegistry:
+    _reject_unexpected_fields(
+        data,
+        {
+            "schema_version", "kind", "fingerprint_format", "fingerprint",
+            "capabilities",
+        },
+        code="INVALID_VERIFICATION_PLANNING_REQUEST",
+        noun="falsification capability registry",
+    )
+    if (
+        data.get("schema_version")
+        != FALSIFICATION_STRATEGY_CAPABILITY_REGISTRY_SCHEMA_VERSION
+        or data.get("kind") != FALSIFICATION_STRATEGY_CAPABILITY_REGISTRY_KIND
+        or data.get("fingerprint_format")
+        != FALSIFICATION_STRATEGY_CAPABILITY_REGISTRY_FINGERPRINT_FORMAT
+    ):
+        raise ProtocolError(
+            "INVALID_VERIFICATION_PLANNING_REQUEST",
+            "unsupported falsification capability registry contract",
+        )
+    items = data.get("capabilities")
+    if not isinstance(items, (list, tuple)):
+        raise ProtocolError(
+            "INVALID_VERIFICATION_PLANNING_REQUEST",
+            "falsification capabilities must be an array",
+        )
+    try:
+        registry = FalsificationStrategyCapabilityRegistry(tuple(
+            _falsification_strategy_descriptor(
+                _require_mapping(item, "falsification strategy descriptor")
+            )
+            for item in items
+        ))
+    except FalsificationStrategyError as exc:
+        raise ProtocolError(
+            "INVALID_VERIFICATION_PLANNING_REQUEST",
+            str(exc),
+        ) from exc
+    if data.get("fingerprint") != registry.fingerprint:
+        raise ProtocolError(
+            "INVALID_VERIFICATION_PLANNING_REQUEST",
+            "falsification capability registry fingerprint does not match canonical content",
+        )
+    return registry
+
+
 def _planning_budget(data: Mapping[str, Any]) -> VerificationPlanningBudget:
     allowed = {
         "max_atomic_claims", "max_composite_claims", "max_steps",
         "max_requests", "max_dependency_edges", "max_requests_per_claim",
-        "max_depth",
+        "max_depth", "max_falsification_steps", "max_falsifications_per_claim",
     }
     _reject_unexpected_fields(
         data,
@@ -808,6 +968,60 @@ def _planning_budget(data: Mapping[str, Any]) -> VerificationPlanningBudget:
         ) from exc
 
 
+def _falsification_strategy_binding(
+    data: Mapping[str, Any],
+) -> FalsificationStrategyBinding:
+    _reject_unexpected_fields(
+        data,
+        {
+            "schema_version", "kind", "fingerprint_format", "fingerprint",
+            "binding_id", "verifier_id", "strategy_id", "strategy_version",
+            "strategy_capability_fingerprint", "parameters",
+        },
+        code="INVALID_VERIFICATION_PLANNING_REQUEST",
+        noun="falsification strategy binding",
+    )
+    if (
+        data.get("schema_version") != FALSIFICATION_STRATEGY_BINDING_SCHEMA_VERSION
+        or data.get("kind") != FALSIFICATION_STRATEGY_BINDING_KIND
+        or data.get("fingerprint_format")
+        != FALSIFICATION_STRATEGY_BINDING_FINGERPRINT_FORMAT
+    ):
+        raise ProtocolError(
+            "INVALID_VERIFICATION_PLANNING_REQUEST",
+            "unsupported falsification strategy binding contract",
+        )
+    try:
+        binding = FalsificationStrategyBinding(
+            binding_id=data.get("binding_id"),
+            verifier_id=data.get("verifier_id"),
+            strategy_id=data.get("strategy_id"),
+            strategy_version=data.get("strategy_version"),
+            strategy_capability_fingerprint=data.get(
+                "strategy_capability_fingerprint"
+            ),
+            parameters=decode_markers(dict(_require_mapping(
+                data.get("parameters"),
+                "falsification strategy parameters",
+            ))),
+            schema_version=data.get("schema_version"),
+            kind=data.get("kind"),
+            fingerprint_format=data.get("fingerprint_format"),
+        )
+    except (ProtocolError, VerificationPlanningError) as exc:
+        message = exc.message if isinstance(exc, ProtocolError) else str(exc)
+        raise ProtocolError(
+            "INVALID_VERIFICATION_PLANNING_REQUEST",
+            message,
+        ) from exc
+    if data.get("fingerprint") != binding.fingerprint:
+        raise ProtocolError(
+            "INVALID_VERIFICATION_PLANNING_REQUEST",
+            "falsification strategy binding fingerprint does not match canonical content",
+        )
+    return binding
+
+
 def _atomic_claim_binding(data: Mapping[str, Any]) -> AtomicClaimBinding:
     _reject_unexpected_fields(
         data,
@@ -815,6 +1029,7 @@ def _atomic_claim_binding(data: Mapping[str, Any]) -> AtomicClaimBinding:
             "schema_version", "kind", "fingerprint_format", "fingerprint",
             "claim_id", "verifier_id", "verifier_version",
             "verifier_capability_fingerprint", "evidence_requests",
+            "falsification_bindings",
         },
         code="INVALID_VERIFICATION_PLANNING_REQUEST",
         noun="atomic claim binding",
@@ -850,6 +1065,12 @@ def _atomic_claim_binding(data: Mapping[str, Any]) -> AtomicClaimBinding:
                     "evidence request fingerprint is required",
                 )
             requests.append(_evidence_provider_request(request_data))
+        falsification_items = data.get("falsification_bindings", ())
+        if not isinstance(falsification_items, (list, tuple)):
+            raise ProtocolError(
+                "INVALID_VERIFICATION_PLANNING_REQUEST",
+                "falsification_bindings must be an array",
+            )
         binding = AtomicClaimBinding(
             schema_version=data.get("schema_version"),
             kind=data.get("kind"),
@@ -861,6 +1082,13 @@ def _atomic_claim_binding(data: Mapping[str, Any]) -> AtomicClaimBinding:
                 "verifier_capability_fingerprint"
             ),
             evidence_requests=tuple(requests),
+            falsification_bindings=tuple(
+                _falsification_strategy_binding(_require_mapping(
+                    item,
+                    "falsification strategy binding",
+                ))
+                for item in falsification_items
+            ),
         )
     except ProtocolError as exc:
         raise ProtocolError(
@@ -891,6 +1119,8 @@ def _verification_planning_request(
             "verifier_capability_registry_fingerprint",
             "evidence_provider_capability_registry",
             "evidence_provider_capability_registry_fingerprint", "budget",
+            "falsification_strategy_capability_registry",
+            "falsification_strategy_capability_registry_fingerprint",
         },
         code="INVALID_VERIFICATION_PLANNING_REQUEST",
         noun="verification planning request",
@@ -950,6 +1180,17 @@ def _verification_planning_request(
             evidence_provider_capability_registry_fingerprint=data.get(
                 "evidence_provider_capability_registry_fingerprint"
             ),
+            falsification_strategy_capability_registry=(
+                None
+                if data.get("falsification_strategy_capability_registry") is None
+                else _falsification_capability_registry(_require_mapping(
+                    data.get("falsification_strategy_capability_registry"),
+                    "falsification_strategy_capability_registry",
+                ))
+            ),
+            falsification_strategy_capability_registry_fingerprint=data.get(
+                "falsification_strategy_capability_registry_fingerprint"
+            ),
             budget=_planning_budget(_require_mapping(data.get("budget"), "budget")),
         )
     except ProtocolError:
@@ -988,7 +1229,9 @@ def _verification_plan_step(data: Mapping[str, Any]) -> VerificationPlanStep:
             "request_fingerprint", "request_kind", "requested_evidence_kinds",
             "provider_id", "provider_version", "provider_capability_fingerprint",
             "verifier_id", "verifier_version", "verifier_capability_fingerprint",
-            "fingerprint", "step_id",
+            "binding_id", "strategy_id", "strategy_version", "strategy_kind",
+            "strategy_capability_fingerprint", "strategy_parameters",
+            "strategy_parameters_fingerprint", "fingerprint", "step_id",
         },
         code="INVALID_VERIFICATION_EXECUTION_REQUEST",
         noun="verification plan step",
@@ -1047,6 +1290,29 @@ def _verification_plan_step(data: Mapping[str, Any]) -> VerificationPlanStep:
                 data.get("verifier_capability_fingerprint"),
                 name="verifier_capability_fingerprint",
             ),
+            binding_id=_optional_string(data.get("binding_id"), name="binding_id"),
+            strategy_id=_optional_string(data.get("strategy_id"), name="strategy_id"),
+            strategy_version=_optional_string(
+                data.get("strategy_version"),
+                name="strategy_version",
+            ),
+            strategy_kind=(
+                None
+                if data.get("strategy_kind") is None
+                else FalsificationStrategyKind(data.get("strategy_kind"))
+            ),
+            strategy_capability_fingerprint=_optional_string(
+                data.get("strategy_capability_fingerprint"),
+                name="strategy_capability_fingerprint",
+            ),
+            strategy_parameters=(
+                None
+                if data.get("strategy_parameters") is None
+                else decode_markers(dict(_require_mapping(
+                    data.get("strategy_parameters"),
+                    "strategy_parameters",
+                )))
+            ),
         )
     except (ProtocolError, VerificationPlanningError, TypeError, ValueError) as exc:
         if isinstance(exc, ProtocolError):
@@ -1060,6 +1326,14 @@ def _verification_plan_step(data: Mapping[str, Any]) -> VerificationPlanStep:
         raise _execution_protocol_error(
             "verification plan step_id does not match canonical content"
         )
+    if (
+        "strategy_parameters_fingerprint" in data
+        and data.get("strategy_parameters_fingerprint")
+        != step.strategy_parameters_fingerprint
+    ):
+        raise _execution_protocol_error(
+            "strategy parameters fingerprint does not match canonical content"
+        )
     return step
 
 
@@ -1071,6 +1345,7 @@ def _verification_plan(data: Mapping[str, Any]) -> VerificationPlan:
             "request_fingerprint", "claim_graph_fingerprint",
             "verifier_capability_registry_fingerprint",
             "evidence_provider_capability_registry_fingerprint", "budget",
+            "falsification_strategy_capability_registry_fingerprint",
             "consumption", "termination", "steps", "issues",
         },
         code="INVALID_VERIFICATION_EXECUTION_REQUEST",
@@ -1095,6 +1370,7 @@ def _verification_plan(data: Mapping[str, Any]) -> VerificationPlan:
         {
             "atomic_claims", "composite_claims", "steps", "requests",
             "dependency_edges", "requests_per_claim", "depth",
+            "falsification_steps", "falsifications_per_claim",
         },
         code="INVALID_VERIFICATION_EXECUTION_REQUEST",
         noun="verification plan consumption",
@@ -1139,6 +1415,9 @@ def _verification_plan(data: Mapping[str, Any]) -> VerificationPlan:
             evidence_provider_capability_registry_fingerprint=data.get(
                 "evidence_provider_capability_registry_fingerprint"
             ),
+            falsification_strategy_capability_registry_fingerprint=data.get(
+                "falsification_strategy_capability_registry_fingerprint"
+            ),
             budget=_planning_budget(_require_mapping(data.get("budget"), "budget")),
             consumption=VerificationPlanningConsumption(
                 atomic_claims=consumption_data.get("atomic_claims"),
@@ -1148,6 +1427,14 @@ def _verification_plan(data: Mapping[str, Any]) -> VerificationPlan:
                 dependency_edges=consumption_data.get("dependency_edges"),
                 requests_per_claim=consumption_data.get("requests_per_claim"),
                 depth=consumption_data.get("depth"),
+                falsification_steps=consumption_data.get(
+                    "falsification_steps",
+                    0,
+                ),
+                falsifications_per_claim=consumption_data.get(
+                    "falsifications_per_claim",
+                    0,
+                ),
             ),
             termination=VerificationPlanTermination(data.get("termination")),
             steps=tuple(
@@ -1320,10 +1607,76 @@ def _provider_runtime_registry(
     return registry
 
 
+def _falsification_runtime_registry(
+    data: Mapping[str, Any],
+    supplied: FalsificationStrategyRuntimeRegistry | None,
+) -> FalsificationStrategyRuntimeRegistry:
+    _reject_unexpected_fields(
+        data,
+        {
+            "schema_version", "kind", "fingerprint_format", "fingerprint",
+            "capability_registry_fingerprint", "runtime_keys",
+            "capability_registry",
+        },
+        code="INVALID_VERIFICATION_EXECUTION_REQUEST",
+        noun="falsification runtime registry",
+    )
+    if (
+        data.get("schema_version")
+        != FALSIFICATION_STRATEGY_RUNTIME_REGISTRY_SCHEMA_VERSION
+        or data.get("kind") != FALSIFICATION_STRATEGY_RUNTIME_REGISTRY_KIND
+        or data.get("fingerprint_format")
+        != FALSIFICATION_STRATEGY_RUNTIME_REGISTRY_FINGERPRINT_FORMAT
+    ):
+        raise _execution_protocol_error(
+            "unsupported falsification runtime registry contract"
+        )
+    try:
+        capability_registry = _falsification_capability_registry(
+            _require_mapping(
+                data.get("capability_registry"),
+                "falsification capability registry",
+            )
+        )
+    except ProtocolError as exc:
+        raise _execution_protocol_error(exc.message) from exc
+    registry = (
+        builtin_falsification_strategy_runtime_registry(capability_registry)
+        if supplied is None
+        else supplied
+    )
+    if type(registry) is not FalsificationStrategyRuntimeRegistry:
+        raise _execution_protocol_error(
+            "falsification_strategy_runtime_registry must be exact"
+        )
+    expected_keys = _runtime_keys(
+        data.get("runtime_keys"),
+        noun="falsification runtime registry",
+    )
+    if registry.capability_registry.fingerprint != capability_registry.fingerprint:
+        raise _execution_protocol_error(
+            "falsification runtime capability registry does not match payload"
+        )
+    if set(expected_keys) != set(registry.runtime_keys):
+        raise _execution_protocol_error(
+            "falsification runtime keys do not match exact runtime registry"
+        )
+    if data.get("capability_registry_fingerprint") != capability_registry.fingerprint:
+        raise _execution_protocol_error(
+            "falsification runtime capability fingerprint does not match registry"
+        )
+    if data.get("fingerprint") != registry.fingerprint:
+        raise _execution_protocol_error(
+            "falsification runtime registry fingerprint does not match exact registry"
+        )
+    return registry
+
+
 def _execution_limits(data: Mapping[str, Any]) -> VerificationExecutionLimits:
     allowed = {
         "max_steps", "max_acquisitions", "max_verifier_invocations",
         "max_compositions", "max_evidence_records", "max_evidence_bytes",
+        "max_falsification_invocations",
     }
     _reject_unexpected_fields(
         data,
@@ -1344,6 +1697,9 @@ def _verification_execution_request(
     *,
     verifier_runtime_registry: VerifierRuntimeRegistry | None,
     evidence_provider_runtime_registry: EvidenceProviderRuntimeRegistry | None,
+    falsification_strategy_runtime_registry: (
+        FalsificationStrategyRuntimeRegistry | None
+    ),
 ) -> VerificationExecutionRequest:
     _reject_unexpected_fields(
         data,
@@ -1354,6 +1710,8 @@ def _verification_execution_request(
             "verifier_capability_registry_fingerprint",
             "evidence_provider_runtime_registry",
             "evidence_provider_capability_registry_fingerprint",
+            "falsification_strategy_runtime_registry",
+            "falsification_strategy_capability_registry_fingerprint",
             "evidence_requests", "limits", "correlation_id",
         },
         code="INVALID_VERIFICATION_EXECUTION_REQUEST",
@@ -1442,6 +1800,20 @@ def _verification_execution_request(
                 "evidence_provider_capability_registry_fingerprint"
             ),
             evidence_requests=exact_requests,
+            falsification_strategy_runtime_registry=(
+                None
+                if data.get("falsification_strategy_runtime_registry") is None
+                else _falsification_runtime_registry(
+                    _require_mapping(
+                        data.get("falsification_strategy_runtime_registry"),
+                        "falsification_strategy_runtime_registry",
+                    ),
+                    falsification_strategy_runtime_registry,
+                )
+            ),
+            falsification_strategy_capability_registry_fingerprint=data.get(
+                "falsification_strategy_capability_registry_fingerprint"
+            ),
             limits=_execution_limits(_require_mapping(data.get("limits"), "limits")),
             correlation_id=correlation_id,
         )
@@ -1529,6 +1901,9 @@ def handle_request(
     *,
     verifier_runtime_registry: VerifierRuntimeRegistry | None = None,
     evidence_provider_runtime_registry: EvidenceProviderRuntimeRegistry | None = None,
+    falsification_strategy_runtime_registry: (
+        FalsificationStrategyRuntimeRegistry | None
+    ) = None,
 ) -> dict[str, Any]:
     if request.get("schema_version") != SCHEMA_VERSION:
         raise ProtocolError(
@@ -1561,6 +1936,9 @@ def handle_request(
                 payload,
                 verifier_runtime_registry=verifier_runtime_registry,
                 evidence_provider_runtime_registry=evidence_provider_runtime_registry,
+                falsification_strategy_runtime_registry=(
+                    falsification_strategy_runtime_registry
+                ),
             )
         except ProtocolError as exc:
             if exc.code == "INVALID_VERIFICATION_EXECUTION_REQUEST":
@@ -1647,6 +2025,42 @@ def handle_request(
         except EvidenceProviderError as exc:
             raise ProtocolError("INVALID_PAYLOAD", str(exc)) from exc
         return envelope("evidence_provider_capability_registry", registry.to_dict())
+
+    if op == "describe_falsification_strategy_capabilities":
+        unexpected = set(payload) - {"strategy_kind", "claim_kind"}
+        if unexpected:
+            raise ProtocolError(
+                "INVALID_PAYLOAD",
+                "unsupported falsification capability query fields: "
+                + ", ".join(sorted(unexpected)),
+            )
+        strategy_kind = payload.get("strategy_kind")
+        claim_kind = payload.get("claim_kind")
+        if strategy_kind is not None and not isinstance(strategy_kind, str):
+            raise ProtocolError(
+                "INVALID_PAYLOAD",
+                "strategy_kind must be a string",
+            )
+        if claim_kind is not None and not isinstance(claim_kind, str):
+            raise ProtocolError("INVALID_PAYLOAD", "claim_kind must be a string")
+        try:
+            capabilities = (
+                builtin_falsification_strategy_capability_registry().query(
+                    strategy_kind=(
+                        None
+                        if strategy_kind is None
+                        else FalsificationStrategyKind(strategy_kind)
+                    ),
+                    claim_kind=claim_kind,
+                )
+            )
+            registry = FalsificationStrategyCapabilityRegistry(capabilities)
+        except (FalsificationStrategyError, ValueError) as exc:
+            raise ProtocolError("INVALID_PAYLOAD", str(exc)) from exc
+        return envelope(
+            "falsification_strategy_capability_registry",
+            registry.to_dict(),
+        )
 
     if op == "validate_evidence_provider_result":
         unexpected = set(payload) - {"request", "capability", "result"}
@@ -1788,12 +2202,18 @@ def safe_handle_request(
     *,
     verifier_runtime_registry: VerifierRuntimeRegistry | None = None,
     evidence_provider_runtime_registry: EvidenceProviderRuntimeRegistry | None = None,
+    falsification_strategy_runtime_registry: (
+        FalsificationStrategyRuntimeRegistry | None
+    ) = None,
 ) -> dict[str, Any]:
     try:
         return handle_request(
             request,
             verifier_runtime_registry=verifier_runtime_registry,
             evidence_provider_runtime_registry=evidence_provider_runtime_registry,
+            falsification_strategy_runtime_registry=(
+                falsification_strategy_runtime_registry
+            ),
         )
     except ProtocolError as exc:
         return envelope("protocol_error", {"code": exc.code, "message": exc.message})

@@ -131,6 +131,22 @@ Returns the immutable built-in `EvidenceProviderCapabilityRegistry` snapshot. It
 
 Optional filters are `request_kind` and `evidence_kind`. Both match exact published provider contract values and may be combined. `claim_kind` is not accepted for provider discovery. The response kind is `evidence_provider_capability_registry`. See [Evidence providers](EVIDENCE_PROVIDERS.md) for request, coverage, result, exact registry, compatibility, and fingerprint semantics.
 
+### `describe_falsification_strategy_capabilities`
+
+Returns the immutable built-in `FalsificationStrategyCapabilityRegistry` snapshot. It is descriptive only and never selects or executes a strategy.
+
+```json
+{
+  "schema_version": 1,
+  "op": "describe_falsification_strategy_capabilities",
+  "payload": {
+    "strategy_kind": "COUNTEREXAMPLE_SEARCH"
+  }
+}
+```
+
+Optional filters are exact `strategy_kind` and `claim_kind`. The response kind is `falsification_strategy_capability_registry`. The built-in snapshot publishes six exact generic strategy IDs at version `1`. See [Falsification](FALSIFICATION.md) for IDs, descriptors, finite Unicode semantics, and registry identity.
+
 ### `validate_evidence_provider_result`
 
 Parses strict serialized `request`, `capability`, and `result` objects, including request `source_class` and `snapshot_class`, capability `source_classes` and `snapshot_classes`, complete coverage, source/snapshot identities, stable provider issue codes and optional allowlisted categories, schema/kind fields, fingerprint formats, and fingerprints. It validates the result against the exact request fingerprint and provider capability, enforces fail-closed class compatibility, and rejects cross-request replay, uncovered emitted evidence, contradictory partial coverage, truth-like control metadata, obsolete issue `message` or `verdict` fields, and claimed fingerprint mismatches before returning a normalized `evidence_provider_result`.
@@ -139,7 +155,7 @@ Unknown or obsolete nested fields and invalid values return machine-readable `pr
 
 ### `compile_verification_plan`
 
-Compiles an immutable deterministic work description from exact claims, bindings, capability snapshots, and budgets. It does not acquire evidence, invoke a verifier, call Graphify, or access a network or file system.
+Compiles an immutable deterministic work description from exact claims, explicit evidence and falsification bindings, capability snapshots, and budgets. It does not acquire evidence, invoke a strategy or verifier, call Graphify, or access a network or file system.
 
 The payload is the exact `VerificationPlanningRequest.to_dict()` shape:
 
@@ -188,9 +204,9 @@ The payload is the exact `VerificationPlanningRequest.to_dict()` shape:
 }
 ```
 
-Each atomic binding includes its own schema, kind, fingerprint format, fingerprint, exact claim ID, verifier ID/version/capability fingerprint, and full serialized evidence requests. Each nested request and capability also carries its existing exact schema, kind, format, and fingerprint fields. Omitting a required nested fingerprint is a malformed planning request, not permission for the protocol to recompute and accept it.
+Each atomic binding includes its own schema, kind, fingerprint format, fingerprint, exact claim ID, verifier ID/version/capability fingerprint, full serialized evidence requests, and optional exact falsification strategy bindings. When bindings are present, the request also carries the exact falsification capability registry and fingerprint. Each nested request, binding, and capability carries its exact schema, kind, format, and fingerprint fields. Omitting a required nested fingerprint is a malformed planning request, not permission for the protocol to recompute and accept it.
 
-The response kind is `verification_plan`. A complete plan contains deterministic `ACQUIRE_EVIDENCE`, `VERIFY_ATOMIC_CLAIM`, and `COMPOSE_CLAIM` steps. Unsupported contracts or exhausted budgets return stable termination and structured planner issues with no executable steps.
+The response kind is `verification_plan`. A complete plan contains deterministic `ACQUIRE_EVIDENCE`, `RUN_FALSIFICATION`, `VERIFY_ATOMIC_CLAIM`, and `COMPOSE_CLAIM` steps. Unsupported contracts or exhausted budgets return stable termination and structured planner issues with no executable steps.
 
 The wire parser is strict. It rejects unknown fields at every new planning layer, malformed arrays and objects, unsupported schema/kind/format values, duplicate bindings, request ID conflicts, and mismatched claim graph, evidence request, binding, capability, registry, or planning request fingerprints. These failures return `INVALID_VERIFICATION_PLANNING_REQUEST` through `safe_handle_request`.
 
@@ -198,7 +214,7 @@ See [Verification planning](VERIFICATION_PLANNING.md) for sharing, ordering, com
 
 ### `execute_verification_plan`
 
-Runs one exact complete `VerificationPlan` against exact provider and verifier runtime registries. It does not discover, rank, repair, broaden, or replace a step.
+Runs one exact complete `VerificationPlan` against exact provider, falsification, and verifier runtime registries. It does not discover, rank, repair, broaden, retry, or replace a step.
 
 The payload is the exact `VerificationExecutionRequest.to_dict()` shape. The following is an abbreviated field map; every nested plan, graph, capability registry, runtime registry, and evidence request must still include its complete `to_dict()` content and required schema, kind, format, and fingerprint fields:
 
@@ -229,6 +245,14 @@ The payload is the exact `VerificationExecutionRequest.to_dict()` shape. The fol
     "capability_registry": {}
   },
   "evidence_provider_capability_registry_fingerprint": "...",
+  "falsification_strategy_runtime_registry": {
+    "kind": "gvr.falsification_strategy_runtime_registry",
+    "capability_registry_fingerprint": "...",
+    "runtime_keys": [["gvr.falsification.counterexample_search.v1", "1"]],
+    "fingerprint": "...",
+    "capability_registry": {}
+  },
+  "falsification_strategy_capability_registry_fingerprint": "...",
   "evidence_requests": [
     {
       "request_id": "request-A",
@@ -239,6 +263,7 @@ The payload is the exact `VerificationExecutionRequest.to_dict()` shape. The fol
   "limits": {
     "max_steps": null,
     "max_acquisitions": null,
+    "max_falsification_invocations": null,
     "max_verifier_invocations": null,
     "max_compositions": null,
     "max_evidence_records": null,
@@ -248,11 +273,11 @@ The payload is the exact `VerificationExecutionRequest.to_dict()` shape. The fol
 }
 ```
 
-The parser validates every nested schema, kind, format, fingerprint, exact runtime key, exact request key, plan step, DAG dependency, and deterministic limit. The executor recompiles the plan from those exact inputs before invocation.
+The parser validates every nested schema, kind, format, fingerprint, exact provider/strategy/verifier runtime key, exact request key, plan step, DAG dependency, and deterministic limit. The executor recompiles the plan from those exact inputs before invocation.
 
-The response kind is `verification_execution_result`. It contains provider results, atomic bundles, the final session, step lifecycle, stable issues, deterministic counters, termination, and a result fingerprint. Runtime failures are valid fail-closed execution results with affected claims `UNKNOWN`; malformed execution requests return `INVALID_VERIFICATION_EXECUTION_REQUEST`.
+The response kind is `verification_execution_result`. It contains provider results, validated falsification results keyed by exact plan step, atomic bundles, the final session, step lifecycle, stable issues, deterministic counters, termination, and a result fingerprint. Runtime failures are valid fail-closed execution results with affected claims `UNKNOWN`; malformed execution requests return `INVALID_VERIFICATION_EXECUTION_REQUEST`.
 
-Python integrations may pass exact custom runtime registries through keyword arguments to `handle_request()` or `safe_handle_request()`. JSON cannot carry executable Python objects. The standalone CLI therefore binds only runtime keys shipped by GVR. Schema v1 ships a built-in data-flow verifier adapter and no built-in evidence providers.
+Python integrations may pass exact custom provider, falsification, and verifier runtime registries through keyword arguments to `handle_request()` or `safe_handle_request()`. JSON cannot carry executable Python objects. The standalone CLI therefore binds only runtime keys shipped by GVR. Schema v1 ships the six generic falsification runtimes, a built-in data-flow verifier adapter, and no built-in evidence providers.
 
 See [Verification execution](VERIFICATION_EXECUTION.md) for the full execution and replay contract.
 

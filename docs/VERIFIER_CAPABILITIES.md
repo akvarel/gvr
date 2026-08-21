@@ -6,13 +6,15 @@ It is metadata about a verifier contract. It does not run the verifier, acquire 
 
 ## Two different registries
 
-GVR has five intentionally separate registry types:
+GVR has seven intentionally separate registry types:
 
 - `VerifierRegistry` in `core.py` contains executable goal/action verifier objects and combines their reports.
 - `VerifierCapabilityRegistry` in `capabilities.py` contains immutable descriptions of verifier contracts.
 - `VerifierRuntimeRegistry` in `execution.py` separately binds exact verifier runtime objects to one exact capability registry.
 - `EvidenceProviderCapabilityRegistry` in `evidence_providers.py` contains immutable, fingerprinted evidence acquisition descriptors only.
 - `EvidenceProviderRuntimeRegistry` in `evidence_providers.py` separately binds exact runtime providers to one capability registry and performs validated acquisition.
+- `FalsificationStrategyCapabilityRegistry` in `falsification.py` contains immutable exact strategy descriptors only.
+- `FalsificationStrategyRuntimeRegistry` in `falsification.py` separately binds exact side-effect-free strategy runtimes to one capability registry.
 
 Keeping these separate prevents descriptive metadata from becoming a hidden execution, acquisition, or selection mechanism.
 
@@ -37,11 +39,17 @@ Its semantic fields are:
 | `bounds` | Canonical mapping describing the domain and work bounds. |
 | `coverage` | Canonical mapping describing what the result covers and any completeness rule. |
 | `authoritative` | Whether the result can be verification truth under its declared contract. |
+| `accepted_falsification_strategy_kinds` | Exact strategy kinds whose validated results this verifier can consume. |
+| `falsification_requirement` | `NONE`, `OPTIONAL`, or `REQUIRED_BEFORE_PASS`. |
 | `description` | Human explanation. It is exported but intentionally non-semantic. |
 
 Descriptors are frozen and deeply detached from caller-owned mappings and lists. Unsupported values, non-string mapping keys, invalid Unicode, non-finite numbers, duplicate contract values, and inconsistent required evidence are rejected.
 
 An empty schema, claim-kind list, or evidence-kind list means no stable machine-readable contract is currently published for that surface. It is not a wildcard.
+
+Legacy descriptors omit the two optional falsification fields and keep their previous schema-v1 shape and fingerprint. A non-`NONE` falsification requirement needs at least one accepted strategy kind.
+
+`REQUIRED_BEFORE_PASS` makes complete declared falsification output a prerequisite for `PASS`. It does not let the strategy publish truth and it does not let a clean search automatically produce `PASS`.
 
 ## Determinism classes
 
@@ -94,6 +102,7 @@ Semantic changes do change identity, including:
 - claim or evidence contract;
 - input/output schema;
 - bounds or coverage semantics.
+- accepted falsification strategy kinds or falsification requirement.
 
 Registry input order does not affect listing order, export order, or fingerprint. Listings use exact UTF-8 byte order by verifier ID and then version.
 

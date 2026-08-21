@@ -72,6 +72,25 @@ DeterminismClass = VerifierDeterminism
 CostClass = VerifierCost
 
 
+class FalsificationStrategyKind(str, Enum):
+    """Stable generic categories for deterministic falsification work."""
+
+    WITNESS_SEARCH = "WITNESS_SEARCH"
+    COUNTEREXAMPLE_SEARCH = "COUNTEREXAMPLE_SEARCH"
+    INVARIANT_CHECK = "INVARIANT_CHECK"
+    METAMORPHIC_TRANSFORM = "METAMORPHIC_TRANSFORM"
+    INDEPENDENT_RECOMPUTE = "INDEPENDENT_RECOMPUTE"
+    REPRESENTATION_CHECK = "REPRESENTATION_CHECK"
+
+
+class FalsificationRequirement(str, Enum):
+    """How a verifier capability treats declared falsification output."""
+
+    NONE = "NONE"
+    OPTIONAL = "OPTIONAL"
+    REQUIRED_BEFORE_PASS = "REQUIRED_BEFORE_PASS"
+
+
 def _strict_identifier(value: Any, *, name: str) -> str:
     if not isinstance(value, str) or not value:
         raise VerifierCapabilityError(f"{name} must be a non-empty string")
@@ -147,6 +166,38 @@ def _enum_value(value: Any, enum_type: type[Enum], *, name: str) -> Enum:
         raise VerifierCapabilityError(f"unsupported {name} {value!r}") from exc
 
 
+def _falsification_kind_tuple(
+    values: Iterable[FalsificationStrategyKind | str],
+) -> tuple[FalsificationStrategyKind, ...]:
+    if isinstance(values, (str, bytes)):
+        raise VerifierCapabilityError(
+            "accepted_falsification_strategy_kinds must be an iterable"
+        )
+    try:
+        supplied = tuple(values)
+    except TypeError as exc:
+        raise VerifierCapabilityError(
+            "accepted_falsification_strategy_kinds must be an iterable"
+        ) from exc
+    normalized: list[FalsificationStrategyKind] = []
+    for value in supplied:
+        try:
+            normalized.append(
+                value
+                if isinstance(value, FalsificationStrategyKind)
+                else FalsificationStrategyKind(str(value))
+            )
+        except ValueError as exc:
+            raise VerifierCapabilityError(
+                f"unsupported falsification strategy kind {value!r}"
+            ) from exc
+    if len(set(normalized)) != len(normalized):
+        raise VerifierCapabilityError(
+            "accepted_falsification_strategy_kinds contains duplicate values"
+        )
+    return tuple(sorted(normalized, key=lambda item: item.value.encode("utf-8")))
+
+
 @dataclass(frozen=True, kw_only=True)
 class VerifierCapability:
     """Strict immutable descriptor for one exact verifier implementation."""
@@ -164,6 +215,12 @@ class VerifierCapability:
     bounds: Mapping[str, Any]
     coverage: Mapping[str, Any]
     authoritative: bool
+    accepted_falsification_strategy_kinds: tuple[
+        FalsificationStrategyKind, ...
+    ] = ()
+    falsification_requirement: FalsificationRequirement = (
+        FalsificationRequirement.NONE
+    )
     description: str | None = None
     fingerprint: str = field(init=False)
 
@@ -245,6 +302,30 @@ class VerifierCapability:
             "coverage",
             _strict_mapping(self.coverage, name="coverage"),
         )
+        object.__setattr__(
+            self,
+            "accepted_falsification_strategy_kinds",
+            _falsification_kind_tuple(
+                self.accepted_falsification_strategy_kinds
+            ),
+        )
+        object.__setattr__(
+            self,
+            "falsification_requirement",
+            _enum_value(
+                self.falsification_requirement,
+                FalsificationRequirement,
+                name="falsification_requirement",
+            ),
+        )
+        if (
+            self.falsification_requirement
+            is not FalsificationRequirement.NONE
+            and not self.accepted_falsification_strategy_kinds
+        ):
+            raise VerifierCapabilityError(
+                "a falsification requirement needs accepted strategy kinds"
+            )
         if self.description is not None:
             if not isinstance(self.description, str):
                 raise VerifierCapabilityError("description must be a string")
@@ -264,7 +345,7 @@ class VerifierCapability:
     def semantic_definition(self) -> dict[str, Any]:
         """Return fingerprinted content. Human description is intentionally absent."""
 
-        return {
+        definition = {
             "schema_version": VERIFIER_CAPABILITY_SCHEMA_VERSION,
             "kind": VERIFIER_CAPABILITY_KIND,
             "verifier_id": self.verifier_id,
@@ -281,6 +362,20 @@ class VerifierCapability:
             "coverage": self.coverage,
             "authoritative": self.authoritative,
         }
+        # Keep schema-v1 Task 19 identities byte-for-byte stable when the new
+        # optional falsification contract is not used.
+        if (
+            self.accepted_falsification_strategy_kinds
+            or self.falsification_requirement is not FalsificationRequirement.NONE
+        ):
+            definition.update({
+                "accepted_falsification_strategy_kinds": tuple(
+                    item.value
+                    for item in self.accepted_falsification_strategy_kinds
+                ),
+                "falsification_requirement": self.falsification_requirement.value,
+            })
+        return definition
 
     def to_dict(self) -> dict[str, Any]:
         value = _export_value(self.semantic_definition())

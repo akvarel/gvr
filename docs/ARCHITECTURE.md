@@ -316,6 +316,21 @@ The schema-v1 `describe_verifier_capabilities` operation exposes this snapshot a
 
 See [Verifier capabilities](VERIFIER_CAPABILITIES.md) for the full contract.
 
+## Falsification layer
+
+`FalsificationStrategyCapabilityRegistry` is a descriptive registry of exact immutable strategy contracts. `FalsificationStrategyRuntimeRegistry` separately binds exact side-effect-free runtimes. Neither registry ranks or selects a strategy.
+
+The caller explicitly attaches `FalsificationStrategyBinding` records to an `AtomicClaimBinding`. The planner validates the exact strategy ID, version, capability fingerprint, claim-kind support, verifier acceptance, and budget before emitting `RUN_FALSIFICATION` steps.
+
+The executor runs each exact strategy only after its evidence and claim prerequisites. It validates result identity, probes, coverage, provenance, and fingerprint, then exposes the result only to the declared verifier. A strategy result never becomes truth directly. A verifier remains responsible for `PASS`, `FAIL`, or `UNKNOWN`.
+
+Two executor gates prevent unsafe `PASS`:
+
+- a declared counterexample cannot be ignored;
+- `REQUIRED_BEFORE_PASS` cannot be satisfied by missing or incomplete output.
+
+See [Falsification](FALSIFICATION.md) for the exact built-in IDs, finite Unicode contract, independent recomputation, and metamorphic semantics.
+
 ## What is outside the GVR core
 
 The generic GVR core should not contain private product decisions such as:
@@ -334,7 +349,6 @@ GVR is under active development.
 
 Potential later layers include:
 
-- deterministic counterexample and falsification support;
 - separately governed plugin loading and attestation;
 - additional built-in verifier and provider runtimes once their public contracts are stable.
 

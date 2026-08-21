@@ -282,7 +282,7 @@ def _fixture(
         falsification_bindings=falsification_bindings,
     ))
 
-    graph = ClaimGraph(tuple(nodes))
+    graph = ClaimGraph(nodes=tuple(nodes))
     planning_request = VerificationPlanningRequest(
         claim_graph=graph,
         bindings=tuple(bindings),
@@ -370,7 +370,7 @@ def _fixture(
 
 
 def _root_verdict(result: Any) -> VerificationVerdict:
-    return result.session.claim_state("target").verdict
+    return result.session.claim_state("target").effective_verdict
 
 
 def _all_keys(value: Any) -> set[str]:

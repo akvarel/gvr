@@ -53,6 +53,16 @@ A data-flow verifier may know which graph relations count as value flow and whic
 
 A verifier should not silently guess missing information.
 
+## Falsification strategy
+
+A **falsification strategy** is deterministic code that tries to challenge an atomic claim before its verifier publishes a verdict.
+
+It may search for a witness or counterexample, check an invariant or representation, apply a named metamorphic transformation, or recompute through an independent path.
+
+A strategy returns probes, coverage, and provenance. It does not return verification truth. The declared verifier still decides `PASS`, `FAIL`, or `UNKNOWN`.
+
+If a declared counterexample exists, a verifier cannot ignore it and return `PASS`. If the verifier requires complete falsification before `PASS`, missing or partial output keeps the claim `UNKNOWN`.
+
 ## Verdict
 
 A **verdict** is the result from a verifier.
@@ -218,11 +228,11 @@ This is called **transitive stale propagation**.
 A `VerificationPlan` is only a deterministic work description. A `VerificationExecutionRequest` binds that exact complete plan to:
 
 - the exact `ClaimGraph` and roots;
-- exact provider and verifier runtime registries;
+- exact provider, optional falsification, and verifier runtime registries;
 - exact evidence requests keyed by `(request_id, request_fingerprint)`;
 - deterministic execution limits.
 
-The executor revalidates and recompiles the plan before invocation. It then records provider results, verifier reports, bundles, step lifecycle, issues, counters, termination, and a final `VerificationSession` in one `VerificationExecutionResult`.
+The executor revalidates and recompiles the plan before invocation. It then records provider results, validated falsification results, verifier reports, bundles, step lifecycle, issues, counters, termination, and a final `VerificationSession` in one `VerificationExecutionResult`.
 
 Execution identity is semantic. It includes exact artifact fingerprints and excludes correlation IDs, clocks, random values, runtime object addresses, and raw exception text.
 

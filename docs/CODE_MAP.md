@@ -124,14 +124,28 @@ Read [Verification sessions](VERIFICATION_SESSIONS.md) before changing this file
 
 This contains deterministic verification planning:
 
-- `AtomicClaimBinding`;
+- `AtomicClaimBinding` and explicit `FalsificationStrategyBinding` records;
 - `VerificationPlanningRequest` and `VerificationPlanningBudget`;
 - stable planner issues and termination;
 - immutable `VerificationPlan` and `VerificationPlanStep`;
-- canonical `ACQUIRE_EVIDENCE`, `VERIFY_ATOMIC_CLAIM`, and `COMPOSE_CLAIM` steps;
+- canonical `ACQUIRE_EVIDENCE`, `RUN_FALSIFICATION`, `VERIFY_ATOMIC_CLAIM`, and `COMPOSE_CLAIM` steps;
 - exact capability, evidence-kind, class, graph, sharing, and budget validation.
 
 The planner compiles descriptions only. It does not call runtime providers, verifiers, Graphify, a network, or the file system. Read [Verification planning](VERIFICATION_PLANNING.md) before changing this file.
+
+## `src/gvr/falsification.py`
+
+This contains the deterministic falsification layer:
+
+- immutable strategy descriptors and exact capability/runtime registries;
+- six generic strategy kinds and exact built-in IDs;
+- finite Unicode code-point text/sequence parameter validation;
+- witness, counterexample, exact count/membership, universal, and existential probes;
+- separate primary and independent recomputation paths;
+- explicit reverse-both metamorphic transformation checks;
+- deterministic result, coverage, and provenance records.
+
+Strategies do not publish verification truth. Their validated output is scoped to the declared verifier. Read [Falsification](FALSIFICATION.md) before changing this file.
 
 ## `src/gvr/execution.py`
 
@@ -141,12 +155,13 @@ This contains the exact plan execution layer:
 - `VerifierRuntimeRegistry` with exact `(verifier_id, version)` bindings;
 - full pre-execution plan, graph, capability, runtime, request, step, and DAG revalidation;
 - one-call-per-step provider acquisition through `EvidenceProviderRuntimeRegistry.acquire`;
-- reachable-only verifier inputs and exact dependency records;
+- reachable-only verifier inputs, exact dependency records, and directly declared falsification results;
+- exact `RUN_FALSIFICATION` execution with prerequisite, runtime, result, provenance, and counterexample gates;
 - deterministic fail-closed `UNKNOWN` reports and bundles;
 - exact session composition and replay-stable execution identity;
 - the schema-v1 built-in data-flow verifier runtime adapter.
 
-It contains no fallback, ranking, scope broadening, product authorization, or LLM. Read [Verification execution](VERIFICATION_EXECUTION.md) before changing this file.
+It contains no fallback, retry, ranking, scope broadening, product authorization, or LLM. Read [Verification execution](VERIFICATION_EXECUTION.md) before changing this file.
 
 ## `src/gvr/adapters/graphify.py`
 

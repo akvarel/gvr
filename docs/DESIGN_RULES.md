@@ -13,7 +13,8 @@ Do not change this into PASS because:
 - the answer looks reasonable;
 - an AI is confident;
 - most evidence points in one direction;
-- no counterexample was found in a partial search.
+- no counterexample was found in a partial search;
+- a required falsification strategy was absent, failed, or covered only part of its finite domain.
 
 This is called **fail closed** behavior.
 
@@ -57,6 +58,8 @@ no path found so far -> not enough to prove "no path exists"
 ```
 
 A negative result needs an explicit completeness contract.
+
+A declared counterexample cannot be ignored by a verifier that returns `PASS`. The executor keeps the claim `UNKNOWN` rather than inventing `FAIL`; only the verifier can publish verification truth.
 
 ## Rule 5: a trusted result travels with its proof basis
 
@@ -211,8 +214,9 @@ Before invocation, it must validate the exact plan, graph, request keys, capabil
 During execution:
 
 - one acquisition step means one exact `(request_id, request_fingerprint)` execution;
+- one falsification step means one exact strategy ID, version, binding, parameter fingerprint, and declared verifier;
 - one verifier step means one exact verifier ID and version;
-- only reachable evidence and exact claim dependencies may cross the verifier boundary;
+- only reachable evidence, exact claim dependencies, and directly declared falsification results may cross the verifier boundary;
 - an invalid prerequisite cannot be upgraded to `PASS`;
 - deterministic limits may block work, but wall-clock races and random cutoffs must not define semantic identity.
 

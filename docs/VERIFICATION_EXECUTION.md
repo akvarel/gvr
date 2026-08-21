@@ -23,6 +23,7 @@ The execution layer exposes these public contracts:
 - `VerificationExecutionTermination`;
 - `VerifierExecutionInput` and `VerifierDependency`;
 - `VerifierRuntimeRegistry`;
+- `FalsificationStrategyRuntimeRegistry` and `FalsificationExecutionInput`;
 - `execute_verification_plan`.
 
 The existing `EvidenceProviderRuntimeRegistry` remains the only provider-dispatch mechanism. Its runtime identity is now fingerprinted from the exact capability-registry fingerprint and exact registered `(provider_id, version)` keys.
@@ -36,6 +37,7 @@ The existing `EvidenceProviderRuntimeRegistry` remains the only provider-dispatc
 - selected session root claim IDs;
 - one exact `VerifierRuntimeRegistry` and verifier capability-registry fingerprint;
 - one exact `EvidenceProviderRuntimeRegistry` and provider capability-registry fingerprint;
+- an optional exact `FalsificationStrategyRuntimeRegistry` and falsification capability-registry fingerprint for plans with `RUN_FALSIFICATION` steps;
 - every exact `EvidenceRequest`, keyed by `(request_id, request_fingerprint)`;
 - deterministic execution limits;
 - an optional `correlation_id`.
@@ -49,8 +51,9 @@ Before any runtime is invoked, construction and execution revalidate:
 3. graph nodes, DAG order, plan step IDs, step fingerprints, and dependency step IDs;
 4. exact claim IDs, claim kinds, claim fingerprints, operators, verifier IDs and versions;
 5. exact request IDs, request fingerprints, request kinds, evidence kinds, provider IDs and versions;
-6. exact runtime keys and runtime capability identities;
-7. exact recompilation of the supplied plan from the graph, requests, capability registries, and plan budget.
+6. exact provider, strategy, and verifier runtime keys and capability identities;
+7. exact falsification binding, parameter, and dependency identity;
+8. exact recompilation of the supplied plan from the graph, requests, capability registries, and plan budget.
 
 A mismatch raises `VerificationExecutionError` before provider or verifier invocation.
 
@@ -73,13 +76,14 @@ A `VerifierExecutionInput` contains only:
 - the exact verifier capability;
 - structurally validated acquisition inputs reachable from that verifier step;
 - reachable evidence records only;
-- exact claim dependencies only.
+- exact claim dependencies only;
+- validated falsification results from directly declared `RUN_FALSIFICATION` dependencies only.
 
 Unrelated evidence and unrelated claims are not passed to the verifier.
 
 ## Step execution
 
-A complete plan contains three executable step kinds.
+A complete plan contains four executable step kinds.
 
 ### `ACQUIRE_EVIDENCE`
 
@@ -95,9 +99,21 @@ Returned results are reconstructed and validated again against the exact request
 
 A provider execution exception becomes the existing deterministic `UNAVAILABLE` provider result. A provider that returns a malformed result causes the acquisition step to fail closed. Raw exception text and exception class representation are never included in semantic output.
 
+### `RUN_FALSIFICATION`
+
+The executor calls one exact side-effect-free strategy runtime after all declared acquisition and claim prerequisites complete. The runtime receives exact claim, verifier, descriptor, parameter, evidence, acquisition, and dependency identity.
+
+The returned `FalsificationResult` is reconstructed and validated against the exact input and descriptor. Identity, probes, coverage, provenance, input fingerprint, parameter fingerprint, and result fingerprint must all agree.
+
+Malformed output produces `FALSIFICATION_RESULT_INVALID`. Runtime exceptions produce `FALSIFICATION_EXECUTION_ERROR`. A blocked or failed strategy result is never substituted, retried, or replaced.
+
+Validated output is stored by exact plan step ID and exposed only to the directly dependent declared verifier.
+
 ### `VERIFY_ATOMIC_CLAIM`
 
 The executor gathers only directly reachable acquisition results and exact claim dependencies.
+
+It also gathers only directly declared falsification results. A verifier cannot see results declared for another verifier or claim.
 
 The verifier is not called when a required acquisition prerequisite is missing, malformed, unavailable, unsupported, missing required evidence kinds, or blocked by an earlier lifecycle failure. Instead, the executor materializes an explicit `UNKNOWN` `VerificationReport` and `VerificationBundle` for the atomic claim.
 
@@ -112,6 +128,10 @@ A valid verifier report must:
 - form a valid `VerificationBundle` with the exact claim dependencies.
 
 Verifier exceptions and malformed reports produce deterministic `UNKNOWN` bundles with stable issue codes. Exception text, stack data, object addresses, and class names are excluded.
+
+If a verifier returns `PASS` while a reachable result contains a counterexample, the executor publishes `UNKNOWN` with `VERIFIER_IGNORED_FALSIFICATION_COUNTEREXAMPLE`. If the verifier declares `REQUIRED_BEFORE_PASS` and output is absent or incomplete, `PASS` becomes `UNKNOWN` with `REQUIRED_FALSIFICATION_INCOMPLETE`.
+
+The executor never turns a clean strategy result into `PASS` and never turns a counterexample directly into `FAIL`. The verifier still decides truth.
 
 ### `COMPOSE_CLAIM`
 
@@ -142,6 +162,7 @@ Execution issues contain stable codes and exact step, claim, or request IDs. The
 - started steps;
 - completed, failed, and blocked steps;
 - provider acquisitions;
+- falsification invocations;
 - verifier invocations;
 - compositions;
 - evidence records and canonical evidence bytes.
@@ -149,6 +170,8 @@ Execution issues contain stable codes and exact step, claim, or request IDs. The
 `VerificationExecutionLimits` can bound those deterministic dimensions. It never uses wall-clock time, random sampling, or nondeterministic scheduling.
 
 When a limit blocks a step, the provider, verifier, or composite operation is not invoked. A blocked atomic step receives an explicit `UNKNOWN` bundle; a blocked composite remains `UNKNOWN` rather than being composed to a definitive verdict.
+
+When a falsification limit blocks a strategy step, the runtime is not invoked and no falsification invocation is consumed. Its dependent verifier cannot produce a definitive result through that blocked dependency.
 
 Final execution termination is:
 
@@ -164,6 +187,7 @@ These are execution states, not product decisions.
 
 - exact request, plan, graph, and capability-registry fingerprints;
 - validated provider results keyed by exact request identity;
+- validated falsification results keyed by exact plan step identity;
 - atomic verification bundles keyed by claim ID;
 - the final `VerificationSession`;
 - step lifecycle records;
@@ -206,7 +230,7 @@ Malformed fields, missing nested fingerprints, runtime descriptor mismatches, an
 INVALID_VERIFICATION_EXECUTION_REQUEST
 ```
 
-Python callers may inject exact runtime registries through the keyword arguments on `handle_request()` or `safe_handle_request()`. The standalone CLI has no way to serialize executable Python objects, so it binds only runtime keys shipped by GVR. Schema v1 currently ships a built-in data-flow verifier adapter and no built-in evidence providers. Custom provider and verifier runtimes are supplied through the Python API.
+Python callers may inject exact runtime registries through the keyword arguments on `handle_request()` or `safe_handle_request()`. The standalone CLI has no way to serialize executable Python objects, so it binds only runtime keys shipped by GVR. Schema v1 ships the generic falsification runtimes, a built-in data-flow verifier adapter, and no built-in evidence providers. Custom provider, strategy, and verifier runtimes are supplied through the Python API.
 
 ## Boundaries
 
@@ -215,7 +239,7 @@ The executor deliberately does not:
 - discover capabilities or runtime plugins;
 - rank or select alternatives;
 - broaden claim scope, evidence scope, or search bounds;
-- retry with a substitute provider or verifier;
+- retry with a substitute provider, strategy, or verifier;
 - infer missing request fields;
 - authorize deployment, deletion, payment, access, or another product action;
 - use model-generated output as authoritative truth.

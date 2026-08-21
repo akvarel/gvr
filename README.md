@@ -49,6 +49,8 @@ VerificationExecutionRequest / exact plan executor
   |
   +--> exact EvidenceProviderRuntimeRegistry
   |
+  +--> exact FalsificationStrategyRuntimeRegistry
+  |
   +--> exact VerifierRuntimeRegistry
   |
   v
@@ -116,10 +118,11 @@ GVR currently includes:
 - immutable `VerifierCapability` descriptors and a distinct deterministic `VerifierCapabilityRegistry`;
 - strict evidence provider request with explicit source/snapshot classes, coverage, stable categorical issue, result, capability, fail-closed class compatibility, public capability-registry validation, and exact runtime registry contracts;
 - deterministic verification planning with exact atomic bindings, capability snapshots, bounded canonical acquisition/check/composition steps, and no execution;
-- deterministic verification execution with exact runtime registries, exact request identities, reachable-only verifier inputs, explicit step lifecycle, fail-closed `UNKNOWN` artifacts, deterministic limits, and replay-stable result identity;
+- deterministic falsification with six exact generic strategy kinds, finite Unicode text/sequence scans, independent recomputation, metamorphic reversal, complete coverage, and fingerprinted provenance;
+- deterministic verification execution with exact provider, falsification, and verifier runtime registries, exact request identities, reachable-only verifier inputs, explicit step lifecycle, fail-closed `UNKNOWN` artifacts, deterministic limits, and replay-stable result identity;
 - an honest built-in verifier capability snapshot with exact verifier IDs, bounds, coverage, cost, and D0/D1/O1/M1 semantics;
 - an honest empty built-in evidence provider capability snapshot;
-- schema-v1 JSON protocol and CLI, including `compile_verification_plan`, `execute_verification_plan`, `compose_verification_session`, `describe_verifier_capabilities`, `describe_evidence_provider_capabilities`, and `validate_evidence_provider_result`.
+- schema-v1 JSON protocol and CLI, including `compile_verification_plan`, `execute_verification_plan`, `compose_verification_session`, `describe_verifier_capabilities`, `describe_evidence_provider_capabilities`, `describe_falsification_strategy_capabilities`, and `validate_evidence_provider_result`.
 
 GVR is under active development. The executor runs only an exact caller-supplied complete plan against exact runtime bindings. Automatic discovery, ranking, substitution, scope broadening, product policy, and LLM-based execution are not part of the core. The built-in evidence provider registry remains empty, while Python callers can supply exact custom provider and verifier runtime registries. Provider and verifier capability registries remain descriptive and never select alternatives.
 
@@ -170,9 +173,10 @@ Recommended reading order:
 5. [Verification sessions](docs/VERIFICATION_SESSIONS.md)
 6. [Verifier capabilities](docs/VERIFIER_CAPABILITIES.md)
 7. [Verification planning](docs/VERIFICATION_PLANNING.md)
-8. [Verification execution](docs/VERIFICATION_EXECUTION.md)
-9. [CLI and JSON protocol](docs/CLI_AND_PROTOCOL.md)
-10. [Design rules](docs/DESIGN_RULES.md)
+8. [Falsification](docs/FALSIFICATION.md)
+9. [Verification execution](docs/VERIFICATION_EXECUTION.md)
+10. [CLI and JSON protocol](docs/CLI_AND_PROTOCOL.md)
+11. [Design rules](docs/DESIGN_RULES.md)
 
 The docs intentionally use plain English and short examples.
 

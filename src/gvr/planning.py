@@ -13,6 +13,8 @@ from .canonical import (
     canonical_utf8_key,
 )
 from .capabilities import (
+    FalsificationRequirement,
+    FalsificationStrategyKind,
     UnknownVerifierCapabilityError,
     VerifierCapability,
     VerifierCapabilityRegistry,
@@ -23,6 +25,11 @@ from .evidence_providers import (
     EvidenceRequest,
     UnknownEvidenceProviderError,
 )
+from .falsification import (
+    FalsificationStrategyCapabilityRegistry,
+    FalsificationStrategyDescriptor,
+    UnknownFalsificationStrategyError,
+)
 from .session import AtomicClaim, ClaimGraph, ClaimOperator, CompositeClaim
 
 
@@ -30,6 +37,11 @@ ATOMIC_CLAIM_BINDING_SCHEMA_VERSION = 1
 ATOMIC_CLAIM_BINDING_KIND = "gvr.atomic_claim_binding"
 ATOMIC_CLAIM_BINDING_FINGERPRINT_FORMAT = (
     "gvr.atomic_claim_binding.ieee754-json.v1"
+)
+FALSIFICATION_STRATEGY_BINDING_SCHEMA_VERSION = 1
+FALSIFICATION_STRATEGY_BINDING_KIND = "gvr.falsification_strategy_binding"
+FALSIFICATION_STRATEGY_BINDING_FINGERPRINT_FORMAT = (
+    "gvr.falsification_strategy_binding.ieee754-json.v1"
 )
 VERIFICATION_PLANNING_REQUEST_SCHEMA_VERSION = 1
 VERIFICATION_PLANNING_REQUEST_KIND = "gvr.verification_planning_request"
@@ -81,6 +93,7 @@ class VerificationPlanningError(ValueError):
 
 class VerificationPlanStepKind(str, Enum):
     ACQUIRE_EVIDENCE = "ACQUIRE_EVIDENCE"
+    RUN_FALSIFICATION = "RUN_FALSIFICATION"
     VERIFY_ATOMIC_CLAIM = "VERIFY_ATOMIC_CLAIM"
     COMPOSE_CLAIM = "COMPOSE_CLAIM"
 
@@ -212,6 +225,8 @@ class VerificationPlanningBudget:
     max_dependency_edges: int | None = None
     max_requests_per_claim: int | None = None
     max_depth: int | None = None
+    max_falsification_steps: int | None = None
+    max_falsifications_per_claim: int | None = None
 
     def __post_init__(self) -> None:
         for name in (
@@ -222,6 +237,8 @@ class VerificationPlanningBudget:
             "max_dependency_edges",
             "max_requests_per_claim",
             "max_depth",
+            "max_falsification_steps",
+            "max_falsifications_per_claim",
         ):
             object.__setattr__(
                 self,
@@ -230,7 +247,7 @@ class VerificationPlanningBudget:
             )
 
     def to_dict(self) -> dict[str, int | None]:
-        return {
+        value = {
             "max_atomic_claims": self.max_atomic_claims,
             "max_composite_claims": self.max_composite_claims,
             "max_steps": self.max_steps,
@@ -239,6 +256,13 @@ class VerificationPlanningBudget:
             "max_requests_per_claim": self.max_requests_per_claim,
             "max_depth": self.max_depth,
         }
+        if self.max_falsification_steps is not None:
+            value["max_falsification_steps"] = self.max_falsification_steps
+        if self.max_falsifications_per_claim is not None:
+            value["max_falsifications_per_claim"] = (
+                self.max_falsifications_per_claim
+            )
+        return value
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -250,6 +274,8 @@ class VerificationPlanningConsumption:
     dependency_edges: int
     requests_per_claim: int
     depth: int
+    falsification_steps: int = 0
+    falsifications_per_claim: int = 0
 
     def __post_init__(self) -> None:
         for name in (
@@ -260,6 +286,8 @@ class VerificationPlanningConsumption:
             "dependency_edges",
             "requests_per_claim",
             "depth",
+            "falsification_steps",
+            "falsifications_per_claim",
         ):
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, int) or value < 0:
@@ -268,7 +296,7 @@ class VerificationPlanningConsumption:
                 )
 
     def to_dict(self) -> dict[str, int]:
-        return {
+        value = {
             "atomic_claims": self.atomic_claims,
             "composite_claims": self.composite_claims,
             "steps": self.steps,
@@ -277,6 +305,92 @@ class VerificationPlanningConsumption:
             "requests_per_claim": self.requests_per_claim,
             "depth": self.depth,
         }
+        if self.falsification_steps:
+            value["falsification_steps"] = self.falsification_steps
+        if self.falsifications_per_claim:
+            value["falsifications_per_claim"] = self.falsifications_per_claim
+        return value
+
+
+@dataclass(frozen=True, kw_only=True)
+class FalsificationStrategyBinding:
+    """One explicit exact strategy invocation declared for one verifier."""
+
+    binding_id: str
+    verifier_id: str
+    strategy_id: str
+    strategy_version: str
+    strategy_capability_fingerprint: str
+    parameters: Mapping[str, Any]
+    schema_version: int = FALSIFICATION_STRATEGY_BINDING_SCHEMA_VERSION
+    kind: str = FALSIFICATION_STRATEGY_BINDING_KIND
+    fingerprint_format: str = FALSIFICATION_STRATEGY_BINDING_FINGERPRINT_FORMAT
+    fingerprint: str = field(init=False)
+
+    def __post_init__(self) -> None:
+        if type(self.schema_version) is not int or self.schema_version != 1:
+            raise VerificationPlanningError(
+                "unsupported falsification strategy binding schema version"
+            )
+        if self.kind != FALSIFICATION_STRATEGY_BINDING_KIND:
+            raise VerificationPlanningError(
+                "unsupported falsification strategy binding kind"
+            )
+        if self.fingerprint_format != FALSIFICATION_STRATEGY_BINDING_FINGERPRINT_FORMAT:
+            raise VerificationPlanningError(
+                "unsupported falsification strategy binding fingerprint format"
+            )
+        for name in (
+            "binding_id", "verifier_id", "strategy_id", "strategy_version",
+        ):
+            object.__setattr__(self, name, _identifier(getattr(self, name), name=name))
+        object.__setattr__(
+            self,
+            "strategy_capability_fingerprint",
+            _sha256(
+                self.strategy_capability_fingerprint,
+                name="strategy_capability_fingerprint",
+            ),
+        )
+        if not isinstance(self.parameters, Mapping):
+            raise VerificationPlanningError(
+                "falsification strategy parameters must be a mapping"
+            )
+        object.__setattr__(
+            self,
+            "parameters",
+            _freeze(self.parameters, name="falsification strategy parameters"),
+        )
+        object.__setattr__(
+            self,
+            "fingerprint",
+            _fingerprint(
+                self.semantic_definition(),
+                fingerprint_format=self.fingerprint_format,
+            ),
+        )
+
+    def semantic_definition(self) -> dict[str, Any]:
+        return {
+            "schema_version": self.schema_version,
+            "kind": self.kind,
+            "binding_id": self.binding_id,
+            "verifier_id": self.verifier_id,
+            "strategy_id": self.strategy_id,
+            "strategy_version": self.strategy_version,
+            "strategy_capability_fingerprint": (
+                self.strategy_capability_fingerprint
+            ),
+            "parameters": self.parameters,
+        }
+
+    def to_dict(self) -> dict[str, Any]:
+        value = _export(self.semantic_definition())
+        value.update({
+            "fingerprint_format": self.fingerprint_format,
+            "fingerprint": self.fingerprint,
+        })
+        return value
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -286,6 +400,7 @@ class AtomicClaimBinding:
     verifier_version: str
     verifier_capability_fingerprint: str
     evidence_requests: tuple[EvidenceRequest, ...] = ()
+    falsification_bindings: tuple[FalsificationStrategyBinding, ...] = ()
     schema_version: int = ATOMIC_CLAIM_BINDING_SCHEMA_VERSION
     kind: str = ATOMIC_CLAIM_BINDING_KIND
     fingerprint_format: str = ATOMIC_CLAIM_BINDING_FINGERPRINT_FORMAT
@@ -350,6 +465,37 @@ class AtomicClaimBinding:
             )
         )
         object.__setattr__(self, "evidence_requests", requests)
+        try:
+            falsification_bindings = tuple(self.falsification_bindings)
+        except TypeError as exc:
+            raise VerificationPlanningError(
+                "falsification_bindings must be iterable"
+            ) from exc
+        if any(
+            type(item) is not FalsificationStrategyBinding
+            for item in falsification_bindings
+        ):
+            raise VerificationPlanningError(
+                "falsification_bindings must contain exact "
+                "FalsificationStrategyBinding records"
+            )
+        binding_ids = [item.binding_id for item in falsification_bindings]
+        if len(set(binding_ids)) != len(binding_ids):
+            raise VerificationPlanningError(
+                f"duplicate falsification binding ID in claim {self.claim_id}"
+            )
+        falsification_bindings = tuple(sorted(
+            falsification_bindings,
+            key=lambda item: (
+                canonical_utf8_key(item.binding_id, path="binding_id"),
+                canonical_utf8_key(item.fingerprint, path="binding fingerprint"),
+            ),
+        ))
+        object.__setattr__(
+            self,
+            "falsification_bindings",
+            falsification_bindings,
+        )
         object.__setattr__(
             self,
             "fingerprint",
@@ -360,7 +506,7 @@ class AtomicClaimBinding:
         )
 
     def semantic_definition(self) -> dict[str, Any]:
-        return {
+        definition = {
             "schema_version": self.schema_version,
             "kind": self.kind,
             "claim_id": self.claim_id,
@@ -371,6 +517,11 @@ class AtomicClaimBinding:
                 request.to_dict() for request in self.evidence_requests
             ),
         }
+        if self.falsification_bindings:
+            definition["falsification_bindings"] = tuple(
+                item.to_dict() for item in self.falsification_bindings
+            )
+        return definition
 
     def to_dict(self) -> dict[str, Any]:
         value = _export(self.semantic_definition())
@@ -391,6 +542,10 @@ class VerificationPlanningRequest:
     verifier_capability_registry_fingerprint: str
     evidence_provider_capability_registry: EvidenceProviderCapabilityRegistry
     evidence_provider_capability_registry_fingerprint: str
+    falsification_strategy_capability_registry: (
+        FalsificationStrategyCapabilityRegistry | None
+    ) = None
+    falsification_strategy_capability_registry_fingerprint: str | None = None
     budget: VerificationPlanningBudget = field(default_factory=VerificationPlanningBudget)
     schema_version: int = VERIFICATION_PLANNING_REQUEST_SCHEMA_VERSION
     kind: str = VERIFICATION_PLANNING_REQUEST_KIND
@@ -449,6 +604,24 @@ class VerificationPlanningRequest:
             raise VerificationPlanningError(
                 "evidence_provider_capability_registry must contain exact EvidenceProviderCapability descriptors"
             )
+        if self.falsification_strategy_capability_registry is not None:
+            if (
+                type(self.falsification_strategy_capability_registry)
+                is not FalsificationStrategyCapabilityRegistry
+            ):
+                raise VerificationPlanningError(
+                    "falsification_strategy_capability_registry must be an exact "
+                    "FalsificationStrategyCapabilityRegistry"
+                )
+            if any(
+                type(capability) is not FalsificationStrategyDescriptor
+                for capability in (
+                    self.falsification_strategy_capability_registry.capabilities
+                )
+            ):
+                raise VerificationPlanningError(
+                    "falsification strategy registry must contain exact descriptors"
+                )
         if type(self.budget) is not VerificationPlanningBudget:
             raise VerificationPlanningError(
                 "budget must be an exact VerificationPlanningBudget"
@@ -461,6 +634,29 @@ class VerificationPlanningRequest:
             self.evidence_provider_capability_registry_fingerprint,
             name="evidence_provider_capability_registry_fingerprint",
         )
+        falsification_registry_fingerprint: str | None = None
+        if self.falsification_strategy_capability_registry is None:
+            if self.falsification_strategy_capability_registry_fingerprint is not None:
+                raise VerificationPlanningError(
+                    "falsification registry fingerprint requires an exact registry"
+                )
+        else:
+            if self.falsification_strategy_capability_registry_fingerprint is None:
+                raise VerificationPlanningError(
+                    "falsification strategy registry fingerprint is required"
+                )
+            falsification_registry_fingerprint = _sha256(
+                self.falsification_strategy_capability_registry_fingerprint,
+                name="falsification_strategy_capability_registry_fingerprint",
+            )
+            if (
+                falsification_registry_fingerprint
+                != self.falsification_strategy_capability_registry.fingerprint
+            ):
+                raise VerificationPlanningError(
+                    "falsification strategy capability registry fingerprint "
+                    "does not match exact registry"
+                )
         if verifier_registry_fingerprint != self.verifier_capability_registry.fingerprint:
             raise VerificationPlanningError(
                 "verifier capability registry fingerprint does not match exact registry"
@@ -481,6 +677,11 @@ class VerificationPlanningRequest:
             self,
             "evidence_provider_capability_registry_fingerprint",
             provider_registry_fingerprint,
+        )
+        object.__setattr__(
+            self,
+            "falsification_strategy_capability_registry_fingerprint",
+            falsification_registry_fingerprint,
         )
 
         try:
@@ -511,6 +712,16 @@ class VerificationPlanningRequest:
                 "bindings reference non-atomic claims: " + ", ".join(extra)
             )
         canonical_bindings = tuple(by_claim[claim_id] for claim_id in sorted(by_claim))
+        has_falsification_bindings = any(
+            item.falsification_bindings for item in canonical_bindings
+        )
+        if (
+            has_falsification_bindings
+            and self.falsification_strategy_capability_registry is None
+        ):
+            raise VerificationPlanningError(
+                "falsification bindings require an exact capability registry"
+            )
         object.__setattr__(self, "bindings", canonical_bindings)
         object.__setattr__(
             self,
@@ -544,7 +755,7 @@ class VerificationPlanningRequest:
             raise KeyError(f"unknown atomic claim binding: {claim_id}") from exc
 
     def semantic_definition(self) -> dict[str, Any]:
-        return {
+        definition = {
             "schema_version": self.schema_version,
             "kind": self.kind,
             "claim_graph_fingerprint": self.claim_graph.fingerprint,
@@ -557,9 +768,14 @@ class VerificationPlanningRequest:
             ),
             "budget": self.budget.to_dict(),
         }
+        if self.falsification_strategy_capability_registry_fingerprint is not None:
+            definition[
+                "falsification_strategy_capability_registry_fingerprint"
+            ] = self.falsification_strategy_capability_registry_fingerprint
+        return definition
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        value = {
             "schema_version": self.schema_version,
             "kind": self.kind,
             "fingerprint_format": self.fingerprint_format,
@@ -578,6 +794,14 @@ class VerificationPlanningRequest:
             ),
             "budget": self.budget.to_dict(),
         }
+        if self.falsification_strategy_capability_registry is not None:
+            value["falsification_strategy_capability_registry"] = (
+                self.falsification_strategy_capability_registry.to_dict()
+            )
+            value[
+                "falsification_strategy_capability_registry_fingerprint"
+            ] = self.falsification_strategy_capability_registry_fingerprint
+        return value
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -638,6 +862,16 @@ class VerificationPlanStep:
     verifier_id: str | None = None
     verifier_version: str | None = None
     verifier_capability_fingerprint: str | None = None
+    binding_id: str | None = None
+    strategy_id: str | None = None
+    strategy_version: str | None = None
+    strategy_kind: FalsificationStrategyKind | None = None
+    strategy_capability_fingerprint: str | None = None
+    strategy_parameters: Mapping[str, Any] | None = None
+    strategy_parameters_fingerprint: str | None = field(
+        init=False,
+        default=None,
+    )
     fingerprint: str = field(init=False)
     step_id: str = field(init=False)
 
@@ -673,6 +907,9 @@ class VerificationPlanStep:
             "provider_version",
             "verifier_id",
             "verifier_version",
+            "binding_id",
+            "strategy_id",
+            "strategy_version",
         ):
             value = getattr(self, name)
             if value is not None:
@@ -682,6 +919,7 @@ class VerificationPlanStep:
             "request_fingerprint",
             "provider_capability_fingerprint",
             "verifier_capability_fingerprint",
+            "strategy_capability_fingerprint",
         ):
             value = getattr(self, name)
             if value is not None:
@@ -691,6 +929,40 @@ class VerificationPlanStep:
                 object.__setattr__(self, "operator", ClaimOperator(str(self.operator)))
             except ValueError as exc:
                 raise VerificationPlanningError("unsupported claim operator") from exc
+        if self.strategy_kind is not None and not isinstance(
+            self.strategy_kind,
+            FalsificationStrategyKind,
+        ):
+            try:
+                object.__setattr__(
+                    self,
+                    "strategy_kind",
+                    FalsificationStrategyKind(str(self.strategy_kind)),
+                )
+            except ValueError as exc:
+                raise VerificationPlanningError(
+                    "unsupported falsification strategy kind"
+                ) from exc
+        if self.strategy_parameters is not None:
+            if not isinstance(self.strategy_parameters, Mapping):
+                raise VerificationPlanningError(
+                    "strategy_parameters must be a mapping"
+                )
+            parameters = _freeze(
+                self.strategy_parameters,
+                name="strategy_parameters",
+            )
+            object.__setattr__(self, "strategy_parameters", parameters)
+            object.__setattr__(
+                self,
+                "strategy_parameters_fingerprint",
+                _fingerprint(
+                    parameters,
+                    fingerprint_format=(
+                        "gvr.falsification.parameters.ieee754-json.v1"
+                    ),
+                ),
+            )
         self._validate_shape()
         fingerprint = _fingerprint(
             self.semantic_definition(),
@@ -700,6 +972,15 @@ class VerificationPlanStep:
         object.__setattr__(self, "step_id", f"step:{fingerprint}")
 
     def _validate_shape(self) -> None:
+        strategy_fields = (
+            self.binding_id,
+            self.strategy_id,
+            self.strategy_version,
+            self.strategy_kind,
+            self.strategy_capability_fingerprint,
+            self.strategy_parameters,
+            self.strategy_parameters_fingerprint,
+        )
         if self.kind is VerificationPlanStepKind.ACQUIRE_EVIDENCE:
             required = (
                 self.request_id,
@@ -724,6 +1005,7 @@ class VerificationPlanStep:
                     self.verifier_id,
                     self.verifier_version,
                     self.verifier_capability_fingerprint,
+                    *strategy_fields,
                 )
             ):
                 raise VerificationPlanningError(
@@ -732,6 +1014,42 @@ class VerificationPlanStep:
             if self.dependency_step_ids:
                 raise VerificationPlanningError(
                     "ACQUIRE_EVIDENCE step cannot depend on another plan step"
+                )
+            return
+        if self.kind is VerificationPlanStepKind.RUN_FALSIFICATION:
+            required = (
+                self.claim_id,
+                self.claim_kind,
+                self.claim_fingerprint,
+                self.verifier_id,
+                self.verifier_version,
+                self.verifier_capability_fingerprint,
+                self.binding_id,
+                self.strategy_id,
+                self.strategy_version,
+                self.strategy_kind,
+                self.strategy_capability_fingerprint,
+                self.strategy_parameters,
+                self.strategy_parameters_fingerprint,
+            )
+            if not all(value is not None for value in required):
+                raise VerificationPlanningError(
+                    "RUN_FALSIFICATION step is missing exact strategy, claim, "
+                    "verifier, or parameter identity"
+                )
+            if self.operator is not None or any(
+                value is not None
+                for value in (
+                    self.request_id,
+                    self.request_fingerprint,
+                    self.request_kind,
+                    self.provider_id,
+                    self.provider_version,
+                    self.provider_capability_fingerprint,
+                )
+            ) or self.requested_evidence_kinds:
+                raise VerificationPlanningError(
+                    "RUN_FALSIFICATION step contains acquisition or composition fields"
                 )
             return
         if self.kind is VerificationPlanStepKind.VERIFY_ATOMIC_CLAIM:
@@ -756,7 +1074,9 @@ class VerificationPlanStep:
                     self.provider_version,
                     self.provider_capability_fingerprint,
                 )
-            ) or self.request_id is not None or self.requested_evidence_kinds:
+            ) or self.request_id is not None or self.requested_evidence_kinds or any(
+                value is not None for value in strategy_fields
+            ):
                 raise VerificationPlanningError(
                     "VERIFY_ATOMIC_CLAIM step contains acquisition or composition fields"
                 )
@@ -782,13 +1102,15 @@ class VerificationPlanStep:
                 self.verifier_version,
                 self.verifier_capability_fingerprint,
             )
-        ) or self.request_id is not None or self.requested_evidence_kinds:
+        ) or self.request_id is not None or self.requested_evidence_kinds or any(
+            value is not None for value in strategy_fields
+        ):
             raise VerificationPlanningError(
                 "COMPOSE_CLAIM step contains acquisition or verifier fields"
             )
 
     def semantic_definition(self) -> dict[str, Any]:
-        return {
+        definition = {
             "kind": self.kind.value,
             "dependency_step_ids": self.dependency_step_ids,
             "claim_id": self.claim_id,
@@ -806,6 +1128,25 @@ class VerificationPlanStep:
             "verifier_version": self.verifier_version,
             "verifier_capability_fingerprint": self.verifier_capability_fingerprint,
         }
+        if self.kind is VerificationPlanStepKind.RUN_FALSIFICATION:
+            definition.update({
+                "binding_id": self.binding_id,
+                "strategy_id": self.strategy_id,
+                "strategy_version": self.strategy_version,
+                "strategy_kind": (
+                    None
+                    if self.strategy_kind is None
+                    else self.strategy_kind.value
+                ),
+                "strategy_capability_fingerprint": (
+                    self.strategy_capability_fingerprint
+                ),
+                "strategy_parameters": self.strategy_parameters,
+                "strategy_parameters_fingerprint": (
+                    self.strategy_parameters_fingerprint
+                ),
+            })
+        return definition
 
     def to_dict(self) -> dict[str, Any]:
         value = _export(self.semantic_definition())
@@ -822,6 +1163,7 @@ class VerificationPlan:
     budget: VerificationPlanningBudget
     consumption: VerificationPlanningConsumption
     termination: VerificationPlanTermination
+    falsification_strategy_capability_registry_fingerprint: str | None = None
     steps: tuple[VerificationPlanStep, ...] = ()
     issues: tuple[VerificationPlannerIssue, ...] = ()
     schema_version: int = VERIFICATION_PLAN_SCHEMA_VERSION
@@ -849,6 +1191,17 @@ class VerificationPlan:
             "evidence_provider_capability_registry_fingerprint",
         ):
             object.__setattr__(self, name, _sha256(getattr(self, name), name=name))
+        if self.falsification_strategy_capability_registry_fingerprint is not None:
+            object.__setattr__(
+                self,
+                "falsification_strategy_capability_registry_fingerprint",
+                _sha256(
+                    self.falsification_strategy_capability_registry_fingerprint,
+                    name=(
+                        "falsification_strategy_capability_registry_fingerprint"
+                    ),
+                ),
+            )
         if type(self.budget) is not VerificationPlanningBudget:
             raise VerificationPlanningError("plan budget has the wrong type")
         if type(self.consumption) is not VerificationPlanningConsumption:
@@ -924,7 +1277,7 @@ class VerificationPlan:
         )
 
     def semantic_definition(self) -> dict[str, Any]:
-        return {
+        definition = {
             "schema_version": self.schema_version,
             "kind": self.kind,
             "request_fingerprint": self.request_fingerprint,
@@ -941,6 +1294,11 @@ class VerificationPlan:
             "steps": tuple(item.to_dict() for item in self.steps),
             "issues": tuple(item.to_dict() for item in self.issues),
         }
+        if self.falsification_strategy_capability_registry_fingerprint is not None:
+            definition[
+                "falsification_strategy_capability_registry_fingerprint"
+            ] = self.falsification_strategy_capability_registry_fingerprint
+        return definition
 
     def to_dict(self) -> dict[str, Any]:
         value = _export(self.semantic_definition())
@@ -1001,16 +1359,30 @@ def _consumption(request: VerificationPlanningRequest) -> VerificationPlanningCo
     )
     atomic_claims = len(request.claim_graph.atomic_claims)
     composite_claims = len(request.claim_graph.composite_claims)
+    falsification_steps = sum(
+        len(binding.falsification_bindings) for binding in request.bindings
+    )
+    falsifications_per_claim = max(
+        (len(binding.falsification_bindings) for binding in request.bindings),
+        default=0,
+    )
     return VerificationPlanningConsumption(
         atomic_claims=atomic_claims,
         composite_claims=composite_claims,
-        steps=len(exact_requests) + atomic_claims + composite_claims,
+        steps=(
+            len(exact_requests)
+            + falsification_steps
+            + atomic_claims
+            + composite_claims
+        ),
         requests=len(exact_requests),
         dependency_edges=sum(
             len(claim.dependencies) for claim in request.claim_graph.nodes
         ),
         requests_per_claim=requests_per_claim,
         depth=_graph_depth(request.claim_graph),
+        falsification_steps=falsification_steps,
+        falsifications_per_claim=falsifications_per_claim,
     )
 
 
@@ -1030,6 +1402,9 @@ def _base_plan(
         ),
         evidence_provider_capability_registry_fingerprint=(
             request.evidence_provider_capability_registry_fingerprint
+        ),
+        falsification_strategy_capability_registry_fingerprint=(
+            request.falsification_strategy_capability_registry_fingerprint
         ),
         budget=request.budget,
         consumption=consumption,
@@ -1107,6 +1482,120 @@ def _compatibility_issues(
                 )
             )
             continue
+        if (
+            verifier.falsification_requirement
+            is FalsificationRequirement.REQUIRED_BEFORE_PASS
+            and not binding.falsification_bindings
+        ):
+            issues.append(
+                VerificationPlannerIssue(
+                    code="MISSING_REQUIRED_FALSIFICATION_BINDING",
+                    claim_id=claim.claim_id,
+                    details={
+                        "accepted_strategy_kinds": tuple(
+                            item.value
+                            for item in (
+                                verifier.accepted_falsification_strategy_kinds
+                            )
+                        ),
+                    },
+                )
+            )
+        for falsification_binding in binding.falsification_bindings:
+            if falsification_binding.verifier_id != binding.verifier_id:
+                issues.append(
+                    VerificationPlannerIssue(
+                        code="FALSIFICATION_VERIFIER_ID_MISMATCH",
+                        claim_id=claim.claim_id,
+                        details={
+                            "binding_id": falsification_binding.binding_id,
+                            "declared_verifier_id": (
+                                falsification_binding.verifier_id
+                            ),
+                            "atomic_verifier_id": binding.verifier_id,
+                        },
+                    )
+                )
+                continue
+            registry = request.falsification_strategy_capability_registry
+            if registry is None:
+                # Construction rejects this combination. Keep the planner
+                # defensive if an object is externally corrupted afterward.
+                issues.append(
+                    VerificationPlannerIssue(
+                        code="MISSING_FALSIFICATION_STRATEGY_REGISTRY",
+                        claim_id=claim.claim_id,
+                        details={"binding_id": falsification_binding.binding_id},
+                    )
+                )
+                continue
+            try:
+                strategy = registry.lookup(
+                    falsification_binding.strategy_id,
+                    falsification_binding.strategy_version,
+                )
+            except UnknownFalsificationStrategyError:
+                issues.append(
+                    VerificationPlannerIssue(
+                        code="UNKNOWN_FALSIFICATION_STRATEGY",
+                        claim_id=claim.claim_id,
+                        details={
+                            "binding_id": falsification_binding.binding_id,
+                            "strategy_id": falsification_binding.strategy_id,
+                            "strategy_version": (
+                                falsification_binding.strategy_version
+                            ),
+                        },
+                    )
+                )
+                continue
+            if (
+                strategy.fingerprint
+                != falsification_binding.strategy_capability_fingerprint
+            ):
+                issues.append(
+                    VerificationPlannerIssue(
+                        code=(
+                            "FALSIFICATION_STRATEGY_CAPABILITY_"
+                            "FINGERPRINT_MISMATCH"
+                        ),
+                        claim_id=claim.claim_id,
+                        details={
+                            "binding_id": falsification_binding.binding_id,
+                            "strategy_id": strategy.strategy_id,
+                            "strategy_version": strategy.version,
+                        },
+                    )
+                )
+                continue
+            if not strategy.supports_claim_kind(claim.claim_kind):
+                issues.append(
+                    VerificationPlannerIssue(
+                        code="UNSUPPORTED_FALSIFICATION_CLAIM_KIND",
+                        claim_id=claim.claim_id,
+                        details={
+                            "binding_id": falsification_binding.binding_id,
+                            "claim_kind": claim.claim_kind,
+                            "strategy_id": strategy.strategy_id,
+                        },
+                    )
+                )
+                continue
+            if (
+                strategy.strategy_kind
+                not in verifier.accepted_falsification_strategy_kinds
+            ):
+                issues.append(
+                    VerificationPlannerIssue(
+                        code="UNSUPPORTED_FALSIFICATION_STRATEGY_KIND",
+                        claim_id=claim.claim_id,
+                        details={
+                            "binding_id": falsification_binding.binding_id,
+                            "strategy_kind": strategy.strategy_kind.value,
+                            "verifier_id": verifier.verifier_id,
+                        },
+                    )
+                )
         if verifier.required_evidence_kinds and not binding.evidence_requests:
             issues.append(
                 VerificationPlannerIssue(
@@ -1241,7 +1730,6 @@ def _budget_issues(
     request: VerificationPlanningRequest,
     consumption: VerificationPlanningConsumption,
 ) -> tuple[VerificationPlannerIssue, ...]:
-    values = consumption.to_dict()
     fields = (
         ("max_atomic_claims", "atomic_claims"),
         ("max_composite_claims", "composite_claims"),
@@ -1250,11 +1738,13 @@ def _budget_issues(
         ("max_dependency_edges", "dependency_edges"),
         ("max_requests_per_claim", "requests_per_claim"),
         ("max_depth", "depth"),
+        ("max_falsification_steps", "falsification_steps"),
+        ("max_falsifications_per_claim", "falsifications_per_claim"),
     )
     issues = []
     for budget_name, consumption_name in fields:
         limit = getattr(request.budget, budget_name)
-        required = values[consumption_name]
+        required = getattr(consumption, consumption_name)
         if limit is not None and required > limit:
             issues.append(
                 VerificationPlannerIssue(
@@ -1327,10 +1817,41 @@ def _build_steps(
                 ].step_id
                 for item in binding.evidence_requests
             ]
+            prerequisite_dependencies = tuple(
+                acquisition_dependencies + claim_dependencies
+            )
+            falsification_steps: list[VerificationPlanStep] = []
+            for falsification_binding in binding.falsification_bindings:
+                registry = request.falsification_strategy_capability_registry
+                assert registry is not None
+                strategy = registry.lookup(
+                    falsification_binding.strategy_id,
+                    falsification_binding.strategy_version,
+                )
+                falsification_step = VerificationPlanStep(
+                    kind=VerificationPlanStepKind.RUN_FALSIFICATION,
+                    dependency_step_ids=prerequisite_dependencies,
+                    claim_id=claim.claim_id,
+                    claim_kind=claim.claim_kind,
+                    claim_fingerprint=_claim_fingerprint(claim),
+                    verifier_id=verifier.verifier_id,
+                    verifier_version=verifier.version,
+                    verifier_capability_fingerprint=verifier.fingerprint,
+                    binding_id=falsification_binding.binding_id,
+                    strategy_id=strategy.strategy_id,
+                    strategy_version=strategy.version,
+                    strategy_kind=strategy.strategy_kind,
+                    strategy_capability_fingerprint=strategy.fingerprint,
+                    strategy_parameters=falsification_binding.parameters,
+                )
+                falsification_steps.append(falsification_step)
+                steps.append(falsification_step)
             step = VerificationPlanStep(
                 kind=VerificationPlanStepKind.VERIFY_ATOMIC_CLAIM,
                 dependency_step_ids=tuple(
-                    acquisition_dependencies + claim_dependencies
+                    acquisition_dependencies
+                    + claim_dependencies
+                    + [item.step_id for item in falsification_steps]
                 ),
                 claim_id=claim.claim_id,
                 claim_kind=claim.claim_kind,
