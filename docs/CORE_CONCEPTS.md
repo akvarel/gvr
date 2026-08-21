@@ -169,6 +169,17 @@ Its effective result becomes `UNKNOWN` until the claim is verified again.
 
 This rule prevents an old correct answer from becoming a new wrong answer after the world changes.
 
+## Durable evidence slots
+
+The in-memory ledger versions evidence during one process. Durable storage separates two related ideas:
+
+- an immutable evidence artifact, identified by canonical content;
+- a replaceable slot, identified by a stable logical name and an append-only version number.
+
+A bundle or claim points to one exact historical slot version. When the slot pointer advances, only objects reachable through indexed dependency edges become noncurrent. The old artifact, old bundle, old claim version, and old session remain available as history.
+
+Freshness is not a timer. Immutable evidence does not become stale merely because it is old. See [Durable storage](DURABLE_STORAGE.md).
+
 ## Source and producer fingerprint
 
 An Evidence record can also carry information such as:
@@ -233,6 +244,8 @@ A `VerificationPlan` is only a deterministic work description. A `VerificationEx
 - deterministic execution limits.
 
 The executor revalidates and recompiles the plan before invocation. It then records provider results, validated falsification results, verifier reports, bundles, step lifecycle, issues, counters, termination, and a final `VerificationSession` in one `VerificationExecutionResult`.
+
+When a caller explicitly supplies durable storage or a unit of work, the executor also records that completed basis atomically before returning. No storage is discovered globally, and a persistence failure cannot return an unstored `PASS`.
 
 Execution identity is semantic. It includes exact artifact fingerprints and excludes correlation IDs, clocks, random values, runtime object addresses, and raw exception text.
 

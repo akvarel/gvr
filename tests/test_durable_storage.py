@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
 import json
 from pathlib import Path
 import sqlite3
@@ -503,6 +502,32 @@ def test_03_identical_evidence_and_slot_writes_are_idempotent(tmp_path: Path) ->
     assert len(db.slot_history("slot:state")) == 1
     assert db.invalidation_events() == ()
 
+    bundle = _bundle((evidence,))
+    exact_slot = db.get_slot("slot:state")
+    first_bundle = db.put_bundle(
+        bundle,
+        evidence_slots={evidence.id: exact_slot},
+    )
+    second_bundle = db.put_bundle(bundle)
+    assert second_bundle == first_bundle
+
+    definition = ClaimDefinition("idempotent:claim", "same basis", VERIFIER_ID)
+    assert db.define_claim(
+        definition,
+        verifier_version=VERIFIER_VERSION,
+    ) == db.define_claim(definition, verifier_version=VERIFIER_VERSION)
+    first_claim = db.record_claim(
+        definition.id,
+        bundle,
+        verifier_version=VERIFIER_VERSION,
+    )
+    second_claim = db.record_claim(
+        definition.id,
+        bundle,
+        verifier_version=VERIFIER_VERSION,
+    )
+    assert second_claim == first_claim
+
 
 def test_04_conflicting_content_for_supplied_immutable_identity_is_rejected(tmp_path: Path) -> None:
     db = SQLiteStorage(tmp_path / "ledger.sqlite3")
@@ -846,7 +871,10 @@ def test_25_task19_executor_records_completed_session_bundle_claim_atomically(tm
     path = tmp_path / "ledger.sqlite3"
     db = SQLiteStorage(path)
     fixture = _execution_fixture()
+    expected = execute_verification_plan(_execution_fixture().request)
     result = execute_verification_plan(fixture.request, storage=db)
+    assert result.fingerprint == expected.fingerprint
+    assert result.session.fingerprint == expected.session.fingerprint
     assert result.session.root_verdicts == {"executor:claim": VerificationVerdict.PASS}
     assert db.claim_status("executor:claim").effective_verdict is VerificationVerdict.PASS
     bundle = next(iter(result.bundles.values()))
@@ -873,7 +901,10 @@ def test_27_task20_falsification_result_and_claim_basis_persist_exactly(tmp_path
     path = tmp_path / "ledger.sqlite3"
     db = SQLiteStorage(path)
     fixture = _falsification_fixture()
+    expected = execute_verification_plan(_falsification_fixture().request)
     result = execute_verification_plan(fixture.request, storage=db)
+    assert result.fingerprint == expected.fingerprint
+    assert result.session.fingerprint == expected.session.fingerprint
     falsification = next(iter(result.falsification_results.values()))
     stored = db.get_falsification_result(falsification.fingerprint)
     assert stored.result == falsification
@@ -978,3 +1009,24 @@ def test_32_reverse_dependency_lookup_uses_index_without_serialized_session_scan
     assert "idx_object_dependencies_dependency" in plan
     assert "sessions" not in plan
     assert written.slot_version == 1
+
+
+def test_33_executor_uses_explicit_caller_owned_unit_of_work_and_outer_rollback(tmp_path: Path) -> None:
+    db = SQLiteStorage(tmp_path / "ledger.sqlite3")
+    fixture = _execution_fixture()
+    with pytest.raises(RuntimeError, match="outer rollback"):
+        with db.unit_of_work() as uow:
+            result = execute_verification_plan(
+                fixture.request,
+                unit_of_work=uow,
+            )
+            assert result.session.root_verdicts == {
+                "executor:claim": VerificationVerdict.PASS
+            }
+            assert (
+                uow.claim_status("executor:claim").effective_verdict
+                is VerificationVerdict.PASS
+            )
+            raise RuntimeError("outer rollback")
+    with pytest.raises(StorageNotFoundError):
+        db.claim_status("executor:claim")

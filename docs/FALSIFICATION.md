@@ -286,6 +286,14 @@ A clean metamorphic check means that this transformation found no inconsistency.
 
 The independent recomputation strategy detects the wrong candidate. If a verifier still returns `PASS`, the executor publishes deterministic `UNKNOWN` with `VERIFIER_IGNORED_FALSIFICATION_COUNTEREXAMPLE`.
 
+## Durable falsification basis
+
+The SQLite reference adapter stores each validated `FalsificationResult` under its exact result fingerprint. Optional evidence-slot links capture the exact input versions used by a strategy. A durable claim version records the exact falsification result fingerprints consumed by its verifier.
+
+A result can support only the same claim ID and declared verifier carried by its provenance. Cross-claim or cross-verifier substitution fails closed. If a linked evidence slot changes, invalidation propagates from the falsification result to its claim version, downstream claims, and sessions.
+
+This does not change truth ownership. Durable falsification output remains part of the verifier basis and never becomes an independent `PASS` or `FAIL`. See [Durable storage](DURABLE_STORAGE.md).
+
 ## Schema-v1 protocol
 
 Task 20 extends schema version 1 without changing legacy payloads.

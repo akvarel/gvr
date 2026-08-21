@@ -12,6 +12,17 @@ The main entry point is:
 result = execute_verification_plan(request)
 ```
 
+Optional durable recording is explicit:
+
+```python
+result = execute_verification_plan(request, storage=storage)
+
+with storage.unit_of_work() as uow:
+    result = execute_verification_plan(request, unit_of_work=uow)
+```
+
+`storage` and `unit_of_work` are mutually exclusive. Supplying neither preserves the original executor behavior and identity.
+
 The execution layer exposes these public contracts:
 
 - `VerificationExecutionRequest`;
@@ -209,6 +220,14 @@ The fingerprint excludes:
 - raw exception text and representation.
 
 Replaying the same exact semantic inputs and runtime outputs therefore produces the same request, bundle, session, and execution-result fingerprints.
+
+## Durable completion recording
+
+An explicitly supplied durable target is invoked only after the normal execution result and sealed session have been constructed. One logical write records exact provider evidence provenance, source snapshot, bounds, coverage, slot versions, falsification results, bundles, claim definitions and versions, graph and plan documents, execution document, and session links.
+
+The write is atomic. If it fails, `execute_verification_plan()` raises `VerificationExecutionError` with a stable durable-storage failure category. It does not return a `PASS` whose basis was only partially stored.
+
+The executor does not open a database unless the caller supplied one, does not select an adapter, and does not expose SQL. See [Durable storage](DURABLE_STORAGE.md).
 
 ## Schema-v1 protocol and CLI
 

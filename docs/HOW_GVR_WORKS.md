@@ -128,6 +128,14 @@ Evidence: df:456
 
 The ledger also remembers the versions of those dependencies.
 
+## Optional durable step: persist the exact basis
+
+A caller may store immutable evidence artifacts, replaceable slot versions, bundles, claim versions, falsification results, and sealed sessions through the generic storage interfaces. The standard-library `SQLiteStorage` adapter writes one logical operation transactionally.
+
+When supplied directly to `execute_verification_plan`, completed execution recording happens before the result returns. A persistence failure raises instead of returning an unstored `PASS`.
+
+Durable current/stale state uses exact dependency versions. It does not use a TTL, wall-clock age, or a cache. See [Durable storage](DURABLE_STORAGE.md).
+
 ## Step 7: evidence changes
 
 Later, the source code may change.

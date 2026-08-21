@@ -74,6 +74,23 @@ It records:
 
 If you are debugging why an old PASS became UNKNOWN, this is one of the main files to inspect.
 
+## `src/gvr/storage.py`
+
+This defines the generic durable storage boundary:
+
+- `EvidenceStore`, `BundleStore`, `ClaimStore`, `SessionStore`, and `DependencyIndex`;
+- `StorageUnitOfWork` and `UnitOfWorkFactory`;
+- immutable stored-record views and durable storage errors;
+- the explicit completed-execution persistence hook.
+
+The interfaces contain no product-specific fields and do not require SQL.
+
+## `src/gvr/sqlite_storage.py`
+
+This is the standard-library SQLite reference adapter. It implements explicit schema versioning and transactional migrations, immutable evidence plus versioned slots, exact bundle and claim bases, falsification and session persistence, indexed reverse dependencies, idempotent invalidation events, corruption checks, rollback, and completed-execution recording.
+
+Read [Durable storage](DURABLE_STORAGE.md) before changing schema or current/stale semantics.
+
 ## `src/gvr/bundle.py`
 
 This implements `VerificationBundle`.

@@ -53,6 +53,11 @@ This page shows how the current GVR pieces fit together.
                            |
                            v
                 VerificationSession
+                           |
+                           v
+               optional durable stores
+             SQLite evidence / bundles /
+              claims / sessions / index
 ```
 
 The important idea is separation.
@@ -107,6 +112,20 @@ Before invocation it reconstructs every nested fingerprinted contract, recompile
 `ACQUIRE_EVIDENCE` dispatches once through the exact `EvidenceProviderRuntimeRegistry`. `VERIFY_ATOMIC_CLAIM` receives only directly reachable evidence and exact claim dependencies. `COMPOSE_CLAIM` uses the existing session tri-state logic. Runtime exceptions, malformed artifacts, invalid prerequisites, and limit exhaustion materialize explicit lifecycle issues and preserve affected claims as `UNKNOWN`; no fallback, ranking, scope broadening, product policy, or LLM is present.
 
 See [Verification execution](VERIFICATION_EXECUTION.md) for the full contract.
+
+When the caller explicitly supplies storage or a unit of work, the executor records the completed provider evidence metadata, falsification results, bundles, claim bases, graph and plan references, execution document, and sealed session in one logical transaction before returning. Persistence failure raises rather than returning an unstored `PASS`.
+
+## Durable storage layer
+
+The durable layer is optional and has no effect on execution fingerprints when omitted. Five generic protocols separate evidence, bundles, claims, sessions, and reverse dependencies. `SQLiteStorage` is the standard-library reference adapter.
+
+Evidence artifacts are immutable and content-addressed. Replaceable slots append versions and atomically move one current pointer. Bundles, claim versions, falsification results, and sessions point to exact historical versions. Reverse edges are indexed, so a slot change invalidates only reachable dependents:
+
+```text
+slot version -> bundle or falsification result -> claim versions -> sessions
+```
+
+Current and stale state is structural. No TTL, cache entry, file timestamp, or session scan decides truth. Historical artifacts remain immutable and readable. See [Durable storage](DURABLE_STORAGE.md).
 
 ## Verifier layer
 

@@ -44,6 +44,8 @@ A request always has this basic shape:
 
 The response is also JSON.
 
+Durable storage is intentionally not a raw SQL protocol operation. Schema-v1 requests cannot submit SQL, choose a database path, or inspect SQLite tables. Applications that need remote durable access should expose an authenticated service boundary around the Python storage interfaces. See [Durable storage](DURABLE_STORAGE.md).
+
 ## Example: text search
 
 Save this as `request.json`:

@@ -2210,8 +2210,21 @@ def _status_consumption(
 
 def execute_verification_plan(
     request: VerificationExecutionRequest,
+    *,
+    storage: Any | None = None,
+    unit_of_work: Any | None = None,
 ) -> VerificationExecutionResult:
-    """Execute one exact immutable plan with no selection or product policy."""
+    """Execute one exact immutable plan with optional explicit durable recording.
+
+    Storage is never discovered globally. When supplied, the completed evidence,
+    bundle, claim, falsification, and session basis is recorded atomically before
+    a result can be returned to the caller.
+    """
+
+    if storage is not None and unit_of_work is not None:
+        raise VerificationExecutionError(
+            "storage and unit_of_work are mutually exclusive"
+        )
 
     request = _runtime_request_copy(request)
     session = VerificationSession(graph=request.claim_graph, roots=request.roots)
@@ -2786,7 +2799,7 @@ def execute_verification_plan(
     else:
         termination = VerificationExecutionTermination.COMPLETE
     session.seal()
-    return VerificationExecutionResult(
+    result = VerificationExecutionResult(
         request_fingerprint=request.fingerprint,
         plan_fingerprint=request.plan_fingerprint,
         claim_graph_fingerprint=request.claim_graph_fingerprint,
@@ -2809,3 +2822,16 @@ def execute_verification_plan(
         termination=termination,
         correlation_id=request.correlation_id,
     )
+    durable_target = storage if storage is not None else unit_of_work
+    if durable_target is not None:
+        try:
+            from .storage import persist_execution_result
+
+            persist_execution_result(durable_target, request, result)
+        except BaseException as exc:
+            if isinstance(exc, (KeyboardInterrupt, SystemExit)):
+                raise
+            raise VerificationExecutionError(
+                "durable storage recording failed closed"
+            ) from exc
+    return result

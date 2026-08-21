@@ -110,6 +110,8 @@ For each `ACQUIRE_EVIDENCE` step, the executor calls `EvidenceProviderRuntimeReg
 
 Unavailable, unsupported, missing-required-kind, malformed, or blocked acquisitions cannot be upgraded to `PASS`. The verifier is not called for that invalid prerequisite, and the executor records an explicit `UNKNOWN` bundle. See [Verification execution](VERIFICATION_EXECUTION.md).
 
+When durable storage is explicitly supplied, each provider evidence artifact also preserves canonical provenance, `snapshot_identity`, declared bounds, and the complete `EvidenceCoverage` document. The evidence ID is the default replaceable slot for executor recording, while the immutable artifact retains the exact request and provider-result fingerprints. See [Durable storage](DURABLE_STORAGE.md).
+
 Graphify materialized evidence kinds remain the stable data-flow evidence surface:
 
 - `graphify.data_flow_edge`

@@ -190,6 +190,14 @@ Independent bundles can arrive in a different order without changing the final s
 
 Internal ClaimLedger mutation clocks are audit data. They are not used as semantic session identity.
 
+## Durable session history
+
+`SQLiteStorage` stores the exact sealed session document together with exact graph, optional plan, optional execution, claim-version, bundle, and falsification references. Claim statuses, root verdicts, termination, and counters remain part of the historical session artifact.
+
+When a linked slot or upstream claim changes, the old session is not rewritten or deleted. It becomes structurally noncurrent and remains available through `historical_sessions()`. A newly verified basis produces a new current claim version and normally a new session fingerprint. `current_sessions()` returns only sessions whose exact linked bases are still current.
+
+No session becomes stale merely because time passed. Reverse dependency indexes find affected sessions without scanning every serialized session. See [Durable storage](DURABLE_STORAGE.md).
+
 ## Use by the verification executor
 
 The plan executor creates one `VerificationSession` for the exact request graph and roots. Each valid atomic verifier report becomes a `VerificationBundle` recorded through the public session API. Each exact `COMPOSE_CLAIM` step calls `compose_claim(claim_id)` once, so the executor does not recompute future or unrelated composite steps.

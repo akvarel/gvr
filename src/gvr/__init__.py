@@ -242,6 +242,40 @@ from .text_search import (
     TextSearchResult,
     evaluate_text_search,
 )
+from .storage import (
+    DURABLE_STORAGE_SCHEMA_TABLE,
+    DURABLE_STORAGE_SCHEMA_VERSION,
+    BundleStore,
+    ClaimStore,
+    DependencyIndex,
+    EvidenceSlotVersion,
+    EvidenceStore,
+    InvalidationEvent,
+    SessionStore,
+    StorageConflictError,
+    StorageError,
+    StorageIntegrityError,
+    StorageMigrationError,
+    StorageNotFoundError,
+    StorageSchemaVersionError,
+    StorageUnitOfWork,
+    StoredBundle,
+    StoredClaimDefinition,
+    StoredClaimStatus,
+    StoredClaimVersion,
+    StoredEvidence,
+    StoredFalsificationResult,
+    StoredSession,
+    StoredTruthError,
+    UnitOfWorkFactory,
+    persist_execution_result,
+)
+from .sqlite_storage import (
+    SQLiteDurableStorage,
+    SQLiteLedgerStorage,
+    SQLiteStorage,
+    SQLiteUnitOfWork,
+)
 from .verifiers.data_flow import (
     BLOCKING_RESOLUTIONS,
     COMPLETE_COVERAGE,
@@ -389,6 +423,16 @@ __all__ = [
     "builtin_falsification_strategy_capability_registry",
     "builtin_falsification_strategy_runtime_registry",
     "validate_falsification_result",
+    "DURABLE_STORAGE_SCHEMA_TABLE", "DURABLE_STORAGE_SCHEMA_VERSION",
+    "EvidenceStore", "BundleStore", "ClaimStore", "SessionStore",
+    "DependencyIndex", "StorageUnitOfWork", "UnitOfWorkFactory",
+    "StorageError", "StorageNotFoundError", "StorageConflictError",
+    "StorageIntegrityError", "StoredTruthError", "StorageSchemaVersionError",
+    "StorageMigrationError", "EvidenceSlotVersion", "StoredEvidence",
+    "StoredBundle", "StoredClaimDefinition", "StoredClaimVersion",
+    "StoredClaimStatus", "StoredFalsificationResult", "StoredSession",
+    "InvalidationEvent", "SQLiteStorage", "SQLiteDurableStorage",
+    "SQLiteLedgerStorage", "SQLiteUnitOfWork", "persist_execution_result",
 ]
 
 from .software import Coverage, DeltaKind, FunctionalDeltaItem, FunctionalDeltaResult, FunctionalSnapshot, Observable, RevisionRef, compare_functionality, FUNCTIONAL_REGRESSION_VERIFIER, verify_functional_regression

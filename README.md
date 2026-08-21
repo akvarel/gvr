@@ -66,12 +66,17 @@ VerificationBundle
 ClaimLedger
   |
   v
+SQLiteStorage (optional durable history)
+  |
+  v
 ClaimGraph / VerificationSession
 ```
 
 A `VerificationBundle` keeps a report together with the exact evidence used by that report.
 
 The `ClaimLedger` remembers dependencies. If evidence changes, old dependent results become stale and must not be treated as current truth.
+
+The optional durable storage layer keeps immutable evidence, exact bundle and claim bases, invalidation history, and sealed sessions across restarts. Freshness remains structural and never expires by time.
 
 A `VerificationSession` can combine several current claims with exact `AND`, `OR`, and `NOT` rules.
 
@@ -109,6 +114,7 @@ GVR currently includes:
 - functional snapshot comparison and conservative functional-regression verification;
 - evidence records and deterministic evidence versioning;
 - `ClaimLedger` with transitive stale propagation;
+- generic `EvidenceStore`, `BundleStore`, `ClaimStore`, `SessionStore`, and `DependencyIndex` interfaces plus a transactional standard-library `SQLiteStorage` adapter;
 - Graphify traversal evidence adapter;
 - deterministic `CAN_FLOW_TO` and `NO_SUPPORTED_PATH` data-flow claim verification;
 - `VerificationBundle` transport with exact evidence manifests;
@@ -120,6 +126,7 @@ GVR currently includes:
 - deterministic verification planning with exact atomic bindings, capability snapshots, bounded canonical acquisition/check/composition steps, and no execution;
 - deterministic falsification with six exact generic strategy kinds, finite Unicode text/sequence scans, independent recomputation, metamorphic reversal, complete coverage, and fingerprinted provenance;
 - deterministic verification execution with exact provider, falsification, and verifier runtime registries, exact request identities, reachable-only verifier inputs, explicit step lifecycle, fail-closed `UNKNOWN` artifacts, deterministic limits, and replay-stable result identity;
+- optional atomic executor recording through an explicitly supplied durable store or unit of work, with no global storage discovery and no returned `PASS` after persistence failure;
 - an honest built-in verifier capability snapshot with exact verifier IDs, bounds, coverage, cost, and D0/D1/O1/M1 semantics;
 - an honest empty built-in evidence provider capability snapshot;
 - schema-v1 JSON protocol and CLI, including `compile_verification_plan`, `execute_verification_plan`, `compose_verification_session`, `describe_verifier_capabilities`, `describe_evidence_provider_capabilities`, `describe_falsification_strategy_capabilities`, and `validate_evidence_provider_result`.
@@ -175,8 +182,9 @@ Recommended reading order:
 7. [Verification planning](docs/VERIFICATION_PLANNING.md)
 8. [Falsification](docs/FALSIFICATION.md)
 9. [Verification execution](docs/VERIFICATION_EXECUTION.md)
-10. [CLI and JSON protocol](docs/CLI_AND_PROTOCOL.md)
-11. [Design rules](docs/DESIGN_RULES.md)
+10. [Durable storage](docs/DURABLE_STORAGE.md)
+11. [CLI and JSON protocol](docs/CLI_AND_PROTOCOL.md)
+12. [Design rules](docs/DESIGN_RULES.md)
 
 The docs intentionally use plain English and short examples.
 

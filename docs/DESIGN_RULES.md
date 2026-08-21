@@ -221,3 +221,20 @@ During execution:
 - deterministic limits may block work, but wall-clock races and random cutoffs must not define semantic identity.
 
 No fallback, ranking, scope broadening, product decision, or LLM belongs in this layer.
+
+## Rule 16: durable truth must be structural and atomic
+
+Persistence must not create a second, weaker truth model.
+
+- immutable evidence and historical bundles never expire by age;
+- replaceable evidence uses explicit append-only slot versions;
+- a slot pointer change and its invalidation event are one transaction;
+- bundle, claim, falsification, and session reads verify canonical content and exact links;
+- a `PASS` needs a complete stored basis;
+- stale propagation follows indexed reverse dependencies and reaches transitive claims and sessions;
+- unrelated objects remain current;
+- a failed logical write rolls back rather than leaving a partial current result;
+- a cache is never authoritative;
+- a newer database schema fails closed and is never reset automatically.
+
+Historical verdicts remain audit data. Current truth is derived from exact dependency versions, not TTLs, timestamps, row order, or serialized-session scans.
