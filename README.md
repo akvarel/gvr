@@ -55,11 +55,16 @@ VerificationBundle
   |
   v
 ClaimLedger
+  |
+  v
+ClaimGraph / VerificationSession
 ```
 
 A `VerificationBundle` keeps a report together with the exact evidence used by that report.
 
 The `ClaimLedger` remembers dependencies. If evidence changes, old dependent results become stale and must not be treated as current truth.
+
+A `VerificationSession` can combine several current claims with exact `AND`, `OR`, and `NOT` rules.
 
 ## A tiny example
 
@@ -99,9 +104,11 @@ GVR currently includes:
 - deterministic `CAN_FLOW_TO` and `NO_SUPPORTED_PATH` data-flow claim verification;
 - `VerificationBundle` transport with exact evidence manifests;
 - language-neutral bundle fingerprint format for trusted cross-language transport;
-- schema-v1 JSON protocol and CLI.
+- `ClaimGraph` with atomic and composite claims;
+- `VerificationSession` with exact tri-state composition, freshness, budgets, termination state, and deterministic session identity;
+- schema-v1 JSON protocol and CLI, including `compose_verification_session`.
 
-GVR is under active development. Multi-claim sessions, verifier/provider registries, planning, and other runtime layers are being built separately and should not be assumed to exist until they are merged into the integration branch.
+GVR is under active development. Verifier/provider registries, deterministic planning, automatic evidence acquisition, and falsification layers are not part of the current integration branch yet.
 
 ## Five-minute start
 
@@ -147,8 +154,9 @@ Recommended reading order:
 2. [Core concepts](docs/CORE_CONCEPTS.md)
 3. [How GVR works](docs/HOW_GVR_WORKS.md)
 4. [Examples](docs/EXAMPLES.md)
-5. [CLI and JSON protocol](docs/CLI_AND_PROTOCOL.md)
-6. [Design rules](docs/DESIGN_RULES.md)
+5. [Verification sessions](docs/VERIFICATION_SESSIONS.md)
+6. [CLI and JSON protocol](docs/CLI_AND_PROTOCOL.md)
+7. [Design rules](docs/DESIGN_RULES.md)
 
 The docs intentionally use plain English and short examples.
 
