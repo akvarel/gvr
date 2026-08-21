@@ -17,6 +17,7 @@ from gvr import (
     VerifierCapabilityRegistry,
     VerifierCost,
     VerifierDeterminism,
+    UnknownVerifierCapabilityError,
     builtin_verifier_capability_registry,
     handle_request,
     verify_data_flow_claim_bundle,
@@ -462,7 +463,6 @@ def test_builtin_snapshot_audits_all_runtime_verifier_contracts():
         "preconditions": (VerifierDeterminism.D0, VerifierCost.LOW),
         "effect_support": (VerifierDeterminism.D0, VerifierCost.LOW),
         "goal_satisfaction": (VerifierDeterminism.D0, VerifierCost.LOW),
-        "registry": (VerifierDeterminism.D1, VerifierCost.MEDIUM),
         "text_search": (VerifierDeterminism.D0, VerifierCost.LOW),
         "functional_regression": (VerifierDeterminism.D1, VerifierCost.MEDIUM),
         DATA_FLOW_VERIFIER: (VerifierDeterminism.O1, VerifierCost.EXTERNAL),
@@ -472,7 +472,9 @@ def test_builtin_snapshot_audits_all_runtime_verifier_contracts():
         ),
     }
 
-    assert len(registry.list()) == 8
+    assert len(registry.list()) == 7
+    with pytest.raises(UnknownVerifierCapabilityError, match="unknown verifier capability"):
+        registry.lookup("registry", "1")
     assert {
         item.verifier_id: (item.determinism, item.cost)
         for item in registry.list()
