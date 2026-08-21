@@ -23,6 +23,7 @@ from gvr import (
     FalsificationCompleteness,
     FalsificationOutcome,
     FalsificationRequirement,
+    FalsificationResult,
     FalsificationStrategyBinding,
     FalsificationStrategyCapabilityRegistry,
     FalsificationStrategyDescriptor,
@@ -131,6 +132,27 @@ class ContradictoryRuntime(RuntimeWrapper):
         assert result.probes
         object.__setattr__(result, "outcome", FalsificationOutcome.NO_COUNTEREXAMPLE_FOUND)
         return result
+
+
+class EmptyProbeRuntime(RuntimeWrapper):
+    def run(self, strategy_input: Any) -> Any:
+        result = super().run(strategy_input)
+        return FalsificationResult(
+            binding_id=result.binding_id,
+            declared_verifier_id=result.declared_verifier_id,
+            strategy_id=result.strategy_id,
+            strategy_version=result.strategy_version,
+            strategy_kind=result.strategy_kind,
+            strategy_capability_fingerprint=(
+                result.strategy_capability_fingerprint
+            ),
+            claim_id=result.claim_id,
+            claim_fingerprint=result.claim_fingerprint,
+            outcome=result.outcome,
+            probes=(),
+            coverage=result.coverage,
+            provenance=result.provenance,
+        )
 
 
 class SideEffectingRuntime(RuntimeWrapper):
@@ -863,3 +885,87 @@ def test_26_schema_v1_protocol_round_trips_exact_planner_and_executor_falsificat
     assert executed["payload"]["fingerprint"] == execute_verification_plan(
         fixture.execution_request
     ).fingerprint
+
+
+def test_27_required_complete_result_without_any_probe_cannot_enable_pass() -> None:
+    fixture = _fixture(
+        requirement=FalsificationRequirement.REQUIRED_BEFORE_PASS,
+        runtime_factory=lambda descriptor, delegate: EmptyProbeRuntime(
+            descriptor,
+            delegate,
+        ),
+    )
+    result = execute_verification_plan(fixture.execution_request)
+    assert _root_verdict(result) is VerificationVerdict.UNKNOWN
+    assert "FALSIFICATION_RESULT_INVALID" in {issue.code for issue in result.issues}
+
+
+def test_28_representation_check_requires_an_explicit_expected_code_point_sequence() -> None:
+    fixture = _fixture(
+        strategy_id=REPRESENTATION_CHECK_STRATEGY_ID,
+        requirement=FalsificationRequirement.REQUIRED_BEFORE_PASS,
+    )
+    result = execute_verification_plan(fixture.execution_request)
+    assert _root_verdict(result) is VerificationVerdict.UNKNOWN
+    assert "FALSIFICATION_RESULT_INVALID" in {issue.code for issue in result.issues}
+
+
+def test_29_metamorphic_identity_fields_must_be_stable_identifiers() -> None:
+    parameters = _scan_parameters(
+        expected_members=tuple(FIXTURE["plain_e"]["expected_members"]),
+        transformation_id="gvr.transform.reverse_both.codepoint.v1",
+    )
+    parameters["transformation"]["version"] = None
+    fixture = _fixture(
+        strategy_id=METAMORPHIC_TRANSFORM_STRATEGY_ID,
+        parameters=parameters,
+        requirement=FalsificationRequirement.REQUIRED_BEFORE_PASS,
+    )
+    result = execute_verification_plan(fixture.execution_request)
+    assert _root_verdict(result) is VerificationVerdict.UNKNOWN
+    assert "FALSIFICATION_RESULT_INVALID" in {issue.code for issue in result.issues}
+
+
+def test_30_verifier_input_rejects_falsification_declared_for_another_verifier() -> None:
+    fixture = _fixture()
+    execute_verification_plan(fixture.execution_request)
+    verifier_input = fixture.verifier_runtime.inputs[0]
+    falsification_result = verifier_input.falsification_results[0]
+    foreign_provenance = replace(
+        falsification_result.provenance,
+        declared_verifier_id="other.verifier",
+    )
+    foreign_result = replace(
+        falsification_result,
+        declared_verifier_id="other.verifier",
+        provenance=foreign_provenance,
+    )
+
+    with pytest.raises(VerificationExecutionError, match="declared verifier"):
+        replace(verifier_input, falsification_results=(foreign_result,))
+
+
+def test_31_execution_result_rejects_falsification_under_a_forged_step_id() -> None:
+    fixture = _fixture()
+    result = execute_verification_plan(fixture.execution_request)
+    falsification_result = next(iter(result.falsification_results.values()))
+
+    with pytest.raises(VerificationExecutionError, match="RUN_FALSIFICATION step"):
+        replace(
+            result,
+            falsification_results={"forged-run": falsification_result},
+        )
+
+
+def test_32_execution_result_rejects_a_substituted_falsification_fingerprint() -> None:
+    fixture = _fixture()
+    result = execute_verification_plan(fixture.execution_request)
+    tampered_steps = tuple(
+        replace(step, falsification_result_fingerprint="0" * 64)
+        if step.kind is VerificationPlanStepKind.RUN_FALSIFICATION
+        else step
+        for step in result.steps
+    )
+
+    with pytest.raises(VerificationExecutionError, match="fingerprint"):
+        replace(result, steps=tampered_steps)

@@ -150,6 +150,8 @@ For a `RUN_FALSIFICATION` step, the executor:
 
 Malformed output produces `FALSIFICATION_RESULT_INVALID`. Runtime exceptions produce `FALSIFICATION_EXECUTION_ERROR`. Raw exception text and exception class representations do not enter semantic output.
 
+The verifier input rejects foreign verifier IDs, foreign claim identities, unaccepted strategy kinds, and duplicate binding IDs. The final execution artifact also requires every published falsification result to correspond to one completed `RUN_FALSIFICATION` step with the same result fingerprint. Non-falsification steps cannot publish falsification fingerprints.
+
 Execution limits include `max_falsification_invocations`. A blocked invocation consumes no falsification invocation count and cannot lead to `PASS` through a dependent verifier.
 
 ## Deterministic result contract
@@ -179,9 +181,12 @@ Probe outcomes are:
 
 The result validator rejects contradictions such as:
 
+- a result with no probe records;
 - `COUNTEREXAMPLE_FOUND` without a counterexample probe;
 - a counterexample probe under another declared outcome;
+- `NO_COUNTEREXAMPLE_FOUND` without a satisfied probe;
 - `NO_COUNTEREXAMPLE_FOUND` with partial coverage;
+- `INCOMPLETE` without an inconclusive probe;
 - `INCOMPLETE` with complete coverage;
 - provenance that does not match the exact input or descriptor.
 
@@ -237,6 +242,10 @@ The exact predicates are:
 
 A finite scan can report a counterexample as soon as one is observed. It can report `NO_COUNTEREXAMPLE_FOUND` only after examining the entire effective finite domain.
 
+### Representation checks
+
+`REPRESENTATION_CHECK` requires `expected_needle_code_points`. The runtime applies the declared normalization, casefold, and reversal pipeline to the needle, then compares its exact Unicode code-point sequence with that explicit expectation. Omitting the expectation is invalid rather than a vacuously clean check.
+
 ## Independent recomputation
 
 `INDEPENDENT_RECOMPUTE` does not call the primary scan or its text-transform helper. It has a separate loop, duplicate handling, transform implementation, and count/membership accumulation path.
@@ -286,6 +295,10 @@ Task 20 extends schema version 1 without changing legacy payloads.
 - `describe_falsification_strategy_capabilities` returns the immutable built-in descriptor snapshot and supports exact `strategy_kind` and `claim_kind` filters.
 
 A direct protocol operation for running an isolated strategy is not required for orchestration. Normal orchestration must pass through `VerificationPlanningRequest`, `VerificationPlan`, `VerificationExecutionRequest`, and `execute_verification_plan` so prerequisites, budgets, identity, output scope, and verifier gates remain enforced.
+
+## External architecture and license references
+
+The Task 20 design review used the public Akon Labs and GitNexus material only as an architecture and license reference. The relevant architectural lesson is to rely on precomputed, deterministic relationships and exact graph validation rather than runtime guesswork. GitNexus uses the PolyForm Noncommercial 1.0.0 license, so no GitNexus source code was copied, adapted, or incorporated into this MIT-licensed implementation.
 
 ## Non-goals and safety boundaries
 

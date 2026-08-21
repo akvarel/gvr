@@ -751,6 +751,10 @@ class FalsificationResult:
                 "probes must contain exact FalsificationProbe records"
             )
         probe_ids = [probe.probe_id for probe in probes]
+        if not probes:
+            raise FalsificationStrategyError(
+                "a falsification result requires at least one probe"
+            )
         if len(set(probe_ids)) != len(probe_ids):
             raise FalsificationStrategyError("falsification probe IDs must be unique")
         probes = tuple(sorted(probes, key=lambda item: canonical_utf8_key(item.probe_id, path="probe_id")))
@@ -765,6 +769,14 @@ class FalsificationResult:
         )
         has_witness = any(
             probe.outcome is FalsificationProbeOutcome.WITNESS
+            for probe in probes
+        )
+        has_satisfied = any(
+            probe.outcome is FalsificationProbeOutcome.SATISFIED
+            for probe in probes
+        )
+        has_inconclusive = any(
+            probe.outcome is FalsificationProbeOutcome.INCONCLUSIVE
             for probe in probes
         )
         if self.outcome is FalsificationOutcome.COUNTEREXAMPLE_FOUND and not has_counterexample:
@@ -785,11 +797,22 @@ class FalsificationResult:
                 "NO_COUNTEREXAMPLE_FOUND requires complete finite coverage"
             )
         if (
+            self.outcome is FalsificationOutcome.NO_COUNTEREXAMPLE_FOUND
+            and not has_satisfied
+        ):
+            raise FalsificationStrategyError(
+                "NO_COUNTEREXAMPLE_FOUND requires a satisfied probe"
+            )
+        if (
             self.outcome is FalsificationOutcome.INCOMPLETE
             and self.coverage.completeness is FalsificationCompleteness.COMPLETE
         ):
             raise FalsificationStrategyError(
                 "INCOMPLETE requires partial coverage"
+            )
+        if self.outcome is FalsificationOutcome.INCOMPLETE and not has_inconclusive:
+            raise FalsificationStrategyError(
+                "INCOMPLETE requires an inconclusive probe"
             )
         provenance = self.provenance
         if (
@@ -1675,6 +1698,14 @@ def _run_metamorphic(strategy_input: FalsificationExecutionInput) -> Falsificati
         raise FalsificationStrategyError(
             "metamorphic transformation requires exact identity fields"
         )
+    _identifier(
+        transformation["transformation_id"],
+        name="metamorphic transformation_id",
+    )
+    _identifier(
+        transformation["version"],
+        name="metamorphic transformation version",
+    )
     if transformation["operation"] != "REVERSE_BOTH" or transformation["unicode_unit"] != "CODE_POINT":
         raise FalsificationStrategyError(
             "only explicit Unicode code-point REVERSE_BOTH is supported"
@@ -1790,7 +1821,11 @@ def _run_representation(strategy_input: FalsificationExecutionInput) -> Falsific
     )
     code_points = tuple(ord(character) for character in transformed)
     expected = spec.expected_needle_code_points
-    if expected is None or expected == code_points:
+    if expected is None:
+        raise FalsificationStrategyError(
+            "representation checks require expected_needle_code_points"
+        )
+    if expected == code_points:
         outcome = FalsificationOutcome.NO_COUNTEREXAMPLE_FOUND
         probe_outcome = FalsificationProbeOutcome.SATISFIED
     else:
@@ -1801,15 +1836,15 @@ def _run_representation(strategy_input: FalsificationExecutionInput) -> Falsific
         predicate_kind="REPRESENTATION_CHECK",
         outcome=probe_outcome,
         subject={"needle": spec.needle},
-        expected={"code_points": expected if expected is not None else code_points},
+        expected={"code_points": expected},
         observed={"code_points": code_points},
     )
     return _result(
         strategy_input,
         outcome=outcome,
         probes=(probe,),
-        examined=len(spec.corpus),
-        total=len(spec.corpus),
+        examined=1,
+        total=1,
         implementation_path="unicode_code_point_representation_v1",
         transformation=_transformation_definition(spec),
     )

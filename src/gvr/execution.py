@@ -468,6 +468,36 @@ class VerifierExecutionInput:
             raise VerificationExecutionError(
                 "verifier falsification_results must contain exact FalsificationResult records"
             )
+        if self.claim.verifier != self.capability.verifier_id:
+            raise VerificationExecutionError(
+                "verifier input capability does not match the claim declared verifier"
+            )
+        claim_fingerprint = _claim_fingerprint(self.claim)
+        binding_ids: set[str] = set()
+        for result in falsification_results:
+            if result.binding_id in binding_ids:
+                raise VerificationExecutionError(
+                    "verifier falsification_results contain a duplicate binding identity"
+                )
+            binding_ids.add(result.binding_id)
+            if result.declared_verifier_id != self.capability.verifier_id:
+                raise VerificationExecutionError(
+                    "falsification result does not match the declared verifier"
+                )
+            if (
+                result.claim_id != self.claim.claim_id
+                or result.claim_fingerprint != claim_fingerprint
+            ):
+                raise VerificationExecutionError(
+                    "falsification result does not match the verifier input claim"
+                )
+            if (
+                result.strategy_kind
+                not in self.capability.accepted_falsification_strategy_kinds
+            ):
+                raise VerificationExecutionError(
+                    "verifier capability does not accept the falsification strategy kind"
+                )
         object.__setattr__(self, "acquisitions", acquisitions)
         object.__setattr__(self, "evidence", evidence)
         object.__setattr__(self, "dependencies", dependencies)
@@ -1806,6 +1836,57 @@ class VerificationExecutionResult:
             raise VerificationExecutionError(
                 "issues must contain exact VerificationExecutionIssue records"
             )
+        steps_by_id: dict[str, VerificationExecutionStep] = {}
+        for step in steps:
+            if step.step_id in steps_by_id:
+                raise VerificationExecutionError(
+                    "execution result steps contain a duplicate step identity"
+                )
+            steps_by_id[step.step_id] = step
+        if (
+            falsification_results
+            and self.falsification_strategy_capability_registry_fingerprint is None
+        ):
+            raise VerificationExecutionError(
+                "falsification results require a capability registry fingerprint"
+            )
+        for step_id, result in falsification_results.items():
+            step = steps_by_id.get(step_id)
+            if (
+                step is None
+                or step.kind is not VerificationPlanStepKind.RUN_FALSIFICATION
+            ):
+                raise VerificationExecutionError(
+                    "falsification result must reference an exact RUN_FALSIFICATION step"
+                )
+            if step.status is not VerificationExecutionStepStatus.COMPLETED:
+                raise VerificationExecutionError(
+                    "falsification result cannot reference an incomplete RUN_FALSIFICATION step"
+                )
+            if step.falsification_result_fingerprint != result.fingerprint:
+                raise VerificationExecutionError(
+                    "falsification result fingerprint does not match its execution step"
+                )
+        for step in steps:
+            if step.kind is VerificationPlanStepKind.RUN_FALSIFICATION:
+                result = falsification_results.get(step.step_id)
+                if step.status is VerificationExecutionStepStatus.COMPLETED:
+                    if result is None:
+                        raise VerificationExecutionError(
+                            "completed RUN_FALSIFICATION step is missing its result"
+                        )
+                    if step.falsification_result_fingerprint is None:
+                        raise VerificationExecutionError(
+                            "completed RUN_FALSIFICATION step is missing its result fingerprint"
+                        )
+                elif step.falsification_result_fingerprint is not None:
+                    raise VerificationExecutionError(
+                        "incomplete RUN_FALSIFICATION step cannot publish a result fingerprint"
+                    )
+            elif step.falsification_result_fingerprint is not None:
+                raise VerificationExecutionError(
+                    "only RUN_FALSIFICATION steps may publish falsification fingerprints"
+                )
         if type(self.consumption) is not VerificationExecutionConsumption:
             raise VerificationExecutionError(
                 "consumption must be an exact VerificationExecutionConsumption"
