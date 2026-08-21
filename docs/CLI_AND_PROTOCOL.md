@@ -135,6 +135,88 @@ Use this form when the result must travel with its exact evidence records.
 
 For trusted remote use, this is safer than sending only a verdict and evidence IDs.
 
+### `compose_verification_session`
+
+Combines several already-materialized verification bundles through a `ClaimGraph`.
+
+Use this when one root claim depends on several smaller claims.
+
+The request contains:
+
+- `claim_graph` — atomic and composite claim definitions;
+- `roots` — which claim IDs are the requested outputs;
+- `bundles` — materialized `VerificationBundle` objects for atomic claims;
+- `budget` — deterministic work limits.
+
+A simple shape looks like this:
+
+```json
+{
+  "schema_version": 1,
+  "op": "compose_verification_session",
+  "payload": {
+    "claim_graph": {
+      "nodes": [
+        {
+          "node_type": "ATOMIC",
+          "claim_id": "A",
+          "claim_kind": "EXAMPLE",
+          "spec": {"subject": "A"},
+          "verifier": "example.verifier.v1",
+          "scope": {},
+          "dependencies": []
+        },
+        {
+          "node_type": "ATOMIC",
+          "claim_id": "B",
+          "claim_kind": "EXAMPLE",
+          "spec": {"subject": "B"},
+          "verifier": "example.verifier.v1",
+          "scope": {},
+          "dependencies": []
+        },
+        {
+          "node_type": "COMPOSITE",
+          "claim_id": "ROOT",
+          "operator": "AND",
+          "dependencies": ["A", "B"]
+        }
+      ]
+    },
+    "roots": ["ROOT"],
+    "bundles": [
+      {"claim_id": "A", "bundle": {"...": "VerificationBundle for A"}},
+      {"claim_id": "B", "bundle": {"...": "VerificationBundle for B"}}
+    ],
+    "budget": {
+      "max_claims": 10,
+      "max_bundles": 10,
+      "max_evidence_records": 100,
+      "max_evidence_bytes": 100000,
+      "max_steps": 100
+    }
+  }
+}
+```
+
+The response includes current claim states, root verdicts, bundle references, budget accounting, termination reason, and the deterministic session fingerprint.
+
+A stale or missing required claim does not become a guessed PASS or FAIL. It remains `UNKNOWN`.
+
+## VerificationBundle transport rule
+
+A current bundle carries an explicit fingerprint format:
+
+```text
+gvr.bundle_fingerprint.ieee754-json.v1
+```
+
+The format is part of the bundle's semantic content.
+
+`compose_verification_session` rejects a bundle if the format marker is missing or unsupported. It does not silently ignore the field and guess a format.
+
+This is important when bundles move between Python and other languages.
+
 ## Example data-flow request shape
 
 A data-flow request looks like this:
