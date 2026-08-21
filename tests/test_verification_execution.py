@@ -1034,3 +1034,29 @@ def test_27_execution_result_seals_session_and_preserves_fingerprint() -> None:
 
     assert result.to_dict() == before
     assert result.session.root_verdicts == {"A": VerificationVerdict.PASS}
+
+
+def test_28_capability_descriptions_are_nonsemantic_for_execution_identity() -> None:
+    first = execution_fixture(
+        verifier_cap=verifier_capability(description="first verifier description"),
+        provider_cap=provider_capability(description="first provider description"),
+    )
+    second = execution_fixture(
+        verifier_cap=verifier_capability(description="second verifier description"),
+        provider_cap=provider_capability(description="second provider description"),
+    )
+
+    assert first.request.plan.fingerprint == second.request.plan.fingerprint
+    assert (
+        first.request.verifier_runtime_registry.fingerprint
+        == second.request.verifier_runtime_registry.fingerprint
+    )
+    assert (
+        first.request.evidence_provider_runtime_registry.fingerprint
+        == second.request.evidence_provider_runtime_registry.fingerprint
+    )
+    assert first.request.fingerprint == second.request.fingerprint
+    assert (
+        execute_verification_plan(first.request).fingerprint
+        == execute_verification_plan(second.request).fingerprint
+    )
