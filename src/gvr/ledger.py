@@ -104,11 +104,11 @@ class ClaimLedger:
             verdict=report.verdict,
             evidence_ids=explicit_evidence,
             claim_dependency_ids=claim_deps,
-            report=report,
+            report=deepcopy(report),
             claim_version=record.version,
         )
         self._history[claim_id].append(snapshot)
-        return snapshot
+        return deepcopy(snapshot)
 
     def record_bundle(
         self,
@@ -147,7 +147,7 @@ class ClaimLedger:
         )
 
     def history(self, claim_id: str) -> tuple[VerificationSnapshot, ...]:
-        return tuple(self._history[claim_id])
+        return deepcopy(tuple(self._history[claim_id]))
 
     def stale_claims(self) -> tuple[str, ...]:
         return self.dependencies.stale_claims()

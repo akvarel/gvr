@@ -229,6 +229,21 @@ def test_noop_claim_reverification_does_not_stale_dependents():
     assert g.is_fresh("C2")
 
 
+def test_returned_claim_records_cannot_rewrite_internal_freshness():
+    g = ClaimDependencyGraph()
+    g.put_evidence("E1", {"value": 1})
+    g.put_claim("C1", VerificationVerdict.PASS)
+    g.add_dependency("C1", "E1")
+    returned = g.mark_reverified("C1", VerificationVerdict.PASS)
+
+    changed = g.put_evidence("E1", {"value": 2})
+    returned.freshness = Freshness.FRESH
+    returned.dependency_versions["E1"] = changed.version
+
+    assert not g.is_fresh("C1")
+    assert g.claims["C1"].freshness is Freshness.STALE
+
+
 def test_claim_verdict_change_stales_dependent():
     g = ClaimDependencyGraph()
     g.put_claim("C1", VerificationVerdict.PASS)

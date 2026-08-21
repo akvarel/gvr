@@ -174,7 +174,7 @@ class ClaimDependencyGraph:
             if rec.verdict != verdict:
                 rec.verdict = verdict
                 self._invalidate_dependents(claim_id)
-        return rec
+        return deepcopy(rec)
 
     def add_dependency(self, claim_id: str, dependency_id: str) -> None:
         if claim_id not in self._claims:
@@ -252,7 +252,7 @@ class ClaimDependencyGraph:
         claim.verdict = verdict
         claim.dependency_versions = versions
         claim.freshness = Freshness.FRESH
-        return claim
+        return deepcopy(claim)
 
     def is_fresh(self, claim_id: str) -> bool:
         claim = self._claims[claim_id]

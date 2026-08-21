@@ -35,7 +35,8 @@ Task 12 reviewed base: `dc8f08f699325ac9547d75bb6cf7dde941d52e48`.
 | Ledger semantics GREEN | `717800458c00db43f1b85f86213c20fabc71c489` | focused remediation suite, then full suite | `54 passed`; full repository suite `146 passed`. |
 | Storage isolation adversarial RED | working tree after remediation GREEN | typed evidence snapshot test | Mutable nested input, returned records, and evidence views could alter stored payload without a version change. |
 | Fingerprint-domain adversarial RED | working tree after remediation GREEN | typed-to-legacy alias test | A crafted legacy payload could equal the typed semantic envelope and suppress an explicit semantic transition. |
-| Final remediation GREEN | working tree after fixes | required focused and full commands | `36`, `57`, and `149` tests passed. |
+| Independent mutation RED | working tree after `7201289` | reviewer probes and two focused regressions | Returned `ClaimRecord` objects could rewrite internal freshness; mutable report/history references could rewrite stored audit history. |
+| Final remediation GREEN | working tree after fixes | required focused and full commands | `36`, `59`, and `151` tests passed. |
 
 ## Test specification
 
@@ -64,6 +65,8 @@ Task 12 reviewed base: `dc8f08f699325ac9547d75bb6cf7dde941d52e48`.
 | 21 | Legacy payload-only evidence remains compatible with explicit `None` kind/source/producer fingerprint defaults. | Legacy compatibility tests | Regression | PASS |
 | 22 | Typed and legacy evidence fingerprint domains cannot alias, and moving an ID between modes is an explicit semantic change. | Domain-separation tests | Adversarial unit | PASS |
 | 23 | Stored nested payloads, returned records, and public evidence views are defensive snapshots that cannot mutate internal versioned state. | Storage isolation test | Adversarial unit | PASS |
+| 24 | Returned claim records cannot rewrite internal freshness or dependency versions after evidence changes. | ClaimRecord mutation isolation test | Adversarial unit | PASS |
+| 25 | Caller reports, returned snapshots, and history views cannot mutate stored verification history. | Ledger history snapshot test | Adversarial ledger | PASS |
 
 ## Canonical fingerprint contract
 
@@ -86,11 +89,12 @@ The existing `put_evidence(id, payload)` path remains available and uses a separ
 ## Final validation
 
 - `python -m pytest -o addopts='' -q tests/test_verification_bundle.py`: `36 passed in 0.07s`.
-- `python -m pytest -o addopts='' -q tests/test_dependencies.py tests/test_ledger.py tests/test_verification_bundle.py`: `57 passed in 0.08s`.
-- `python -m pytest -o addopts='' -q`: `149 passed in 0.22s`.
+- `python -m pytest -o addopts='' -q tests/test_dependencies.py tests/test_ledger.py tests/test_verification_bundle.py`: `59 passed in 0.09s`.
+- `python -m pytest -o addopts='' -q`: `151 passed in 0.23s`.
 - `python -m compileall -q src`: PASS.
 - `git diff --check`: PASS.
 - Real Graphify bundle probe: `PASS`, two selected direct evidence records, deterministic fingerprint `24abb0649b1a3a43f8fdaf6b38c52c552d97a66881c86b47a2ba16d98e1e00b7`.
+- Direct upstream/downstream false-freshness probe: PASS.
 
 ## Coverage and known gaps
 

@@ -33,6 +33,25 @@ def test_reverification_restores_trusted_verdict_and_history():
     assert [s.verdict for s in ledger.history("C")] == [VerificationVerdict.PASS, VerificationVerdict.FAIL]
 
 
+def test_recorded_reports_and_history_are_defensive_snapshots():
+    ledger = ClaimLedger()
+    ledger.define(ClaimDefinition("C", "x is true", "v"))
+    metadata = {"nested": {"value": 1}}
+    report = VerificationReport(
+        VerificationVerdict.PASS,
+        "v",
+        metadata=metadata,
+    )
+
+    returned = ledger.record_verification("C", report)
+    metadata["nested"]["value"] = 2
+    returned.report.metadata["nested"]["value"] = 3
+    exposed = ledger.history("C")[0]
+    exposed.report.metadata["nested"]["value"] = 4
+
+    assert ledger.history("C")[0].report.metadata["nested"]["value"] == 1
+
+
 def test_missing_evidence_rejected():
     ledger = ClaimLedger()
     ledger.define(ClaimDefinition("C", "x", "v"))
