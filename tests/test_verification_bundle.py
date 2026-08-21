@@ -467,6 +467,178 @@ def test_claim_ledger_records_a_valid_bundle_atomically_and_fresh():
     assert set(ledger.dependencies.evidence) == set(bundle.report.evidence_ids)
 
 
+def _semantic_bundle(
+    *,
+    kind: str = "provider.kind.v1",
+    payload: dict[str, object] | None = None,
+    source: str = "revision-A",
+    producer_fingerprint: str = "producer-fp-A",
+    claim_dependency_ids: tuple[str, ...] = (),
+):
+    evidence = _evidence(
+        "E",
+        {"value": 1} if payload is None else payload,
+        kind=kind,
+        source=source,
+        fingerprint=producer_fingerprint,
+    )
+    return build_verification_bundle(
+        _report(evidence_ids=("E",)),
+        (evidence,),
+        claim_dependency_ids=claim_dependency_ids,
+    )
+
+
+def _recorded_semantic_bundle():
+    bundle = _semantic_bundle()
+    ledger = ClaimLedger()
+    ledger.define(ClaimDefinition("C", "semantic evidence claim", "v"))
+    ledger.record_bundle("C", bundle)
+    return ledger, bundle
+
+
+def test_source_only_evidence_change_versions_and_stales_bundle_claim():
+    ledger, bundle = _recorded_semantic_bundle()
+    before = ledger.dependencies.evidence["E"]
+    changed = Evidence(
+        id="E",
+        kind=bundle.evidence[0].kind,
+        payload=bundle.evidence[0].payload,
+        source="revision-B",
+        fingerprint=bundle.evidence[0].fingerprint,
+    )
+
+    ledger.put_evidence_record(changed)
+
+    after = ledger.dependencies.evidence["E"]
+    assert after.version != before.version
+    assert after.source == "revision-B"
+    assert ledger.status("C").effective_verdict is VerificationVerdict.UNKNOWN
+
+
+def test_producer_fingerprint_only_change_versions_and_stales_bundle_claim():
+    ledger, bundle = _recorded_semantic_bundle()
+    before = ledger.dependencies.evidence["E"]
+    changed = Evidence(
+        id="E",
+        kind=bundle.evidence[0].kind,
+        payload=bundle.evidence[0].payload,
+        source=bundle.evidence[0].source,
+        fingerprint="producer-fp-B",
+    )
+
+    ledger.put_evidence_record(changed)
+
+    after = ledger.dependencies.evidence["E"]
+    assert after.version != before.version
+    assert after.producer_fingerprint == "producer-fp-B"
+    assert ledger.status("C").effective_verdict is VerificationVerdict.UNKNOWN
+
+
+def test_kind_only_change_versions_and_stales_bundle_claim():
+    ledger, bundle = _recorded_semantic_bundle()
+    before = ledger.dependencies.evidence["E"]
+    changed = Evidence(
+        id="E",
+        kind="provider.kind.v2",
+        payload=bundle.evidence[0].payload,
+        source=bundle.evidence[0].source,
+        fingerprint=bundle.evidence[0].fingerprint,
+    )
+
+    ledger.put_evidence_record(changed)
+
+    after = ledger.dependencies.evidence["E"]
+    assert after.version != before.version
+    assert after.kind == "provider.kind.v2"
+    assert ledger.status("C").effective_verdict is VerificationVerdict.UNKNOWN
+
+
+def test_bundle_recording_retains_the_exact_full_evidence_record():
+    ledger, bundle = _recorded_semantic_bundle()
+
+    stored = ledger.dependencies.evidence["E"]
+    expected = bundle.evidence[0]
+    assert stored.id == expected.id
+    assert stored.kind == expected.kind
+    assert stored.payload == expected.payload
+    assert stored.source == expected.source
+    assert stored.producer_fingerprint == expected.fingerprint
+
+
+def test_semantic_mapping_reordering_is_an_evidence_version_noop():
+    ledger, bundle = _recorded_semantic_bundle()
+    before = ledger.dependencies.evidence["E"]
+    reordered = Evidence(
+        id="E",
+        kind=bundle.evidence[0].kind,
+        payload={"nested": {"b": 2, "a": 1}, "value": 1},
+        source=bundle.evidence[0].source,
+        fingerprint=bundle.evidence[0].fingerprint,
+    )
+    baseline = Evidence(
+        id="E",
+        kind=bundle.evidence[0].kind,
+        payload={"value": 1, "nested": {"a": 1, "b": 2}},
+        source=bundle.evidence[0].source,
+        fingerprint=bundle.evidence[0].fingerprint,
+    )
+    ledger.put_evidence_record(baseline)
+    changed_once = ledger.dependencies.evidence["E"]
+
+    ledger.put_evidence_record(reordered)
+
+    assert ledger.dependencies.evidence["E"].version == changed_once.version
+    assert changed_once.version != before.version
+
+
+def test_changed_bundle_evidence_basis_reversions_upstream_and_stales_downstream():
+    first = _semantic_bundle()
+    changed = _semantic_bundle(
+        source="revision-B",
+        producer_fingerprint="producer-fp-B",
+    )
+    ledger = ClaimLedger()
+    ledger.define(ClaimDefinition("A", "upstream", "v"))
+    ledger.define(ClaimDefinition("B", "downstream", "v"))
+    ledger.record_bundle("A", first)
+    downstream = build_verification_bundle(
+        _report(),
+        (),
+        claim_dependency_ids=("A",),
+    )
+    ledger.record_bundle("B", downstream)
+    upstream_version = ledger.status("A").version
+
+    ledger.record_bundle("A", changed)
+
+    assert ledger.status("A").freshness is Freshness.FRESH
+    assert ledger.status("A").version != upstream_version
+    assert ledger.status("B").freshness is Freshness.STALE
+    assert ledger.status("B").effective_verdict is VerificationVerdict.UNKNOWN
+
+
+def test_semantically_identical_bundle_rerecord_is_noop_for_downstream():
+    first = _semantic_bundle(payload={"value": 1, "nested": {"a": 1, "b": 2}})
+    reordered = _semantic_bundle(payload={"nested": {"b": 2, "a": 1}, "value": 1})
+    ledger = ClaimLedger()
+    ledger.define(ClaimDefinition("A", "upstream", "v"))
+    ledger.define(ClaimDefinition("B", "downstream", "v"))
+    ledger.record_bundle("A", first)
+    ledger.record_bundle(
+        "B",
+        build_verification_bundle(_report(), (), claim_dependency_ids=("A",)),
+    )
+    evidence_version = ledger.dependencies.evidence["E"].version
+    upstream_version = ledger.status("A").version
+
+    ledger.record_bundle("A", reordered)
+
+    assert ledger.dependencies.evidence["E"].version == evidence_version
+    assert ledger.status("A").version == upstream_version
+    assert ledger.status("B").freshness is Freshness.FRESH
+
+
 def test_replacing_query_result_payload_stales_a_bundle_recorded_claim():
     first = verify_data_flow_claim_bundle(
         _claim(DataFlowClaimKind.NO_SUPPORTED_PATH),
