@@ -353,3 +353,24 @@ def test_validate_evidence_provider_result_protocol_operation_returns_machine_re
     assert response["kind"] == "protocol_error"
     assert response["payload"]["code"] == "INVALID_EVIDENCE_PROVIDER_RESULT"
     assert "fingerprint" in response["payload"]["message"]
+
+
+def test_validate_evidence_provider_result_protocol_operation_defaults_omitted_coverage_fields() -> None:
+    cap = capability()
+    req = request()
+    res = result()
+    res_dict = res.to_dict()
+    del res_dict["coverage"]["truncated"]
+    del res_dict["coverage"]["termination_reason"]
+    response = handle_request({
+        "schema_version": 1,
+        "op": "validate_evidence_provider_result",
+        "payload": {
+            "request": req.to_dict(),
+            "capability": cap.to_dict(),
+            "result": res_dict,
+        },
+    })
+    assert response["kind"] == "evidence_provider_result"
+    assert response["payload"]["coverage"]["truncated"] is False
+    assert response["payload"]["coverage"]["termination_reason"] == "UNKNOWN"
