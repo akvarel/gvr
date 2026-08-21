@@ -38,6 +38,14 @@ Target branch: `feature/gvr-verification-session-v1`.
 - Adversarial remediation made the ledger view defensive, graph/roots/budget
   read-only, and stale composition terminate as `UNSUPPORTED_CLAIM` until
   recomputation. The focused session suite then produced `35 passed in 0.10s`.
+- Task 14 RED commit: `fb10d68` (`test: specify deterministic session semantic
+  identity`). The focused suite produced `7 failed, 35 passed in 0.29s`, proving
+  that raw global ledger clocks leaked into public session versions and that the
+  ClaimGraph lookup cache was mutable.
+- Task 14 GREEN separates operational ledger versions from claim-local semantic
+  revisions, excludes raw audit clocks from the public `to_dict()` contract, and
+  makes the graph lookup cache immutable. The focused suite then produced
+  `42 passed in 0.14s`.
 
 ## Test specification
 
@@ -63,6 +71,11 @@ Target branch: `feature/gvr-verification-session-v1`.
 | 18 | Schema-v1 composition is deterministic and exposes graph, claims, roots, bundle refs, budgets, termination, and fingerprint | protocol composition test | integration | PASS |
 | 19 | Cyclic graphs and inconsistent fingerprints fail closed as protocol errors | protocol error tests | integration | PASS |
 | 20 | Existing dependency, ledger, bundle, protocol, goal, text, functional, and data-flow behavior remains clean | adjacent/full pytest commands | regression | PASS |
+| 21 | Opposite incremental bundle order yields identical composite-root and independent-root session identity | incremental order tests | integration | PASS |
+| 22 | Semantic no-op rerecord order and canonical compose order preserve identity | rerecord/compose order tests | integration | PASS |
+| 23 | Changed Evidence and stale/recompute histories use deterministic claim-local semantic revisions | changed/history order tests | integration | PASS |
+| 24 | ClaimLedger retains distinct raw operational versions while public session identity remains deterministic | raw-versus-semantic assertions | adversarial | PASS |
+| 25 | ClaimGraph lookup cache and exported semantic content cannot mutate cached graph identity | graph cache immutability test | adversarial | PASS |
 
 ## Fingerprint and accounting contract
 
@@ -72,6 +85,10 @@ Target branch: `feature/gvr-verification-session-v1`.
   bundle fingerprints or unverified markers, stored/effective verdicts,
   freshness and versions, evidence and claim dependency references, budget
   declaration and deterministic consumption, and termination.
+- Public claim `version` values are claim-local semantic revision counters.
+  ClaimLedger global versions and history run IDs remain available through the
+  defensive ledger snapshot but are operational audit data outside session
+  fingerprint and `to_dict()` identity.
 - Canonical Evidence byte consumption is UTF-8 length of strict canonical
   evidence-record JSON. Wall-clock time is excluded.
 - Rejected malformed inputs do not consume budget or mutate ledger state.
@@ -81,10 +98,10 @@ Target branch: `feature/gvr-verification-session-v1`.
 Final validation from the completed working tree:
 
 - `python -m pytest -o addopts='' -q tests/test_verification_session.py`:
-  `35 passed in 0.09s`.
+  `42 passed in 0.14s`.
 - `python -m pytest -o addopts='' -q tests/test_dependencies.py tests/test_ledger.py tests/test_verification_bundle.py tests/test_protocol.py tests/test_verification_session.py`:
-  `104 passed in 0.24s`.
-- `python -m pytest -o addopts='' -q`: `186 passed in 0.29s`.
+  `111 passed in 0.29s`.
+- `python -m pytest -o addopts='' -q`: `193 passed in 0.34s`.
 - `python -m compileall -q src`: PASS.
 - `git diff --check`: PASS.
 

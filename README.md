@@ -103,8 +103,12 @@ only as validated `VerificationBundle` objects. Bundle verifier and claim
 dependency requirements must exactly match the graph. Missing bundles and stale
 claims remain effective `UNKNOWN`; changed typed Evidence semantics re-version
 the atomic claim and stale dependent composites; identical bundle rerecording
-does not change claim or dependent versions. Composite claims are explicitly
-recomputed from effective, fresh dependency states using these rules:
+does not change claim or dependent versions. Public session claim versions are
+claim-local semantic revisions, so independent recording order cannot perturb
+the session fingerprint. The defensive ledger snapshot retains its operational
+raw versions and audit history, which are intentionally excluded from session
+semantic identity. Composite claims are explicitly recomputed from effective,
+fresh dependency states using these rules:
 
 - `AND`: `FAIL` dominates, then `UNKNOWN`, otherwise `PASS`;
 - `OR`: `PASS` dominates, then `UNKNOWN`, otherwise `FAIL`;
@@ -117,7 +121,8 @@ atomic claims, deterministic budget declaration and consumption, explicit
 session fingerprint. Budgets cover claims, bundles, evidence records, canonical
 evidence bytes, and generic steps. No wall-clock value participates in identity.
 A defensive ledger snapshot is exposed for inspection, while trusted writes go
-through the bundle-only session API.
+through the bundle-only session API. ClaimGraph nodes, semantic values, and its
+lookup cache are immutable; exported dictionaries are fresh defensive values.
 
 Schema version 1 exposes `compose_verification_session`. It accepts a claim graph,
 roots, materialized verification bundles keyed by atomic claim ID, and a budget.

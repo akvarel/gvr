@@ -5,6 +5,7 @@ from dataclasses import dataclass, field, replace
 from enum import Enum
 import hashlib
 import heapq
+from types import MappingProxyType
 from typing import Any, Iterable, Mapping
 
 from .bundle import (
@@ -214,7 +215,14 @@ class ClaimGraph:
 
         canonical_nodes = tuple(by_id[claim_id] for claim_id in sorted(by_id))
         object.__setattr__(self, "nodes", canonical_nodes)
-        object.__setattr__(self, "_by_id", dict(by_id))
+        object.__setattr__(
+            self,
+            "_by_id",
+            MappingProxyType({
+                claim_id: by_id[claim_id]
+                for claim_id in sorted(by_id)
+            }),
+        )
 
         known = set(by_id)
         for node in canonical_nodes:
@@ -283,6 +291,9 @@ class ClaimGraph:
             return self._by_id[claim_id]
         except KeyError as exc:
             raise KeyError(f"unknown claim: {claim_id}") from exc
+
+    def __deepcopy__(self, _memo: dict[int, Any]) -> ClaimGraph:
+        return self
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -402,6 +413,8 @@ class VerificationSession:
         "_budget",
         "_ledger",
         "_bundle_refs",
+        "_operational_versions",
+        "_semantic_versions",
         "_budget_exhausted",
         "_consumption",
     )
@@ -438,6 +451,14 @@ class VerificationSession:
         self._budget = SessionBudget() if budget is None else budget
         self._ledger = ClaimLedger()
         self._bundle_refs: dict[str, _AtomicVerificationRef] = {}
+        self._operational_versions = {
+            node.claim_id: 0
+            for node in graph.nodes
+        }
+        self._semantic_versions = {
+            node.claim_id: 0
+            for node in graph.nodes
+        }
         self._budget_exhausted = False
         self._consumption = SessionConsumption()
 
@@ -596,6 +617,7 @@ class VerificationSession:
             return None
 
         snapshot = self._ledger.record_bundle(claim_id, bundle)
+        self._record_semantic_version(snapshot)
         self._bundle_refs[claim_id] = _AtomicVerificationRef(
             fingerprint=bundle.fingerprint,
             evidence_ids=bundle.report.evidence_ids,
@@ -609,6 +631,15 @@ class VerificationSession:
             steps=self._consumption.steps + 1,
         )
         return snapshot
+
+    def _record_semantic_version(self, snapshot: VerificationSnapshot) -> None:
+        """Advance a claim-local semantic version from raw ledger operations."""
+
+        claim_id = snapshot.claim_id
+        if snapshot.claim_version == self._operational_versions[claim_id]:
+            return
+        self._operational_versions[claim_id] = snapshot.claim_version
+        self._semantic_versions[claim_id] += 1
 
     def _effective_verdicts(self) -> dict[str, VerificationVerdict]:
         effective: dict[str, VerificationVerdict] = {}
@@ -661,6 +692,7 @@ class VerificationSession:
             ),
             claim_dependency_ids=node.dependencies,
         )
+        self._record_semantic_version(snapshot)
         self._consumption = replace(
             self._consumption,
             steps=self._consumption.steps + 1,
@@ -690,7 +722,7 @@ class VerificationSession:
                 stored_verdict=status.stored_verdict,
                 effective_verdict=effective[node.claim_id],
                 freshness=status.freshness,
-                version=status.version,
+                version=self._semantic_versions[node.claim_id],
                 bundle_fingerprint=(None if reference is None else reference.fingerprint),
                 evidence_ids=(() if reference is None else reference.evidence_ids),
                 claim_dependency_ids=(
@@ -756,7 +788,9 @@ class VerificationSession:
             })
         return items
 
-    def _semantic_content(self) -> dict[str, Any]:
+    def _semantic_basis(self) -> dict[str, Any]:
+        """Return canonical identity state without operational ledger clocks."""
+
         return _canonical_value({
             "schema_version": self.schema_version,
             "kind": self.kind,
@@ -790,11 +824,12 @@ class VerificationSession:
 
     @property
     def fingerprint(self) -> str:
-        canonical = _canonical_json(self._semantic_content())
+        canonical = _canonical_json(self._semantic_basis())
         return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
     def to_dict(self) -> dict[str, Any]:
-        return {
-            **self._semantic_content(),
-            "fingerprint": self.fingerprint,
-        }
+        """Return the public semantic contract, excluding raw ledger history."""
+
+        document = self._semantic_basis()
+        document["fingerprint"] = self.fingerprint
+        return document
