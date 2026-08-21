@@ -129,7 +129,13 @@ Returns the immutable built-in evidence provider capability snapshot. The schema
 }
 ```
 
-The optional filter is `claim_kind`, which matches one exact published claim kind. The response kind is `evidence_provider_capability_registry`. See [Evidence providers](EVIDENCE_PROVIDERS.md) for request, coverage, result, exact registry, compatibility, and fingerprint semantics.
+Optional filters are `request_kind` and `evidence_kind`. Both match exact published provider contract values and may be combined. `claim_kind` is not accepted for provider discovery. The response kind is `evidence_provider_capability_registry`. See [Evidence providers](EVIDENCE_PROVIDERS.md) for request, coverage, result, exact registry, compatibility, and fingerprint semantics.
+
+### `validate_evidence_provider_result`
+
+Parses serialized `request`, `capability`, and `result` objects, validates the result against the exact request and provider capability, and returns a normalized `evidence_provider_result`.
+
+Invalid payloads return machine-readable `protocol_error` responses through the safe handler, including `INVALID_EVIDENCE_PROVIDER_REQUEST`, `INVALID_EVIDENCE_PROVIDER_CAPABILITY`, and `INVALID_EVIDENCE_PROVIDER_RESULT`.
 
 ### `verify_goal`
 

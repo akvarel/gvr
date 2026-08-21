@@ -29,8 +29,8 @@ This page shows how the current GVR pieces fit together.
        +-----------+-----------+
        |                       |
        v                       v
- direct structured data   evidence adapter
-                           such as Graphify
+ direct structured data   evidence provider
+                           or adapter such as Graphify
        |                       |
        +-----------+-----------+
                    |
@@ -131,6 +131,16 @@ Graphify answers source-analysis questions and produces graph evidence.
 GVR checks verification claims against that evidence.
 
 GVR does not secretly build another source graph in the verifier.
+
+## Evidence provider layer
+
+An evidence provider is an acquisition contract, not a truth-producing verifier.
+
+`EvidenceRequest` names one exact provider ID and version, the request kind, required and accepted evidence kinds, input, and bounds. `EvidenceProviderCapability` publishes the exact request kinds and produced evidence kinds a provider can support. `EvidenceProviderResult` carries acquisition status, coverage, evidence records, issues, and the capability fingerprint used for validation.
+
+The built-in schema-v1 evidence provider registry is honestly empty. It still defines deterministic lookup, exact runtime provider dispatch, fail-closed unavailable results, canonical fingerprints, and compatibility checks against verifier capabilities.
+
+The schema-v1 protocol exposes `describe_evidence_provider_capabilities` with optional `request_kind` and `evidence_kind` filters, and `validate_evidence_provider_result`, which parses serialized request, capability, and result payloads and returns either a normalized `evidence_provider_result` or a machine-readable protocol error.
 
 ## VerificationReport
 

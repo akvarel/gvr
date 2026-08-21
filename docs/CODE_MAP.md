@@ -173,6 +173,20 @@ This registry is separate from the executable `VerifierRegistry` in `core.py`. I
 
 Read [Verifier capabilities](VERIFIER_CAPABILITIES.md) before adding or changing a descriptor.
 
+## `src/gvr/evidence_providers.py`
+
+This contains the evidence acquisition contract layer:
+
+- `EvidenceRequest`;
+- `EvidenceCoverage`;
+- `EvidenceProviderResult`;
+- `EvidenceProviderCapability`;
+- `EvidenceProviderRegistry`;
+- provider-to-verifier compatibility checks;
+- result validation against the exact request and capability.
+
+The registry is deterministic and exact. It queries descriptors by optional `request_kind` and `evidence_kind` filters, dispatches runtime providers only by exact `(provider_id, version)`, and can fail closed to an unavailable result. The built-in schema-v1 registry is intentionally empty until GVR ships stable acquisition providers.
+
 ## `src/gvr/protocol.py`
 
 This is the schema-v1 request dispatcher.
@@ -188,7 +202,9 @@ Current operations include:
 - `verify_data_flow_claim`;
 - `verify_data_flow_claim_bundle`;
 - `compose_verification_session`;
-- `describe_verifier_capabilities`.
+- `describe_verifier_capabilities`;
+- `describe_evidence_provider_capabilities`;
+- `validate_evidence_provider_result`.
 
 The session wire path also validates the explicit bundle fingerprint format before accepting a materialized bundle.
 

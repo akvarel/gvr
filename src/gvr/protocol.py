@@ -9,9 +9,16 @@ from .capabilities import (
     builtin_verifier_capability_registry,
 )
 from .evidence_providers import (
+    EvidenceAcquisitionStatus,
+    EvidenceCompleteness,
+    EvidenceCoverage,
     EvidenceProviderError,
+    EvidenceProviderCapability,
     EvidenceProviderRegistry,
+    EvidenceProviderResult,
+    EvidenceRequest,
     builtin_evidence_provider_registry,
+    validate_evidence_provider_result,
 )
 from .core import Action, Goal, Predicate, Proposal, StateEffect, VerificationContext, default_registry
 from .model import Evidence, VerificationIssue, VerificationReport, VerificationVerdict
@@ -129,6 +136,91 @@ def _string_array(value: Any, name: str) -> tuple[str, ...]:
     ):
         raise ProtocolError("INVALID_PAYLOAD", f"{name} must be an array of non-empty strings")
     return tuple(value)
+
+
+def _evidence_provider_request(data: Mapping[str, Any]) -> EvidenceRequest:
+    try:
+        return EvidenceRequest(
+            request_id=str(data.get("request_id") or ""),
+            provider_id=str(data.get("provider_id") or ""),
+            provider_version=str(data.get("provider_version") or ""),
+            claim_kind=str(data.get("claim_kind") or ""),
+            required_evidence_kinds=_string_array(data.get("required_evidence_kinds", ()), "required_evidence_kinds"),
+            accepted_evidence_kinds=_string_array(data.get("accepted_evidence_kinds", ()), "accepted_evidence_kinds"),
+            input=decode_markers(dict(_require_mapping(data.get("input", {}), "input"))),
+            bounds=decode_markers(dict(_require_mapping(data.get("bounds", {}), "bounds"))),
+        )
+    except EvidenceProviderError as exc:
+        raise ProtocolError("INVALID_EVIDENCE_PROVIDER_REQUEST", str(exc)) from exc
+
+
+def _evidence_provider_capability(data: Mapping[str, Any]) -> EvidenceProviderCapability:
+    try:
+        capability = EvidenceProviderCapability(
+            provider_id=str(data.get("provider_id") or ""),
+            version=str(data.get("version") or ""),
+            claim_kinds=_string_array(data.get("claim_kinds", ()), "claim_kinds"),
+            produced_evidence_kinds=_string_array(data.get("produced_evidence_kinds", ()), "produced_evidence_kinds"),
+            input_schema=decode_markers(dict(_require_mapping(data.get("input_schema", {}), "input_schema"))),
+            output_schema=decode_markers(dict(_require_mapping(data.get("output_schema", {}), "output_schema"))),
+            determinism=str(data.get("determinism") or ""),
+            side_effect_free=data.get("side_effect_free"),
+            cost=str(data.get("cost") or ""),
+            bounds=decode_markers(dict(_require_mapping(data.get("bounds", {}), "bounds"))),
+            coverage=decode_markers(dict(_require_mapping(data.get("coverage", {}), "coverage"))),
+            description=data.get("description"),
+        )
+    except EvidenceProviderError as exc:
+        raise ProtocolError("INVALID_EVIDENCE_PROVIDER_CAPABILITY", str(exc)) from exc
+    supplied = data.get("fingerprint")
+    if supplied is not None and supplied != capability.fingerprint:
+        raise ProtocolError("INVALID_EVIDENCE_PROVIDER_CAPABILITY", "capability fingerprint does not match canonical content")
+    return capability
+
+
+def _evidence_provider_result(data: Mapping[str, Any]) -> EvidenceProviderResult:
+    try:
+        coverage_data = _require_mapping(data.get("coverage", {}), "coverage")
+        evidence_data = data.get("evidence", ())
+        issues_data = data.get("issues", ())
+        if not isinstance(evidence_data, (list, tuple)) or not isinstance(issues_data, (list, tuple)):
+            raise ProtocolError("INVALID_EVIDENCE_PROVIDER_RESULT", "evidence and issues must be arrays")
+        return EvidenceProviderResult(
+            request_id=str(data.get("request_id") or ""),
+            provider_id=str(data.get("provider_id") or ""),
+            provider_version=str(data.get("provider_version") or ""),
+            status=EvidenceAcquisitionStatus(str(data.get("status") or "")),
+            coverage=EvidenceCoverage(
+                completeness=EvidenceCompleteness(str(coverage_data.get("completeness") or "")),
+                covered_evidence_kinds=_string_array(coverage_data.get("covered_evidence_kinds", ()), "covered_evidence_kinds"),
+                truncated=coverage_data.get("truncated"),
+                details=decode_markers(dict(_require_mapping(coverage_data.get("details", {}), "coverage details"))),
+            ),
+            evidence=tuple(
+                Evidence(
+                    id=str(record.get("id") or ""),
+                    kind=str(record.get("kind") or ""),
+                    payload=decode_markers(dict(_require_mapping(record.get("payload", {}), "evidence payload"))),
+                    source=record.get("source"),
+                    fingerprint=record.get("fingerprint"),
+                )
+                for record in (_require_mapping(item, "evidence record") for item in evidence_data)
+            ),
+            issues=tuple(
+                VerificationIssue(
+                    code=str(issue.get("code") or ""),
+                    message=str(issue.get("message") or ""),
+                    verdict=VerificationVerdict(str(issue.get("verdict") or "")),
+                    evidence_ids=_string_array(issue.get("evidence_ids", ()), "issue evidence_ids"),
+                )
+                for issue in (_require_mapping(item, "issue") for item in issues_data)
+            ),
+            capability_fingerprint=str(data.get("capability_fingerprint") or ""),
+        )
+    except ProtocolError:
+        raise
+    except (EvidenceProviderError, ValueError) as exc:
+        raise ProtocolError("INVALID_EVIDENCE_PROVIDER_RESULT", str(exc)) from exc
 
 
 def _verification_bundle(data: Mapping[str, Any]) -> VerificationBundle:
@@ -368,24 +460,47 @@ def handle_request(request: Mapping[str, Any]) -> dict[str, Any]:
         return envelope("verifier_capability_registry", registry.to_dict())
 
     if op == "describe_evidence_provider_capabilities":
-        unexpected = set(payload) - {"claim_kind"}
+        unexpected = set(payload) - {"request_kind", "evidence_kind"}
         if unexpected:
             raise ProtocolError(
                 "INVALID_PAYLOAD",
                 "unsupported evidence provider capability query fields: "
                 + ", ".join(sorted(unexpected)),
             )
-        claim_kind = payload.get("claim_kind")
-        if claim_kind is not None and not isinstance(claim_kind, str):
-            raise ProtocolError("INVALID_PAYLOAD", "claim_kind must be a string")
+        request_kind = payload.get("request_kind")
+        evidence_kind = payload.get("evidence_kind")
+        if request_kind is not None and not isinstance(request_kind, str):
+            raise ProtocolError("INVALID_PAYLOAD", "request_kind must be a string")
+        if evidence_kind is not None and not isinstance(evidence_kind, str):
+            raise ProtocolError("INVALID_PAYLOAD", "evidence_kind must be a string")
         try:
             capabilities = builtin_evidence_provider_registry().query(
-                claim_kind=claim_kind,
+                request_kind=request_kind,
+                evidence_kind=evidence_kind,
             )
             registry = EvidenceProviderRegistry(capabilities)
         except EvidenceProviderError as exc:
             raise ProtocolError("INVALID_PAYLOAD", str(exc)) from exc
         return envelope("evidence_provider_capability_registry", registry.to_dict())
+
+    if op == "validate_evidence_provider_result":
+        unexpected = set(payload) - {"request", "capability", "result"}
+        if unexpected:
+            raise ProtocolError(
+                "INVALID_PAYLOAD",
+                "unsupported evidence provider result validation fields: "
+                + ", ".join(sorted(unexpected)),
+            )
+        try:
+            parsed_request = _evidence_provider_request(_require_mapping(payload.get("request", {}), "request"))
+            parsed_capability = _evidence_provider_capability(_require_mapping(payload.get("capability", {}), "capability"))
+            parsed_result = _evidence_provider_result(_require_mapping(payload.get("result", {}), "result"))
+            normalized = validate_evidence_provider_result(parsed_result, parsed_request, parsed_capability)
+        except ProtocolError:
+            raise
+        except EvidenceProviderError as exc:
+            raise ProtocolError("INVALID_EVIDENCE_PROVIDER_RESULT", str(exc)) from exc
+        return envelope("evidence_provider_result", normalized.to_dict())
 
     if op == "verify_goal":
         state = decode_markers(dict(_require_mapping(payload.get("initial_state", {}), "initial_state")))

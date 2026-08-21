@@ -6,12 +6,13 @@ It is metadata about a verifier contract. It does not run the verifier, acquire 
 
 ## Two different registries
 
-GVR now has two intentionally separate registry types:
+GVR now has three intentionally separate registry types:
 
 - `VerifierRegistry` in `core.py` contains executable goal/action verifier objects and combines their reports.
 - `VerifierCapabilityRegistry` in `capabilities.py` contains immutable descriptions of verifier contracts.
+- `EvidenceProviderRegistry` in `evidence_providers.py` contains immutable evidence acquisition descriptors plus optional exact runtime provider bindings.
 
-Keeping these separate prevents descriptive metadata from becoming a hidden execution or selection mechanism.
+Keeping these separate prevents descriptive metadata from becoming a hidden execution, acquisition, or selection mechanism.
 
 ## `VerifierCapability`
 
@@ -172,6 +173,41 @@ Filter by one exact claim kind and exclude proposal/advisory entries:
 ```
 
 The response kind is `verifier_capability_registry`. Its payload contains the registry schema version, kind, fingerprint format, fingerprint, and deterministically ordered capability descriptors.
+
+## Evidence provider discovery and result validation
+
+Evidence provider capabilities describe acquisition contracts. They are separate from verifier capabilities because providers gather evidence but do not decide verification truth.
+
+The schema-v1 provider discovery operation accepts deterministic optional filters:
+
+```json
+{
+  "schema_version": 1,
+  "op": "describe_evidence_provider_capabilities",
+  "payload": {
+    "request_kind": "CAN_FLOW_TO",
+    "evidence_kind": "graphify.data_flow_query_result"
+  }
+}
+```
+
+`claim_kind` is intentionally not accepted for provider discovery. Use `request_kind` for the provider request contract and `evidence_kind` for produced evidence.
+
+Provider results can be validated over the schema-v1 protocol:
+
+```json
+{
+  "schema_version": 1,
+  "op": "validate_evidence_provider_result",
+  "payload": {
+    "request": {},
+    "capability": {},
+    "result": {}
+  }
+}
+```
+
+The operation parses serialized request, capability, and result objects, checks exact provider identity, version, capability fingerprint, produced and accepted evidence kinds, and required coverage, then returns a canonical `evidence_provider_result`. Invalid inputs return a `protocol_error` with codes such as `INVALID_EVIDENCE_PROVIDER_REQUEST`, `INVALID_EVIDENCE_PROVIDER_CAPABILITY`, or `INVALID_EVIDENCE_PROVIDER_RESULT`.
 
 ## Current limits
 

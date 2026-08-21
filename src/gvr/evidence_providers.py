@@ -301,8 +301,11 @@ class EvidenceProviderCapability:
     def export(self) -> dict[str, Any]:
         return self.to_dict()
 
-    def supports_claim_kind(self, claim_kind: str) -> bool:
-        return claim_kind in self.claim_kinds
+    def supports_request_kind(self, request_kind: str) -> bool:
+        return request_kind in self.claim_kinds
+
+    def produces_evidence_kind(self, evidence_kind: str) -> bool:
+        return evidence_kind in self.produced_evidence_kinds
 
 
 @dataclass(frozen=True)
@@ -428,10 +431,17 @@ class EvidenceProviderRegistry:
         except KeyError as exc:
             raise UnknownEvidenceProviderError(f"unknown evidence provider capability {key[0]} version {key[1]}") from exc
 
-    def query(self, *, claim_kind: str | None = None) -> tuple[EvidenceProviderCapability, ...]:
-        if claim_kind is not None:
-            claim_kind = _strict_identifier(claim_kind, name="claim_kind")
-        return tuple(cap for cap in self.capabilities if claim_kind is None or cap.supports_claim_kind(claim_kind))
+    def query(self, *, request_kind: str | None = None, evidence_kind: str | None = None) -> tuple[EvidenceProviderCapability, ...]:
+        if request_kind is not None:
+            request_kind = _strict_identifier(request_kind, name="request_kind")
+        if evidence_kind is not None:
+            evidence_kind = _strict_identifier(evidence_kind, name="evidence_kind")
+        return tuple(
+            cap
+            for cap in self.capabilities
+            if (request_kind is None or cap.supports_request_kind(request_kind))
+            and (evidence_kind is None or cap.produces_evidence_kind(evidence_kind))
+        )
 
     def acquire(self, request: EvidenceRequest, *, fail_closed: bool = False) -> EvidenceProviderResult:
         capability = self.lookup(request.provider_id, request.provider_version)
