@@ -4656,14 +4656,86 @@ class SQLiteUnitOfWork:
                     )
                 claim_versions.append((claim_id, stored_claim.version))
 
-            bundle_ids = tuple(sorted({
+            derived_falsifications_by_record: dict[
+                str,
+                StoredFalsificationResult,
+            ] = {}
+            for stored_claim in selected_claim_records:
+                if len(stored_claim.falsification_fingerprints) != len(
+                    stored_claim.falsification_record_fingerprints
+                ):
+                    raise StorageIntegrityError(
+                        "session claim basis has incomplete exact falsification records"
+                    )
+                for falsification_fingerprint, record_fingerprint in zip(
+                    stored_claim.falsification_fingerprints,
+                    stored_claim.falsification_record_fingerprints,
+                ):
+                    exact = self.get_falsification_result(
+                        falsification_fingerprint,
+                        record_fingerprint=record_fingerprint,
+                    )
+                    derived_falsifications_by_record.setdefault(
+                        record_fingerprint,
+                        exact,
+                    )
+            derived_falsifications = tuple(
+                derived_falsifications_by_record[key]
+                for key in sorted(derived_falsifications_by_record)
+            )
+            if (
+                falsification_records is not None
+                or falsification_fingerprints
+            ) and tuple(
+                item.record_fingerprint for item in falsifications
+            ) != tuple(
+                item.record_fingerprint for item in derived_falsifications
+            ):
+                raise StorageIntegrityError(
+                    "session falsification records do not match exact claim records"
+                )
+            falsifications = derived_falsifications
+
+            session_bundle_ids = tuple(sorted(
                 item["bundle_fingerprint"]
                 for item in session_document.get("atomic_verifications", ())
                 if item.get("bundle_fingerprint") is not None
-            }))
-            if bundle_records is None:
-                bundles = tuple(self.get_bundle(item) for item in bundle_ids)
-            else:
+            ))
+            claim_bundle_references = tuple(sorted(
+                (
+                    stored_claim.bundle_fingerprint,
+                    stored_claim.bundle_record_fingerprint,
+                )
+                for stored_claim in selected_claim_records
+                if stored_claim.bundle_fingerprint is not None
+            ))
+            if any(
+                record_fingerprint is None
+                for _, record_fingerprint in claim_bundle_references
+            ):
+                raise StorageIntegrityError(
+                    "session claim basis is missing an exact bundle record"
+                )
+            if tuple(
+                bundle_fingerprint
+                for bundle_fingerprint, _ in claim_bundle_references
+            ) != session_bundle_ids:
+                raise StorageIntegrityError(
+                    "session bundle domains do not match exact claim records"
+                )
+            derived_bundles_by_record: dict[str, StoredBundle] = {}
+            for bundle_fingerprint, record_fingerprint in claim_bundle_references:
+                assert record_fingerprint is not None
+                exact = self.get_bundle(
+                    bundle_fingerprint,
+                    record_fingerprint=record_fingerprint,
+                )
+                derived_bundles_by_record.setdefault(record_fingerprint, exact)
+            derived_bundles = tuple(
+                derived_bundles_by_record[key]
+                for key in sorted(derived_bundles_by_record)
+            )
+            if bundle_records is not None:
                 supplied_bundles = tuple(bundle_records)
                 if (
                     any(
@@ -4671,30 +4743,41 @@ class SQLiteUnitOfWork:
                         or item.record_fingerprint is None
                         for item in supplied_bundles
                     )
-                    or tuple(item.fingerprint for item in supplied_bundles)
-                    != bundle_ids
+                    or tuple(
+                        item.record_fingerprint for item in supplied_bundles
+                    )
+                    != tuple(
+                        item.record_fingerprint for item in derived_bundles
+                    )
                 ):
                     raise StorageIntegrityError(
-                        "session bundle records must be exact and sorted by domain"
+                        "session bundle records must match the exact claim records "
+                        "and be sorted by record fingerprint"
                     )
-                bundles = tuple(
+                supplied_exact_bundles = tuple(
                     self.get_bundle(
                         item.fingerprint,
                         record_fingerprint=item.record_fingerprint,
                     )
                     for item in supplied_bundles
                 )
-                for supplied, exact in zip(supplied_bundles, bundles):
+                for supplied, exact, derived in zip(
+                    supplied_bundles,
+                    supplied_exact_bundles,
+                    derived_bundles,
+                ):
                     if (
                         exact.bundle != supplied.bundle
                         or exact.record_fingerprint != supplied.record_fingerprint
                         or exact.evidence_dependencies
                         != supplied.evidence_dependencies
+                        or exact != derived
                         or not exact.current
                     ):
                         raise StorageIntegrityError(
                             "session bundle record conflicts with exact durable content"
                         )
+            bundles = derived_bundles
             session_content, session_canonical, session_digest = _parts(
                 session_document
             )
@@ -4767,7 +4850,14 @@ class SQLiteUnitOfWork:
                         ),
                         "claim_version",
                     )
-                for ordinal, stored_bundle in enumerate(bundles):
+                legacy_bundles = {
+                    item.fingerprint: item
+                    for item in bundles
+                }
+                for ordinal, bundle_fingerprint in enumerate(
+                    sorted(legacy_bundles)
+                ):
+                    stored_bundle = legacy_bundles[bundle_fingerprint]
                     self._conn().execute(
                         """
                         INSERT INTO session_bundle_links(
@@ -5097,8 +5187,10 @@ class SQLiteUnitOfWork:
             item["claim_id"]: item
             for item in session_document.get("claims", ())
         }
+        exact_claims: list[StoredClaimVersion] = []
         for claim_id, claim_version in claim_versions:
             stored_claim = self._read_claim_version(claim_id, claim_version)
+            exact_claims.append(stored_claim)
             state = states.get(claim_id)
             if state is None or (
                 state.get("stored_verdict") != stored_claim.verdict.value
@@ -5124,6 +5216,25 @@ class SQLiteUnitOfWork:
         bundle_record_fingerprints = tuple(
             item["bundle_record_fingerprint"] for item in bundle_rows
         )
+        expected_bundle_references = tuple(sorted({
+            (
+                item.bundle_fingerprint,
+                item.bundle_record_fingerprint,
+            )
+            for item in exact_claims
+            if item.bundle_fingerprint is not None
+            and item.bundle_record_fingerprint is not None
+        }, key=lambda item: item[1]))
+        if tuple(
+            (
+                item["bundle_fingerprint"],
+                item["bundle_record_fingerprint"],
+            )
+            for item in bundle_rows
+        ) != expected_bundle_references:
+            raise StorageIntegrityError(
+                "session exact bundle links conflict with exact claim records"
+            )
         for item in bundle_rows:
             self.get_bundle(
                 item["bundle_fingerprint"],
@@ -5146,6 +5257,24 @@ class SQLiteUnitOfWork:
             item["falsification_record_fingerprint"]
             for item in falsification_rows
         )
+        expected_falsification_references = tuple(sorted({
+            (falsification_fingerprint, record_fingerprint)
+            for claim in exact_claims
+            for falsification_fingerprint, record_fingerprint in zip(
+                claim.falsification_fingerprints,
+                claim.falsification_record_fingerprints,
+            )
+        }, key=lambda item: item[1]))
+        if tuple(
+            (
+                item["falsification_fingerprint"],
+                item["falsification_record_fingerprint"],
+            )
+            for item in falsification_rows
+        ) != expected_falsification_references:
+            raise StorageIntegrityError(
+                "session exact falsification links conflict with exact claim records"
+            )
         for item in falsification_rows:
             self.get_falsification_result(
                 item["falsification_fingerprint"],
@@ -5664,30 +5793,47 @@ class SQLiteUnitOfWork:
             execution_document = result.to_dict()
             self._put_document("verification_execution", result.fingerprint, execution_document)
             session_bundle_records: dict[str, StoredBundle] = {}
-            for stored_bundle in stored_bundles.values():
-                previous = session_bundle_records.setdefault(
-                    stored_bundle.fingerprint,
+            for stored_claim in stored_claims.values():
+                if stored_claim.bundle_fingerprint is None:
+                    if stored_claim.bundle_record_fingerprint is not None:
+                        raise StorageIntegrityError(
+                            "claim without a bundle cannot reference an exact bundle record"
+                        )
+                    continue
+                if stored_claim.bundle_record_fingerprint is None:
+                    raise StorageIntegrityError(
+                        "session claim basis is missing an exact bundle record"
+                    )
+                stored_bundle = self.get_bundle(
+                    stored_claim.bundle_fingerprint,
+                    record_fingerprint=stored_claim.bundle_record_fingerprint,
+                )
+                session_bundle_records.setdefault(
+                    stored_claim.bundle_record_fingerprint,
                     stored_bundle,
                 )
-                if previous.record_fingerprint != stored_bundle.record_fingerprint:
-                    raise StorageIntegrityError(
-                        "one session cannot substitute conflicting exact bundle records"
-                    )
             session_falsification_records: dict[
                 str,
                 StoredFalsificationResult,
             ] = {}
-            for stored_falsification in falsification_records_by_step.values():
-                previous = session_falsification_records.setdefault(
-                    stored_falsification.fingerprint,
-                    stored_falsification,
-                )
-                if (
-                    previous.record_fingerprint
-                    != stored_falsification.record_fingerprint
+            for stored_claim in stored_claims.values():
+                if len(stored_claim.falsification_fingerprints) != len(
+                    stored_claim.falsification_record_fingerprints
                 ):
                     raise StorageIntegrityError(
-                        "one session cannot substitute conflicting exact falsification records"
+                        "claim basis has incomplete exact falsification records"
+                    )
+                for falsification_fingerprint, record_fingerprint in zip(
+                    stored_claim.falsification_fingerprints,
+                    stored_claim.falsification_record_fingerprints,
+                ):
+                    stored_falsification = self.get_falsification_result(
+                        falsification_fingerprint,
+                        record_fingerprint=record_fingerprint,
+                    )
+                    session_falsification_records.setdefault(
+                        record_fingerprint,
+                        stored_falsification,
                     )
             return self.put_session(
                 result.session,

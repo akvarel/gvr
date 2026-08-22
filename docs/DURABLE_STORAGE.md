@@ -222,7 +222,7 @@ stored_session = storage.put_session(
 )
 ```
 
-Exact claim, bundle, and falsification records are validated again before the session record is created. This keeps the session basis tied to the current execution even when another exact record with the same domain fingerprint is also structurally current.
+Exact claim, bundle, and falsification records are validated again before the session record is created. Bundle and falsification collections are derived from the selected exact claim versions, deduplicated only when their exact record fingerprints are equal, and sorted by exact record fingerprint. This keeps the session basis tied to the current execution even when another exact record with the same domain fingerprint is also structurally current. Multiple claims may retain different exact bundle records for one bundle domain, while claims that share the same exact bundle record store one canonical session link.
 
 The durable session layer separates semantic truth basis from audit correlation. A session record preserves:
 
@@ -253,7 +253,7 @@ stored = storage.put_falsification_result(
 )
 ```
 
-A claim may use a falsification result only when the result belongs to that exact claim and declared verifier. If a linked evidence slot changes, invalidation flows through:
+A claim may use a falsification result only when the result belongs to that exact claim and declared verifier. Exact falsification inputs remain unique by domain within one claim version. This restriction is safe and intentional because the falsification domain fingerprint includes the claim ID, binding, declared verifier, strategy identity, and semantic outcome. A second exact record for that same domain would be another dependency basis for the same claim-specific semantic result, not a distinct falsification result. Reverification may select the other exact record in a new claim version, and sessions derive that selected exact record from the claim. If a linked evidence slot changes, invalidation flows through:
 
 ```text
 slot version
@@ -298,7 +298,7 @@ with storage.unit_of_work() as uow:
 
 `storage` and `unit_of_work` are mutually exclusive. GVR never discovers storage globally.
 
-The executor first completes its normal fail-closed in-memory semantics. Before returning, durable recording atomically writes exact provider evidence metadata, explicit semantic slot versions or direct immutable dependencies, falsification records, bundle records, claim versions, graph and plan documents, execution audit observations, and sealed session records. Every acquisition dependency is retained, including multiple source/request slots that emitted one identical raw evidence ID. Each returned bundle and falsification record is matched against the canonical dependency tuple computed for the current execution, then threaded directly through the claim and session write. A to B to reopen to replay A therefore restores A's exact basis instead of selecting B by a shared domain fingerprint or row order. `record_execution()` never uses raw `Evidence.id` as a global mutable slot. If any exact record mismatches, is stale, or is corrupt, the outer transaction rolls back and `execute_verification_plan()` raises `VerificationExecutionError`; it does not return an unstored `PASS`.
+The executor first completes its normal fail-closed in-memory semantics. Before returning, durable recording atomically writes exact provider evidence metadata, explicit semantic slot versions or direct immutable dependencies, falsification records, bundle records, claim versions, graph and plan documents, execution audit observations, and sealed session records. Every acquisition dependency is retained, including multiple source/request slots that emitted one identical raw evidence ID. Each returned bundle and falsification record is matched against the canonical dependency tuple computed for the current execution, then threaded directly through the claim write. The session exact-record collections are subsequently derived from those exact claim records and canonicalized by exact record fingerprint rather than domain fingerprint. A to B to reopen to replay A therefore restores A's exact basis instead of selecting B by a shared domain fingerprint or row order, and one session may retain A and B simultaneously when different claims share a bundle domain but not an exact record. `record_execution()` never uses raw `Evidence.id` as a global mutable slot. If any exact record mismatches, is stale, or is corrupt, the outer transaction rolls back and `execute_verification_plan()` raises `VerificationExecutionError`; it does not return an unstored `PASS`.
 
 Supplying no storage preserves the Task 19 and Task 20 behavior and fingerprints.
 
@@ -317,7 +317,7 @@ Migration failure raises `StorageMigrationError` and rolls back schema creation 
 
 Schema version 2 added canonical slot identity metadata, mutable-or-immutable evidence dependency links, versioned bundle/falsification/session records, and nonsemantic session execution observations.
 
-Schema version 3 changes bundle-record, falsification-record, and claim dependency-link keys from raw evidence ID to canonical dependency ordinal. This is required because independent acquisitions may legitimately share one raw evidence ID. Migration from version 2 rebuilds only those link tables, copies every authoritative row transactionally, and preserves record fingerprints, slot authority, currentness, history, and replay behavior. Task 24 exact-record threading requires no schema change because schema v3 already stores every bundle, falsification, claim, session, and observation record fingerprint needed for exact selection.
+Schema version 3 changes bundle-record, falsification-record, and claim dependency-link keys from raw evidence ID to canonical dependency ordinal. This is required because independent acquisitions may legitimately share one raw evidence ID. Migration from version 2 rebuilds only those link tables, copies every authoritative row transactionally, and preserves record fingerprints, slot authority, currentness, history, and replay behavior. Task 24 exact-record threading and Task 25 session multiplicity require no schema change because schema v3 already keys `session_record_bundle_links` and `session_record_falsification_links` by exact record fingerprint. The legacy semantic-domain projection remains intentionally unique by domain, while exact session records may contain several same-domain bundle links when their exact record fingerprints differ.
 
 Version 1 did not record whether a slot string was caller-owned or inferred by the old executor from raw `Evidence.id`. Migration still marks every pre-v2 slot `LEGACY_AMBIGUOUS` and non-authoritative before the version-3 link migration runs. Its artifacts and history remain readable, but any dependent bundle, claim, falsification result, or session is structurally stale. A new explicit semantic identity uses its canonical namespaced slot and can establish a new authoritative basis; an ambiguous raw slot is never silently adopted.
 

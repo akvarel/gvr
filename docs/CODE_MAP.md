@@ -88,7 +88,7 @@ The interfaces contain no product-specific fields and do not require SQL.
 
 ## `src/gvr/sqlite_storage.py`
 
-This is the standard-library SQLite reference adapter. It implements schema-v3 transactional migration, fail-closed legacy slot authority, immutable evidence plus canonical semantic slot identities, versioned bundle/falsification/session dependency records, duplicate-raw-ID-safe exact dependency tuples, direct immutable evidence links, exact claim bases, exact returned-record validation and threading through claims and sessions, separate audit-bearing execution observations, indexed reverse dependencies, idempotent invalidation events, corruption checks, rollback, and completed-execution recording without raw-ID slot inference.
+This is the standard-library SQLite reference adapter. It implements schema-v3 transactional migration, fail-closed legacy slot authority, immutable evidence plus canonical semantic slot identities, versioned bundle/falsification/session dependency records, duplicate-raw-ID-safe exact dependency tuples, direct immutable evidence links, exact claim bases, exact returned-record validation and threading through claims and sessions, record-fingerprint-keyed session multiplicity derived from exact claim records, separate audit-bearing execution observations, indexed reverse dependencies, idempotent invalidation events, corruption checks, rollback, and completed-execution recording without raw-ID slot inference.
 
 Read [Durable storage](DURABLE_STORAGE.md) before changing schema or current/stale semantics.
 

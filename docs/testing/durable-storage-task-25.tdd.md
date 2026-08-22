@@ -55,3 +55,28 @@ multiplicity path, order invariance, reopen and replay, idempotency, independent
 A-only and B-only invalidation, same-exact-record deduplication, wrong-record
 substitution, corrupt exact links, falsification exact-record uniqueness, and
 execution from an isolated installed wheel with `PYTHONPATH` removed.
+
+## GREEN implementation
+
+The implementation preserves durable schema v3. Existing
+`session_record_bundle_links` already use the exact bundle record fingerprint
+as part of their primary key, so several links may share one bundle domain
+without a migration.
+
+Completed-execution recording now obtains the session bundle and falsification
+collections from the exact stored claim versions. Session creation independently
+rereads those claim versions, derives their exact record references, deduplicates
+only equal exact record fingerprints, and sorts by exact record fingerprint.
+Caller-supplied exact records must equal that derived collection. Session reads
+repeat the same derivation and reject links that do not match the claim records.
+The legacy semantic-domain link projection remains unique by domain and is not
+used as an exact truth collection.
+
+The exact-record audit found one unsafe domain-keyed collection: session bundle
+records. It is now record-keyed. Claim-level exact falsification records remain
+unique by domain intentionally. A `FalsificationResult` domain includes its
+claim ID, binding, declared verifier, strategy identity, and semantic outcome,
+so two same-domain records inside one claim version would be alternative bases
+for one claim-specific semantic result rather than distinct results. A later
+claim version may select a different exact record, and the session derives that
+selection from the claim.
