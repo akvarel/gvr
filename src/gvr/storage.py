@@ -4,13 +4,14 @@ from dataclasses import dataclass
 from typing import Any, ContextManager, Mapping, Protocol, runtime_checkable
 
 from .bundle import VerificationBundle
+from .evidence_providers import EvidenceSlotIdentity
 from .falsification import FalsificationResult
 from .ledger import ClaimDefinition
 from .model import Evidence, VerificationReport, VerificationVerdict
 from .session import VerificationSession
 
 
-DURABLE_STORAGE_SCHEMA_VERSION = 1
+DURABLE_STORAGE_SCHEMA_VERSION = 2
 DURABLE_STORAGE_SCHEMA_TABLE = "gvr_storage_schema"
 
 
@@ -49,10 +50,33 @@ class EvidenceSlotVersion:
     evidence_fingerprint: str
     previous_version: int | None
     current: bool
+    identity_fingerprint: str | None = None
+    authoritative: bool = True
 
     @property
     def object_key(self) -> str:
         return f"slot-version:{self.slot_id}:{self.version}"
+
+
+@dataclass(frozen=True)
+class EvidenceDependency:
+    evidence_id: str
+    evidence_fingerprint: str
+    slot: EvidenceSlotVersion | None = None
+
+    @property
+    def replaceable(self) -> bool:
+        return self.slot is not None
+
+    @property
+    def current(self) -> bool:
+        return self.slot is None or self.slot.current
+
+    @property
+    def object_key(self) -> str:
+        if self.slot is not None:
+            return self.slot.object_key
+        return f"evidence:{self.evidence_fingerprint}"
 
 
 @dataclass(frozen=True)
@@ -66,6 +90,7 @@ class StoredEvidence:
     coverage: Mapping[str, Any]
     slot_id: str | None = None
     slot_version: int | None = None
+    slot_identity: EvidenceSlotIdentity | None = None
 
 
 @dataclass(frozen=True)
@@ -74,9 +99,13 @@ class StoredBundle:
     bundle: VerificationBundle
     evidence_slots: tuple[EvidenceSlotVersion, ...]
     current: bool
+    record_fingerprint: str | None = None
+    evidence_dependencies: tuple[EvidenceDependency, ...] = ()
 
     @property
     def object_key(self) -> str:
+        if self.record_fingerprint is not None:
+            return f"bundle-record:{self.record_fingerprint}"
         return f"bundle:{self.fingerprint}"
 
 
@@ -101,6 +130,9 @@ class StoredClaimVersion:
     claim_dependency_versions: tuple[tuple[str, int], ...]
     falsification_fingerprints: tuple[str, ...]
     current: bool
+    bundle_record_fingerprint: str | None = None
+    evidence_dependencies: tuple[EvidenceDependency, ...] = ()
+    falsification_record_fingerprints: tuple[str, ...] = ()
 
     @property
     def object_key(self) -> str:
@@ -122,9 +154,13 @@ class StoredFalsificationResult:
     result: FalsificationResult
     evidence_slots: tuple[EvidenceSlotVersion, ...]
     current: bool
+    record_fingerprint: str | None = None
+    evidence_dependencies: tuple[EvidenceDependency, ...] = ()
 
     @property
     def object_key(self) -> str:
+        if self.record_fingerprint is not None:
+            return f"falsification-record:{self.record_fingerprint}"
         return f"falsification:{self.fingerprint}"
 
 
@@ -142,10 +178,27 @@ class StoredSession:
     bundle_fingerprints: tuple[str, ...]
     falsification_fingerprints: tuple[str, ...]
     current: bool
+    record_fingerprint: str | None = None
+    bundle_record_fingerprints: tuple[str, ...] = ()
+    falsification_record_fingerprints: tuple[str, ...] = ()
 
     @property
     def object_key(self) -> str:
+        if self.record_fingerprint is not None:
+            return f"session-record:{self.record_fingerprint}"
         return f"session:{self.fingerprint}"
+
+
+@dataclass(frozen=True)
+class SessionExecutionObservation:
+    observation_fingerprint: str
+    session_fingerprint: str
+    session_record_fingerprint: str
+    plan_fingerprint: str | None
+    execution_fingerprint: str | None
+    request_ids: tuple[str, ...]
+    correlation_id: str | None
+    execution_document: Mapping[str, Any] | None
 
 
 @dataclass(frozen=True)
@@ -164,6 +217,7 @@ class EvidenceStore(Protocol):
         evidence: Evidence,
         *,
         slot_id: str | None = None,
+        slot_identity: EvidenceSlotIdentity | None = None,
         provenance: Mapping[str, Any] | None = None,
         source_snapshot: Mapping[str, Any] | None = None,
         bounds: Mapping[str, Any] | None = None,
@@ -185,9 +239,17 @@ class BundleStore(Protocol):
         bundle: VerificationBundle,
         *,
         evidence_slots: Mapping[str, EvidenceSlotVersion] | None = None,
+        evidence_artifacts: Mapping[str, str] | None = None,
     ) -> StoredBundle: ...
 
-    def get_bundle(self, fingerprint: str) -> StoredBundle: ...
+    def get_bundle(
+        self,
+        fingerprint: str,
+        *,
+        record_fingerprint: str | None = None,
+    ) -> StoredBundle: ...
+
+    def bundle_history(self, fingerprint: str) -> tuple[StoredBundle, ...]: ...
 
 
 @runtime_checkable
@@ -228,6 +290,16 @@ class SessionStore(Protocol):
     ) -> StoredSession: ...
 
     def get_session(self, fingerprint: str) -> StoredSession: ...
+
+    def session_record_history(
+        self,
+        fingerprint: str,
+    ) -> tuple[StoredSession, ...]: ...
+
+    def session_execution_observations(
+        self,
+        fingerprint: str,
+    ) -> tuple[SessionExecutionObservation, ...]: ...
 
 
 @runtime_checkable

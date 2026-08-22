@@ -15,7 +15,7 @@ You do not need to know AI research terms to read it. You do not need to know gr
 7. [Verification planning](VERIFICATION_PLANNING.md) — how exact contracts become bounded acquisition, atomic-check, and composition steps without execution.
 8. [Falsification](FALSIFICATION.md) — how explicit finite witness, counterexample, invariant, metamorphic, recomputation, and representation strategies challenge atomic claims without deciding truth.
 9. [Verification execution](VERIFICATION_EXECUTION.md) — how one exact complete plan runs against exact provider, falsification, and verifier runtime registries.
-10. [Durable storage](DURABLE_STORAGE.md) — how immutable evidence, versioned slots, bundles, claims, invalidation, and sessions survive restarts with the SQLite reference adapter.
+10. [Durable storage](DURABLE_STORAGE.md) — how immutable evidence, explicit semantic slots, versioned dependency records, invalidation, audit observations, and safe schema migration survive restarts with the SQLite reference adapter.
 11. [Architecture](ARCHITECTURE.md) — how the current GVR pieces fit together.
 12. [CLI and JSON protocol](CLI_AND_PROTOCOL.md) — how another program can call GVR.
 13. [Code map](CODE_MAP.md) — where the main pieces live in the repository.
@@ -73,7 +73,7 @@ The bundle keeps the result together with the evidence used for that result.
 
 The ledger remembers which result depends on which evidence. If the evidence changes, the old result becomes stale and must not be treated as current truth.
 
-The optional durable storage layer preserves that dependency basis and invalidation history across process restarts. It uses structural slot and dependency versions, not wall-clock expiry.
+The optional durable storage layer preserves that dependency basis and invalidation history across process restarts. Replacement is explicit and canonically namespaced by provider/source/request semantics; undeclared evidence stays immutable. It uses structural slot and dependency versions, not raw evidence IDs or wall-clock expiry.
 
 A verification session can combine several current claims with exact `AND`, `OR`, and `NOT` rules. Missing or stale required claims stay `UNKNOWN`.
 

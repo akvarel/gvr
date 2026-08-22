@@ -265,6 +265,12 @@ class _ProviderRuntime:
             ),
             evidence=(evidence,),
             capability_fingerprint=self.capability.fingerprint,
+            evidence_slot_identities=(
+                request.evidence_slot_identity(
+                    evidence.id,
+                    source_identity=request.source_context,
+                ),
+            ),
         )
 
 
@@ -879,7 +885,11 @@ def test_25_task19_executor_records_completed_session_bundle_claim_atomically(tm
     assert db.claim_status("executor:claim").effective_verdict is VerificationVerdict.PASS
     bundle = next(iter(result.bundles.values()))
     assert db.get_bundle(bundle.fingerprint).current
-    stored_evidence = db.get_evidence_by_slot("executor:evidence")
+    slot_identity = next(
+        iter(result.provider_results.values())
+    ).evidence_slot_identities[0]
+    assert db.get_slot("executor:evidence") is None
+    stored_evidence = db.get_evidence_by_slot(slot_identity.slot_id)
     assert stored_evidence.source_snapshot["revision"] == "executor-revision-A"
     assert stored_evidence.coverage["completeness"] == "COMPLETE"
     reopened = SQLiteStorage(path)

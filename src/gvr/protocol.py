@@ -56,6 +56,7 @@ from .evidence_providers import (
     EvidenceProviderResult,
     EvidenceProviderRuntimeRegistry,
     EvidenceRequest,
+    EvidenceSlotIdentity,
     builtin_evidence_provider_capability_registry,
     validate_evidence_provider_result,
 )
@@ -324,7 +325,7 @@ def _evidence_provider_result(data: Mapping[str, Any]) -> EvidenceProviderResult
                 "schema_version", "kind", "fingerprint_format", "fingerprint",
                 "request_id", "request_fingerprint", "provider_id",
                 "provider_version", "status", "coverage", "evidence", "issues",
-                "capability_fingerprint",
+                "capability_fingerprint", "evidence_slot_identities",
             },
             code="INVALID_EVIDENCE_PROVIDER_RESULT",
             noun="evidence provider result",
@@ -344,8 +345,16 @@ def _evidence_provider_result(data: Mapping[str, Any]) -> EvidenceProviderResult
         )
         evidence_data = data.get("evidence", ())
         issues_data = data.get("issues", ())
-        if not isinstance(evidence_data, (list, tuple)) or not isinstance(issues_data, (list, tuple)):
-            raise ProtocolError("INVALID_EVIDENCE_PROVIDER_RESULT", "evidence and issues must be arrays")
+        slot_identity_data = data.get("evidence_slot_identities", ())
+        if (
+            not isinstance(evidence_data, (list, tuple))
+            or not isinstance(issues_data, (list, tuple))
+            or not isinstance(slot_identity_data, (list, tuple))
+        ):
+            raise ProtocolError(
+                "INVALID_EVIDENCE_PROVIDER_RESULT",
+                "evidence, issues, and evidence_slot_identities must be arrays",
+            )
         coverage = EvidenceCoverage(
             schema_version=coverage_data.get("schema_version"),
             kind=coverage_data.get("kind"),
@@ -379,6 +388,12 @@ def _evidence_provider_result(data: Mapping[str, Any]) -> EvidenceProviderResult
             evidence=tuple(_evidence_provider_evidence_record(_require_mapping(item, "evidence record")) for item in evidence_data),
             issues=tuple(_evidence_provider_issue(_require_mapping(item, "issue")) for item in issues_data),
             capability_fingerprint=str(data.get("capability_fingerprint") or ""),
+            evidence_slot_identities=tuple(
+                _evidence_slot_identity(
+                    _require_mapping(item, "evidence slot identity")
+                )
+                for item in slot_identity_data
+            ),
         )
         supplied_result_fingerprint = data.get("fingerprint")
         if supplied_result_fingerprint is not None and supplied_result_fingerprint != result.fingerprint:
@@ -388,6 +403,45 @@ def _evidence_provider_result(data: Mapping[str, Any]) -> EvidenceProviderResult
         raise
     except (EvidenceProviderError, ValueError) as exc:
         raise ProtocolError("INVALID_EVIDENCE_PROVIDER_RESULT", str(exc)) from exc
+
+
+def _evidence_slot_identity(data: Mapping[str, Any]) -> EvidenceSlotIdentity:
+    _reject_unexpected_fields(
+        data,
+        {
+            "schema_version", "kind", "fingerprint_format", "fingerprint",
+            "slot_id", "provider_id", "evidence_id", "source_identity",
+            "request_identity",
+        },
+        code="INVALID_EVIDENCE_PROVIDER_RESULT",
+        noun="evidence slot identity",
+    )
+    identity = EvidenceSlotIdentity(
+        schema_version=data.get("schema_version"),
+        kind=data.get("kind"),
+        fingerprint_format=data.get("fingerprint_format"),
+        provider_id=str(data.get("provider_id") or ""),
+        evidence_id=str(data.get("evidence_id") or ""),
+        source_identity=decode_markers(dict(_require_mapping(
+            data.get("source_identity", {}),
+            "slot source_identity",
+        ))),
+        request_identity=decode_markers(dict(_require_mapping(
+            data.get("request_identity", {}),
+            "slot request_identity",
+        ))),
+    )
+    if data.get("fingerprint") not in (None, identity.fingerprint):
+        raise ProtocolError(
+            "INVALID_EVIDENCE_PROVIDER_RESULT",
+            "evidence slot identity fingerprint does not match canonical content",
+        )
+    if data.get("slot_id") not in (None, identity.slot_id):
+        raise ProtocolError(
+            "INVALID_EVIDENCE_PROVIDER_RESULT",
+            "evidence slot ID does not match canonical identity",
+        )
+    return identity
 
 
 def _evidence_provider_evidence_record(record: Mapping[str, Any]) -> Evidence:

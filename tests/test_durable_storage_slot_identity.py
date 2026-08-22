@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 from pathlib import Path
 import sqlite3
 from typing import Any, Mapping
@@ -384,6 +385,40 @@ def _drop_v2_tables_and_project_raw_legacy_slot(path: Path) -> None:
             "WHERE dependency_key LIKE ?",
             (semantic_slot_id, RAW_EVIDENCE_ID, f"slot-version:{semantic_slot_id}:%"),
         )
+        for row in connection.execute(
+            "SELECT claim_id, version, content_json FROM claim_versions"
+        ).fetchall():
+            document = json.loads(row[2])
+            document["schema_version"] = 1
+            document.pop("bundle_record_fingerprint", None)
+            document.pop("evidence_dependencies", None)
+            document.pop("falsification_record_fingerprints", None)
+            for slot in document.get("evidence_slots", ()):
+                slot["slot_id"] = RAW_EVIDENCE_ID
+            content = json.dumps(
+                document,
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=False,
+                allow_nan=False,
+            )
+            canonical = gvr.canonical_json(
+                document,
+                fingerprint_format="gvr.storage.claim_basis.ieee754-json.v1",
+            )
+            digest = gvr.canonical_fingerprint(
+                document,
+                fingerprint_format="gvr.storage.claim_basis.ieee754-json.v1",
+            )
+            connection.execute(
+                """
+                UPDATE claim_versions
+                SET content_json = ?, canonical_json = ?,
+                    content_digest = ?, basis_fingerprint = ?
+                WHERE claim_id = ? AND version = ?
+                """,
+                (content, canonical, digest, digest, row[0], row[1]),
+            )
         for table in v2_tables:
             connection.execute(f"DROP TABLE IF EXISTS {table}")
         connection.execute(
@@ -400,12 +435,16 @@ def test_task22_01_request_id_only_change_is_same_slot_version_and_current_basis
     tmp_path: Path,
 ) -> None:
     db = SQLiteStorage(tmp_path / "ledger.sqlite3")
-    _, first = _record(db, request_id="request-a")
+    first_fixture, first = _record(db, request_id="request-a")
     _, second = _record(db, request_id="request-b")
 
     first_identity = _slot_identity(first)
     second_identity = _slot_identity(second)
+    first_provider_result = next(iter(first.provider_results.values()))
+    second_provider_result = next(iter(second.provider_results.values()))
     assert first_identity == second_identity
+    assert first_provider_result.request_fingerprint == second_provider_result.request_fingerprint
+    assert first_provider_result.fingerprint == second_provider_result.fingerprint
     assert first_identity.slot_id != RAW_EVIDENCE_ID
     assert db.get_slot(RAW_EVIDENCE_ID) is None
     assert len(db.slot_history(first_identity.slot_id)) == 1
@@ -419,6 +458,25 @@ def test_task22_01_request_id_only_change_is_same_slot_version_and_current_basis
         ("request-a",),
         ("request-b",),
     }
+    capability = (
+        first_fixture.request.evidence_provider_runtime_registry
+        .capability_registry.lookup(
+            first_provider_result.provider_id,
+            first_provider_result.provider_version,
+        )
+    )
+    protocol = gvr.handle_request({
+        "schema_version": 1,
+        "op": "validate_evidence_provider_result",
+        "payload": {
+            "request": first_fixture.evidence_request.to_dict(),
+            "capability": capability.to_dict(),
+            "result": first_provider_result.to_dict(),
+        },
+    })
+    assert protocol["payload"]["evidence_slot_identities"][0]["slot_id"] == (
+        first_identity.slot_id
+    )
 
 
 def test_task22_02_execution_correlation_only_is_audit_not_slot_or_session_basis(
@@ -561,7 +619,10 @@ def test_task22_07_snapshot_change_with_identical_content_versions_bundle_claim_
     identity = _slot_identity(first)
     assert _slot_identity(second) == _slot_identity(replay) == identity
     assert [item.version for item in db.slot_history(identity.slot_id)] == [1, 2]
-    assert len(db.invalidation_events()) == 1
+    assert sum(
+        item.kind == "slot_version_changed"
+        for item in db.invalidation_events()
+    ) == 1
     bundle_fingerprint = next(iter(first.bundles.values())).fingerprint
     bundles = db.bundle_history(bundle_fingerprint)
     assert len(bundles) == 2
@@ -592,7 +653,10 @@ def test_task22_08_content_change_stales_exact_only_and_leaves_unrelated_current
     identity = _slot_identity(first)
     assert _slot_identity(second) == _slot_identity(replay) == identity
     assert [item.version for item in db.slot_history(identity.slot_id)] == [1, 2]
-    assert len(db.invalidation_events()) == 1
+    assert sum(
+        item.kind == "slot_version_changed"
+        for item in db.invalidation_events()
+    ) == 1
     assert len(db.claim_history("claim-a")) == 2
     assert db.claim_status("claim-a").current
     assert db.claim_status("claim-unrelated").current
@@ -616,16 +680,20 @@ def test_task22_09_falsification_tracks_exact_semantic_slot_version_transitively
 
     first_falsification = next(iter(first.falsification_results.values()))
     second_falsification = next(iter(second.falsification_results.values()))
-    assert first_falsification.fingerprint == second_falsification.fingerprint
-    history = db.falsification_history(first_falsification.fingerprint)
-    assert len(history) == 2
-    assert [item.current for item in history] == [False, True]
+    first_stored = db.get_falsification_result(first_falsification.fingerprint)
+    second_stored = db.get_falsification_result(second_falsification.fingerprint)
+    assert not first_stored.current
+    assert second_stored.current
     assert [item.current for item in db.claim_history("claim-a")] == [False, True]
     assert [
         item.current
         for item in db.session_record_history(first.session.fingerprint)
     ] == [False, True]
-    targets = db.invalidation_events()[0].targets
+    targets = {
+        target
+        for event in db.invalidation_events()
+        for target in event.targets
+    }
     assert any(target.startswith("falsification-record:") for target in targets)
 
 
@@ -692,6 +760,31 @@ def test_task22_12_v1_migration_marks_ambiguous_raw_slots_stale_and_restart_repl
     _, first = _record(db)
     first_session = first.session.fingerprint
     _drop_v2_tables_and_project_raw_legacy_slot(path)
+
+    def fail_migration(connection: sqlite3.Connection) -> None:
+        connection.execute(
+            "CREATE TABLE task22_migration_must_rollback(value INTEGER)"
+        )
+        raise RuntimeError("injected task22 migration failure")
+
+    with pytest.raises(gvr.StorageMigrationError):
+        SQLiteStorage(path, migration_hooks={2: fail_migration})
+    connection = sqlite3.connect(path)
+    try:
+        assert connection.execute(
+            f"SELECT version FROM {gvr.DURABLE_STORAGE_SCHEMA_TABLE} "
+            "WHERE singleton = 1"
+        ).fetchone()[0] == 1
+        assert connection.execute(
+            "SELECT 1 FROM sqlite_master "
+            "WHERE type = 'table' AND name = 'task22_migration_must_rollback'"
+        ).fetchone() is None
+        assert connection.execute(
+            "SELECT 1 FROM sqlite_master "
+            "WHERE type = 'table' AND name = 'evidence_slot_identities'"
+        ).fetchone() is None
+    finally:
+        connection.close()
 
     migrated = SQLiteStorage(path)
     assert migrated.schema_version == gvr.DURABLE_STORAGE_SCHEMA_VERSION == 2

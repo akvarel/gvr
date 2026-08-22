@@ -27,6 +27,7 @@ from .falsification import (
     FalsificationProvenance,
     FalsificationResult,
 )
+from .evidence_providers import EvidenceSlotIdentity
 from .ledger import ClaimDefinition
 from .model import (
     INDETERMINATE,
@@ -45,6 +46,7 @@ from .session import (
 from .storage import (
     DURABLE_STORAGE_SCHEMA_TABLE,
     DURABLE_STORAGE_SCHEMA_VERSION,
+    EvidenceDependency,
     EvidenceSlotVersion,
     InvalidationEvent,
     StorageConflictError,
@@ -60,6 +62,7 @@ from .storage import (
     StoredFalsificationResult,
     StoredSession,
     StoredTruthError,
+    SessionExecutionObservation,
 )
 
 
@@ -69,6 +72,11 @@ _STORAGE_DOCUMENT_FORMAT = "gvr.storage.document.ieee754-json.v1"
 _CLAIM_DEFINITION_FORMAT = "gvr.storage.claim_definition.ieee754-json.v1"
 _CLAIM_BASIS_FORMAT = "gvr.storage.claim_basis.ieee754-json.v1"
 _INVALIDATION_EVENT_FORMAT = "gvr.storage.invalidation_event.ieee754-json.v1"
+_SLOT_IDENTITY_FORMAT = "gvr.storage.evidence_slot_identity.ieee754-json.v1"
+_BUNDLE_RECORD_FORMAT = "gvr.storage.bundle_record.ieee754-json.v1"
+_FALSIFICATION_RECORD_FORMAT = "gvr.storage.falsification_record.ieee754-json.v1"
+_SESSION_RECORD_FORMAT = "gvr.storage.session_record.ieee754-json.v1"
+_SESSION_OBSERVATION_FORMAT = "gvr.storage.session_observation.ieee754-json.v1"
 
 
 _MIGRATION_1: tuple[str, ...] = (
@@ -384,6 +392,246 @@ _MIGRATION_1: tuple[str, ...] = (
     )
     """,
     "CREATE INDEX idx_invalidation_targets_target ON invalidation_targets(target_key, event_id)",
+)
+
+
+_MIGRATION_2: tuple[str, ...] = (
+    """
+    CREATE TABLE evidence_slot_identities (
+        slot_id TEXT PRIMARY KEY,
+        identity_kind TEXT NOT NULL,
+        identity_fingerprint TEXT,
+        authoritative INTEGER NOT NULL CHECK (authoritative IN (0, 1)),
+        content_json TEXT NOT NULL,
+        canonical_json TEXT NOT NULL,
+        content_digest TEXT NOT NULL,
+        FOREIGN KEY (slot_id)
+            REFERENCES evidence_slots(slot_id)
+            ON UPDATE RESTRICT ON DELETE RESTRICT
+    )
+    """,
+    "CREATE INDEX idx_evidence_slot_identity_fingerprint ON evidence_slot_identities(identity_fingerprint)",
+    """
+    CREATE TABLE bundle_records (
+        record_fingerprint TEXT PRIMARY KEY,
+        bundle_fingerprint TEXT NOT NULL,
+        content_json TEXT NOT NULL,
+        canonical_json TEXT NOT NULL,
+        content_digest TEXT NOT NULL,
+        FOREIGN KEY (bundle_fingerprint)
+            REFERENCES bundles(fingerprint)
+            ON UPDATE RESTRICT ON DELETE RESTRICT
+    )
+    """,
+    "CREATE INDEX idx_bundle_records_domain ON bundle_records(bundle_fingerprint)",
+    """
+    CREATE TABLE bundle_record_evidence_links (
+        record_fingerprint TEXT NOT NULL,
+        evidence_id TEXT NOT NULL,
+        evidence_fingerprint TEXT NOT NULL,
+        dependency_kind TEXT NOT NULL CHECK (dependency_kind IN ('IMMUTABLE', 'SLOT')),
+        slot_id TEXT,
+        slot_version INTEGER,
+        ordinal INTEGER NOT NULL CHECK (ordinal >= 0),
+        PRIMARY KEY (record_fingerprint, evidence_id),
+        UNIQUE (record_fingerprint, ordinal),
+        CHECK (
+            (dependency_kind = 'IMMUTABLE' AND slot_id IS NULL AND slot_version IS NULL)
+            OR
+            (dependency_kind = 'SLOT' AND slot_id IS NOT NULL AND slot_version IS NOT NULL)
+        ),
+        FOREIGN KEY (record_fingerprint)
+            REFERENCES bundle_records(record_fingerprint)
+            ON UPDATE RESTRICT ON DELETE RESTRICT,
+        FOREIGN KEY (evidence_fingerprint)
+            REFERENCES evidence_artifacts(fingerprint)
+            ON UPDATE RESTRICT ON DELETE RESTRICT,
+        FOREIGN KEY (slot_id, slot_version)
+            REFERENCES evidence_slot_versions(slot_id, version)
+            ON UPDATE RESTRICT ON DELETE RESTRICT
+    )
+    """,
+    "CREATE INDEX idx_bundle_record_slot ON bundle_record_evidence_links(slot_id, slot_version)",
+    """
+    CREATE TABLE falsification_records (
+        record_fingerprint TEXT PRIMARY KEY,
+        falsification_fingerprint TEXT NOT NULL,
+        content_json TEXT NOT NULL,
+        canonical_json TEXT NOT NULL,
+        content_digest TEXT NOT NULL,
+        FOREIGN KEY (falsification_fingerprint)
+            REFERENCES falsification_results(fingerprint)
+            ON UPDATE RESTRICT ON DELETE RESTRICT
+    )
+    """,
+    "CREATE INDEX idx_falsification_records_domain ON falsification_records(falsification_fingerprint)",
+    """
+    CREATE TABLE falsification_record_evidence_links (
+        record_fingerprint TEXT NOT NULL,
+        evidence_id TEXT NOT NULL,
+        evidence_fingerprint TEXT NOT NULL,
+        dependency_kind TEXT NOT NULL CHECK (dependency_kind IN ('IMMUTABLE', 'SLOT')),
+        slot_id TEXT,
+        slot_version INTEGER,
+        ordinal INTEGER NOT NULL CHECK (ordinal >= 0),
+        PRIMARY KEY (record_fingerprint, evidence_id),
+        UNIQUE (record_fingerprint, ordinal),
+        CHECK (
+            (dependency_kind = 'IMMUTABLE' AND slot_id IS NULL AND slot_version IS NULL)
+            OR
+            (dependency_kind = 'SLOT' AND slot_id IS NOT NULL AND slot_version IS NOT NULL)
+        ),
+        FOREIGN KEY (record_fingerprint)
+            REFERENCES falsification_records(record_fingerprint)
+            ON UPDATE RESTRICT ON DELETE RESTRICT,
+        FOREIGN KEY (evidence_fingerprint)
+            REFERENCES evidence_artifacts(fingerprint)
+            ON UPDATE RESTRICT ON DELETE RESTRICT,
+        FOREIGN KEY (slot_id, slot_version)
+            REFERENCES evidence_slot_versions(slot_id, version)
+            ON UPDATE RESTRICT ON DELETE RESTRICT
+    )
+    """,
+    "CREATE INDEX idx_falsification_record_slot ON falsification_record_evidence_links(slot_id, slot_version)",
+    """
+    CREATE TABLE claim_bundle_record_links (
+        claim_id TEXT NOT NULL,
+        claim_version INTEGER NOT NULL,
+        bundle_record_fingerprint TEXT NOT NULL,
+        PRIMARY KEY (claim_id, claim_version),
+        FOREIGN KEY (claim_id, claim_version)
+            REFERENCES claim_versions(claim_id, version)
+            ON UPDATE RESTRICT ON DELETE RESTRICT,
+        FOREIGN KEY (bundle_record_fingerprint)
+            REFERENCES bundle_records(record_fingerprint)
+            ON UPDATE RESTRICT ON DELETE RESTRICT
+    )
+    """,
+    """
+    CREATE TABLE claim_evidence_dependency_links (
+        claim_id TEXT NOT NULL,
+        claim_version INTEGER NOT NULL,
+        evidence_id TEXT NOT NULL,
+        evidence_fingerprint TEXT NOT NULL,
+        dependency_kind TEXT NOT NULL CHECK (dependency_kind IN ('IMMUTABLE', 'SLOT')),
+        slot_id TEXT,
+        slot_version INTEGER,
+        ordinal INTEGER NOT NULL CHECK (ordinal >= 0),
+        PRIMARY KEY (claim_id, claim_version, evidence_id),
+        UNIQUE (claim_id, claim_version, ordinal),
+        CHECK (
+            (dependency_kind = 'IMMUTABLE' AND slot_id IS NULL AND slot_version IS NULL)
+            OR
+            (dependency_kind = 'SLOT' AND slot_id IS NOT NULL AND slot_version IS NOT NULL)
+        ),
+        FOREIGN KEY (claim_id, claim_version)
+            REFERENCES claim_versions(claim_id, version)
+            ON UPDATE RESTRICT ON DELETE RESTRICT,
+        FOREIGN KEY (evidence_fingerprint)
+            REFERENCES evidence_artifacts(fingerprint)
+            ON UPDATE RESTRICT ON DELETE RESTRICT,
+        FOREIGN KEY (slot_id, slot_version)
+            REFERENCES evidence_slot_versions(slot_id, version)
+            ON UPDATE RESTRICT ON DELETE RESTRICT
+    )
+    """,
+    "CREATE INDEX idx_claim_evidence_dependency_slot ON claim_evidence_dependency_links(slot_id, slot_version)",
+    """
+    CREATE TABLE claim_falsification_record_links (
+        claim_id TEXT NOT NULL,
+        claim_version INTEGER NOT NULL,
+        falsification_fingerprint TEXT NOT NULL,
+        falsification_record_fingerprint TEXT NOT NULL,
+        ordinal INTEGER NOT NULL CHECK (ordinal >= 0),
+        PRIMARY KEY (claim_id, claim_version, falsification_record_fingerprint),
+        UNIQUE (claim_id, claim_version, ordinal),
+        FOREIGN KEY (claim_id, claim_version)
+            REFERENCES claim_versions(claim_id, version)
+            ON UPDATE RESTRICT ON DELETE RESTRICT,
+        FOREIGN KEY (falsification_record_fingerprint)
+            REFERENCES falsification_records(record_fingerprint)
+            ON UPDATE RESTRICT ON DELETE RESTRICT
+    )
+    """,
+    """
+    CREATE TABLE session_records (
+        record_fingerprint TEXT PRIMARY KEY,
+        session_fingerprint TEXT NOT NULL,
+        content_json TEXT NOT NULL,
+        canonical_json TEXT NOT NULL,
+        content_digest TEXT NOT NULL,
+        FOREIGN KEY (session_fingerprint)
+            REFERENCES sessions(fingerprint)
+            ON UPDATE RESTRICT ON DELETE RESTRICT
+    )
+    """,
+    "CREATE INDEX idx_session_records_domain ON session_records(session_fingerprint)",
+    """
+    CREATE TABLE session_record_claim_links (
+        record_fingerprint TEXT NOT NULL,
+        claim_id TEXT NOT NULL,
+        claim_version INTEGER NOT NULL,
+        ordinal INTEGER NOT NULL CHECK (ordinal >= 0),
+        PRIMARY KEY (record_fingerprint, claim_id),
+        UNIQUE (record_fingerprint, ordinal),
+        FOREIGN KEY (record_fingerprint)
+            REFERENCES session_records(record_fingerprint)
+            ON UPDATE RESTRICT ON DELETE RESTRICT,
+        FOREIGN KEY (claim_id, claim_version)
+            REFERENCES claim_versions(claim_id, version)
+            ON UPDATE RESTRICT ON DELETE RESTRICT
+    )
+    """,
+    """
+    CREATE TABLE session_record_bundle_links (
+        record_fingerprint TEXT NOT NULL,
+        bundle_fingerprint TEXT NOT NULL,
+        bundle_record_fingerprint TEXT NOT NULL,
+        ordinal INTEGER NOT NULL CHECK (ordinal >= 0),
+        PRIMARY KEY (record_fingerprint, bundle_record_fingerprint),
+        UNIQUE (record_fingerprint, ordinal),
+        FOREIGN KEY (record_fingerprint)
+            REFERENCES session_records(record_fingerprint)
+            ON UPDATE RESTRICT ON DELETE RESTRICT,
+        FOREIGN KEY (bundle_record_fingerprint)
+            REFERENCES bundle_records(record_fingerprint)
+            ON UPDATE RESTRICT ON DELETE RESTRICT
+    )
+    """,
+    """
+    CREATE TABLE session_record_falsification_links (
+        record_fingerprint TEXT NOT NULL,
+        falsification_fingerprint TEXT NOT NULL,
+        falsification_record_fingerprint TEXT NOT NULL,
+        ordinal INTEGER NOT NULL CHECK (ordinal >= 0),
+        PRIMARY KEY (record_fingerprint, falsification_record_fingerprint),
+        UNIQUE (record_fingerprint, ordinal),
+        FOREIGN KEY (record_fingerprint)
+            REFERENCES session_records(record_fingerprint)
+            ON UPDATE RESTRICT ON DELETE RESTRICT,
+        FOREIGN KEY (falsification_record_fingerprint)
+            REFERENCES falsification_records(record_fingerprint)
+            ON UPDATE RESTRICT ON DELETE RESTRICT
+    )
+    """,
+    """
+    CREATE TABLE session_execution_observations (
+        observation_fingerprint TEXT PRIMARY KEY,
+        session_fingerprint TEXT NOT NULL,
+        session_record_fingerprint TEXT NOT NULL,
+        plan_fingerprint TEXT,
+        execution_fingerprint TEXT,
+        request_ids_json TEXT NOT NULL,
+        correlation_id TEXT,
+        content_json TEXT NOT NULL,
+        canonical_json TEXT NOT NULL,
+        content_digest TEXT NOT NULL,
+        FOREIGN KEY (session_record_fingerprint)
+            REFERENCES session_records(record_fingerprint)
+            ON UPDATE RESTRICT ON DELETE RESTRICT
+    )
+    """,
+    "CREATE INDEX idx_session_observations_record ON session_execution_observations(session_record_fingerprint)",
 )
 
 
@@ -720,6 +968,32 @@ def _verify_formatted_document_fingerprint(
         raise StorageIntegrityError(f"{identity} semantic fingerprint is corrupt")
 
 
+def _migrate_v2_data(connection: sqlite3.Connection) -> None:
+    """Fail closed for v1 slots whose creation semantics are unknowable."""
+
+    for row in connection.execute(
+        "SELECT slot_id FROM evidence_slots ORDER BY slot_id"
+    ).fetchall():
+        document = {
+            "schema_version": 1,
+            "kind": "gvr.legacy_ambiguous_evidence_slot",
+            "legacy_slot_id": row["slot_id"],
+        }
+        content, canonical, digest = _parts(
+            document,
+            fingerprint_format=_SLOT_IDENTITY_FORMAT,
+        )
+        connection.execute(
+            """
+            INSERT INTO evidence_slot_identities(
+                slot_id, identity_kind, identity_fingerprint, authoritative,
+                content_json, canonical_json, content_digest
+            ) VALUES (?, 'LEGACY_AMBIGUOUS', NULL, 0, ?, ?, ?)
+            """,
+            (row["slot_id"], content, canonical, digest),
+        )
+
+
 class SQLiteStorage:
     """SQLite stdlib reference adapter for the generic durable GVR stores."""
 
@@ -811,11 +1085,16 @@ class SQLiteStorage:
                     f"{DURABLE_STORAGE_SCHEMA_VERSION}"
                 )
             for version in range(current + 1, DURABLE_STORAGE_SCHEMA_VERSION + 1):
-                statements = _MIGRATION_1 if version == 1 else ()
+                statements = {
+                    1: _MIGRATION_1,
+                    2: _MIGRATION_2,
+                }.get(version, ())
                 if not statements:
                     raise StorageMigrationError(f"missing migration for schema version {version}")
                 for statement in statements:
                     connection.execute(statement)
+                if version == 2:
+                    _migrate_v2_data(connection)
                 hook = self._migration_hooks.get(version)
                 if hook is not None:
                     hook(connection)
@@ -884,8 +1163,11 @@ class SQLiteStorage:
     def put_bundle(self, bundle: VerificationBundle, **kwargs: Any) -> StoredBundle:
         return self._write("put_bundle", bundle, **kwargs)
 
-    def get_bundle(self, fingerprint: str) -> StoredBundle:
-        return self._read("get_bundle", fingerprint)
+    def get_bundle(self, fingerprint: str, **kwargs: Any) -> StoredBundle:
+        return self._read("get_bundle", fingerprint, **kwargs)
+
+    def bundle_history(self, fingerprint: str) -> tuple[StoredBundle, ...]:
+        return self._read("bundle_history", fingerprint)
 
     def define_claim(self, definition: ClaimDefinition, **kwargs: Any) -> StoredClaimDefinition:
         return self._write("define_claim", definition, **kwargs)
@@ -905,14 +1187,33 @@ class SQLiteStorage:
     def put_falsification_result(self, result: FalsificationResult, **kwargs: Any) -> StoredFalsificationResult:
         return self._write("put_falsification_result", result, **kwargs)
 
-    def get_falsification_result(self, fingerprint: str) -> StoredFalsificationResult:
-        return self._read("get_falsification_result", fingerprint)
+    def get_falsification_result(
+        self,
+        fingerprint: str,
+        **kwargs: Any,
+    ) -> StoredFalsificationResult:
+        return self._read("get_falsification_result", fingerprint, **kwargs)
+
+    def falsification_history(
+        self,
+        fingerprint: str,
+    ) -> tuple[StoredFalsificationResult, ...]:
+        return self._read("falsification_history", fingerprint)
 
     def put_session(self, session: VerificationSession, **kwargs: Any) -> StoredSession:
         return self._write("put_session", session, **kwargs)
 
-    def get_session(self, fingerprint: str) -> StoredSession:
-        return self._read("get_session", fingerprint)
+    def get_session(self, fingerprint: str, **kwargs: Any) -> StoredSession:
+        return self._read("get_session", fingerprint, **kwargs)
+
+    def session_record_history(self, fingerprint: str) -> tuple[StoredSession, ...]:
+        return self._read("session_record_history", fingerprint)
+
+    def session_execution_observations(
+        self,
+        fingerprint: str,
+    ) -> tuple[SessionExecutionObservation, ...]:
+        return self._read("session_execution_observations", fingerprint)
 
     def session_history(self) -> tuple[StoredSession, ...]:
         return self._read("session_history")
@@ -1160,11 +1461,173 @@ class SQLiteUnitOfWork:
             ))
         return tuple(events)
 
+    def _slot_identity_document(
+        self,
+        slot_id: str,
+        slot_identity: EvidenceSlotIdentity | None,
+    ) -> tuple[str, str | None, dict[str, Any]]:
+        if slot_identity is None:
+            return (
+                "CALLER_OWNED",
+                None,
+                {
+                    "schema_version": 1,
+                    "kind": "gvr.caller_owned_evidence_slot",
+                    "slot_id": slot_id,
+                },
+            )
+        if type(slot_identity) is not EvidenceSlotIdentity:
+            raise StorageIntegrityError(
+                "slot_identity must be an exact EvidenceSlotIdentity"
+            )
+        if slot_id != slot_identity.slot_id:
+            raise StorageIntegrityError(
+                "semantic slot ID does not match its canonical identity"
+            )
+        return "SEMANTIC", slot_identity.fingerprint, slot_identity.to_dict()
+
+    def _read_slot_identity_row(self, slot_id: str) -> sqlite3.Row:
+        row = self._conn().execute(
+            "SELECT * FROM evidence_slot_identities WHERE slot_id = ?",
+            (slot_id,),
+        ).fetchone()
+        if row is None:
+            raise StorageIntegrityError(
+                f"evidence slot {slot_id} is missing identity metadata"
+            )
+        document = _verified_document(
+            content_json=row["content_json"],
+            canonical_json_value=row["canonical_json"],
+            content_digest=row["content_digest"],
+            fingerprint_format=_SLOT_IDENTITY_FORMAT,
+            identity=f"evidence slot identity {slot_id}",
+        )
+        if row["identity_kind"] == "SEMANTIC":
+            if (
+                document.get("slot_id") != slot_id
+                or document.get("fingerprint") != row["identity_fingerprint"]
+            ):
+                raise StorageIntegrityError(
+                    "semantic evidence slot identity metadata is corrupt"
+                )
+        elif row["identity_kind"] == "CALLER_OWNED":
+            if document.get("slot_id") != slot_id:
+                raise StorageIntegrityError(
+                    "caller-owned evidence slot identity metadata is corrupt"
+                )
+        elif row["identity_kind"] == "LEGACY_AMBIGUOUS":
+            if document.get("legacy_slot_id") != slot_id:
+                raise StorageIntegrityError(
+                    "legacy evidence slot identity metadata is corrupt"
+                )
+        else:
+            raise StorageIntegrityError("unknown evidence slot identity kind")
+        return row
+
+    def _ensure_slot_identity(
+        self,
+        slot_id: str,
+        slot_identity: EvidenceSlotIdentity | None,
+    ) -> None:
+        identity_kind, identity_fingerprint, document = self._slot_identity_document(
+            slot_id,
+            slot_identity,
+        )
+        content, canonical, digest = _parts(
+            document,
+            fingerprint_format=_SLOT_IDENTITY_FORMAT,
+        )
+        existing = self._conn().execute(
+            "SELECT * FROM evidence_slot_identities WHERE slot_id = ?",
+            (slot_id,),
+        ).fetchone()
+        if existing is None:
+            self._conn().execute(
+                """
+                INSERT INTO evidence_slot_identities(
+                    slot_id, identity_kind, identity_fingerprint,
+                    authoritative, content_json, canonical_json, content_digest
+                ) VALUES (?, ?, ?, 1, ?, ?, ?)
+                """,
+                (
+                    slot_id,
+                    identity_kind,
+                    identity_fingerprint,
+                    content,
+                    canonical,
+                    digest,
+                ),
+            )
+            return
+        self._read_slot_identity_row(slot_id)
+        if existing["identity_kind"] == "LEGACY_AMBIGUOUS":
+            if slot_identity is None or slot_id != slot_identity.slot_id:
+                raise StorageConflictError(
+                    "ambiguous legacy evidence slot cannot be adopted implicitly"
+                )
+            self._conn().execute(
+                """
+                UPDATE evidence_slot_identities
+                SET identity_kind = ?, identity_fingerprint = ?, authoritative = 1,
+                    content_json = ?, canonical_json = ?, content_digest = ?
+                WHERE slot_id = ?
+                """,
+                (
+                    identity_kind,
+                    identity_fingerprint,
+                    content,
+                    canonical,
+                    digest,
+                    slot_id,
+                ),
+            )
+            return
+        if (
+            existing["identity_kind"] != identity_kind
+            or existing["identity_fingerprint"] != identity_fingerprint
+            or existing["content_json"] != content
+            or existing["canonical_json"] != canonical
+            or existing["content_digest"] != digest
+            or existing["authoritative"] != 1
+        ):
+            raise StorageConflictError(
+                "evidence slot identity conflicts with existing semantic scope"
+            )
+
+    def _semantic_slot_identity(
+        self,
+        slot_id: str,
+    ) -> EvidenceSlotIdentity | None:
+        row = self._read_slot_identity_row(slot_id)
+        if row["identity_kind"] != "SEMANTIC":
+            return None
+        document = json.loads(row["content_json"])
+        try:
+            identity = EvidenceSlotIdentity(
+                provider_id=document["provider_id"],
+                evidence_id=document["evidence_id"],
+                source_identity=_decode_value(document["source_identity"]),
+                request_identity=_decode_value(document["request_identity"]),
+                schema_version=document["schema_version"],
+                kind=document["kind"],
+                fingerprint_format=document["fingerprint_format"],
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise StorageIntegrityError(
+                "semantic evidence slot identity cannot be reconstructed"
+            ) from exc
+        if identity.fingerprint != row["identity_fingerprint"]:
+            raise StorageIntegrityError(
+                "semantic evidence slot identity fingerprint is corrupt"
+            )
+        return identity
+
     def put_evidence(
         self,
         evidence: Evidence,
         *,
         slot_id: str | None = None,
+        slot_identity: EvidenceSlotIdentity | None = None,
         provenance: Mapping[str, Any] | None = None,
         source_snapshot: Mapping[str, Any] | None = None,
         bounds: Mapping[str, Any] | None = None,
@@ -1172,6 +1635,10 @@ class SQLiteUnitOfWork:
         expected_fingerprint: str | None = None,
     ) -> StoredEvidence:
         with self._logical_write():
+            if slot_id is not None and slot_identity is not None:
+                raise StorageIntegrityError(
+                    "slot_id and slot_identity are mutually exclusive"
+                )
             evidence_document = _evidence_document(evidence)
             document = {
                 "schema_version": 1,
@@ -1225,13 +1692,21 @@ class SQLiteUnitOfWork:
 
             selected_slot_id: str | None = None
             selected_version: int | None = None
-            if slot_id is not None:
-                selected_slot_id = _identifier(slot_id, name="slot_id")
+            if slot_id is not None or slot_identity is not None:
+                selected_slot_id = _identifier(
+                    (
+                        slot_identity.slot_id
+                        if slot_identity is not None
+                        else slot_id
+                    ),
+                    name="slot_id",
+                )
                 current = self._conn().execute(
                     "SELECT current_version, current_evidence_fingerprint FROM evidence_slots WHERE slot_id = ?",
                     (selected_slot_id,),
                 ).fetchone()
                 if current is not None:
+                    self._ensure_slot_identity(selected_slot_id, slot_identity)
                     current_slot = self._slot_version(
                         selected_slot_id,
                         current["current_version"],
@@ -1264,6 +1739,7 @@ class SQLiteUnitOfWork:
                             """,
                             (selected_slot_id, selected_version, fingerprint),
                         )
+                        self._ensure_slot_identity(selected_slot_id, slot_identity)
                     else:
                         self._conn().execute(
                             """
@@ -1303,6 +1779,7 @@ class SQLiteUnitOfWork:
                 coverage=stored.coverage,
                 slot_id=selected_slot_id,
                 slot_version=selected_version,
+                slot_identity=slot_identity,
             )
 
     def _read_evidence_row(self, row: sqlite3.Row) -> StoredEvidence:
@@ -1346,7 +1823,8 @@ class SQLiteUnitOfWork:
         return self._read_evidence_row(row)
 
     def _slot_from_row(self, row: sqlite3.Row, *, current_version: int | None = None) -> EvidenceSlotVersion:
-        is_current = (
+        identity = self._read_slot_identity_row(row["slot_id"])
+        pointer_current = (
             current_version == row["version"]
             if current_version is not None
             else self._conn().execute(
@@ -1354,12 +1832,15 @@ class SQLiteUnitOfWork:
                 (row["slot_id"],),
             ).fetchone()[0] == row["version"]
         )
+        authoritative = identity["authoritative"] == 1
         return EvidenceSlotVersion(
             slot_id=row["slot_id"],
             version=row["version"],
             evidence_fingerprint=row["evidence_fingerprint"],
             previous_version=row["previous_version"],
-            current=is_current,
+            current=pointer_current and authoritative,
+            identity_fingerprint=identity["identity_fingerprint"],
+            authoritative=authoritative,
         )
 
     def get_slot(self, slot_id: str) -> EvidenceSlotVersion | None:
@@ -1399,6 +1880,7 @@ class SQLiteUnitOfWork:
             coverage=stored.coverage,
             slot_id=slot.slot_id,
             slot_version=slot.version,
+            slot_identity=self._semantic_slot_identity(slot.slot_id),
         )
 
     def slot_history(self, slot_id: str) -> tuple[EvidenceSlotVersion, ...]:
@@ -1465,125 +1947,56 @@ class SQLiteUnitOfWork:
         self.get_evidence(row["evidence_fingerprint"])
         return self._slot_from_row(row, current_version=current["current_version"])
 
-    def put_bundle(
+    def _dependency_document(
         self,
-        bundle: VerificationBundle,
-        *,
-        evidence_slots: Mapping[str, EvidenceSlotVersion] | None = None,
-    ) -> StoredBundle:
-        with self._logical_write():
-            try:
-                validate_verification_bundle(bundle)
-            except BundleValidationError as exc:
-                raise StorageIntegrityError(str(exc)) from exc
-            supplied = None if evidence_slots is None else dict(evidence_slots)
-            if supplied is not None and set(supplied) != {item.id for item in bundle.evidence}:
+        dependency: EvidenceDependency,
+    ) -> dict[str, Any]:
+        return {
+            "evidence_id": dependency.evidence_id,
+            "evidence_fingerprint": dependency.evidence_fingerprint,
+            "dependency_kind": "SLOT" if dependency.replaceable else "IMMUTABLE",
+            "slot_id": None if dependency.slot is None else dependency.slot.slot_id,
+            "slot_version": (
+                None if dependency.slot is None else dependency.slot.version
+            ),
+        }
+
+    def _dependency_from_record_link(
+        self,
+        row: sqlite3.Row,
+    ) -> EvidenceDependency:
+        artifact = self.get_evidence(row["evidence_fingerprint"])
+        if artifact.evidence.id != row["evidence_id"]:
+            raise StorageIntegrityError(
+                "stored evidence dependency ID conflicts with its artifact"
+            )
+        if row["dependency_kind"] == "IMMUTABLE":
+            if row["slot_id"] is not None or row["slot_version"] is not None:
                 raise StorageIntegrityError(
-                    "bundle evidence slot mapping must match exact bundle evidence IDs"
+                    "immutable evidence dependency contains slot coordinates"
                 )
-            existing = self._conn().execute(
-                "SELECT 1 FROM bundles WHERE fingerprint = ?",
-                (bundle.fingerprint,),
-            ).fetchone()
-            if existing is not None and supplied is None:
-                stored = self.get_bundle(bundle.fingerprint)
-                if stored.bundle != bundle:
-                    raise StorageConflictError(
-                        "immutable bundle fingerprint has conflicting canonical content"
-                    )
-                return stored
-            resolved: list[tuple[Evidence, EvidenceSlotVersion]] = []
-            for evidence in bundle.evidence:
-                slot: EvidenceSlotVersion | None
-                if supplied is None:
-                    slot = self.get_slot(evidence.id)
-                    if slot is not None:
-                        artifact = self.get_evidence(slot.evidence_fingerprint)
-                        if artifact.evidence != evidence:
-                            slot = None
-                    if slot is None:
-                        written = self.put_evidence(evidence, slot_id=evidence.id)
-                        assert written.slot_version is not None
-                        slot = self._slot_version(evidence.id, written.slot_version)
-                else:
-                    slot = supplied[evidence.id]
-                    if not isinstance(slot, EvidenceSlotVersion):
-                        raise StorageIntegrityError(
-                            "bundle evidence slots must contain EvidenceSlotVersion records"
-                        )
-                    slot = self._slot_version(slot.slot_id, slot.version)
-                artifact = self.get_evidence(slot.evidence_fingerprint)
-                if artifact.evidence != evidence:
-                    raise StorageIntegrityError(
-                        f"bundle evidence {evidence.id} does not match exact slot artifact"
-                    )
-                resolved.append((evidence, slot))
+            return EvidenceDependency(
+                row["evidence_id"],
+                row["evidence_fingerprint"],
+            )
+        if row["dependency_kind"] != "SLOT":
+            raise StorageIntegrityError("unknown evidence dependency kind")
+        if row["slot_id"] is None or row["slot_version"] is None:
+            raise StorageIntegrityError(
+                "replaceable evidence dependency is missing slot coordinates"
+            )
+        slot = self._slot_version(row["slot_id"], row["slot_version"])
+        if slot.evidence_fingerprint != row["evidence_fingerprint"]:
+            raise StorageIntegrityError(
+                "evidence dependency slot conflicts with artifact fingerprint"
+            )
+        return EvidenceDependency(
+            row["evidence_id"],
+            row["evidence_fingerprint"],
+            slot,
+        )
 
-            document = bundle.to_dict()
-            content, canonical, digest = _parts(document)
-            existing = self._conn().execute(
-                "SELECT * FROM bundles WHERE fingerprint = ?",
-                (bundle.fingerprint,),
-            ).fetchone()
-            if existing is None:
-                self._conn().execute(
-                    """
-                    INSERT INTO bundles(fingerprint, content_json, canonical_json, content_digest)
-                    VALUES (?, ?, ?, ?)
-                    """,
-                    (bundle.fingerprint, content, canonical, digest),
-                )
-                for ordinal, (evidence, slot) in enumerate(resolved):
-                    self._conn().execute(
-                        """
-                        INSERT INTO bundle_evidence_links(
-                            bundle_fingerprint, evidence_id, evidence_fingerprint,
-                            slot_id, slot_version, ordinal
-                        ) VALUES (?, ?, ?, ?, ?, ?)
-                        """,
-                        (
-                            bundle.fingerprint,
-                            evidence.id,
-                            slot.evidence_fingerprint,
-                            slot.slot_id,
-                            slot.version,
-                            ordinal,
-                        ),
-                    )
-                    self._put_dependency(
-                        _object_key("bundle", bundle.fingerprint),
-                        slot.object_key,
-                        "evidence_slot_version",
-                    )
-                for ordinal, claim_id in enumerate(bundle.claim_dependency_ids):
-                    self._conn().execute(
-                        """
-                        INSERT INTO bundle_claim_links(
-                            bundle_fingerprint, claim_dependency_id, ordinal
-                        ) VALUES (?, ?, ?)
-                        """,
-                        (bundle.fingerprint, claim_id, ordinal),
-                    )
-            else:
-                stored = self.get_bundle(bundle.fingerprint)
-                if stored.bundle != bundle or stored.evidence_slots != tuple(slot for _, slot in resolved):
-                    raise StorageConflictError(
-                        "immutable bundle fingerprint has conflicting content or evidence links"
-                    )
-            return self.get_bundle(bundle.fingerprint)
-
-    def _bundle_current(self, fingerprint: str) -> bool:
-        key = _object_key("bundle", fingerprint)
-        if self._is_invalidated(key):
-            return False
-        rows = self._conn().execute(
-            "SELECT slot_id, slot_version FROM bundle_evidence_links WHERE bundle_fingerprint = ?",
-            (fingerprint,),
-        ).fetchall()
-        return all(self._slot_version(row["slot_id"], row["slot_version"]).current for row in rows)
-
-    def get_bundle(self, fingerprint: str) -> StoredBundle:
-        fingerprint = _sha256(fingerprint, name="bundle fingerprint")
+    def _read_bundle_domain(self, fingerprint: str) -> VerificationBundle:
         row = self._conn().execute(
             "SELECT * FROM bundles WHERE fingerprint = ?",
             (fingerprint,),
@@ -1598,28 +2011,9 @@ class SQLiteUnitOfWork:
         )
         bundle = _bundle_from_document(document)
         if bundle.fingerprint != fingerprint:
-            raise StorageIntegrityError("bundle key does not match bundle fingerprint")
-        links = self._conn().execute(
-            """
-            SELECT * FROM bundle_evidence_links
-            WHERE bundle_fingerprint = ?
-            ORDER BY ordinal
-            """,
-            (fingerprint,),
-        ).fetchall()
-        if len(links) != len(bundle.evidence):
-            raise StorageIntegrityError("bundle evidence links are incomplete")
-        slots: list[EvidenceSlotVersion] = []
-        for evidence, link in zip(bundle.evidence, links):
-            if link["evidence_id"] != evidence.id:
-                raise StorageIntegrityError("bundle evidence link order or identity is corrupt")
-            slot = self._slot_version(link["slot_id"], link["slot_version"])
-            if slot.evidence_fingerprint != link["evidence_fingerprint"]:
-                raise StorageIntegrityError("bundle evidence link fingerprint is corrupt")
-            artifact = self.get_evidence(link["evidence_fingerprint"])
-            if artifact.evidence != evidence:
-                raise StorageIntegrityError("bundle evidence artifact content is corrupt")
-            slots.append(slot)
+            raise StorageIntegrityError(
+                "bundle key does not match bundle fingerprint"
+            )
         claim_links = tuple(
             item[0]
             for item in self._conn().execute(
@@ -1632,12 +2026,452 @@ class SQLiteUnitOfWork:
         )
         if claim_links != bundle.claim_dependency_ids:
             raise StorageIntegrityError("bundle claim dependency links are corrupt")
+        return bundle
+
+    def _legacy_bundle_projection(
+        self,
+        fingerprint: str,
+        dependencies: Sequence[EvidenceDependency],
+        *,
+        create: bool,
+    ) -> bool:
+        rows = self._conn().execute(
+            """
+            SELECT evidence_id, evidence_fingerprint, slot_id,
+                   slot_version, ordinal
+            FROM bundle_evidence_links
+            WHERE bundle_fingerprint = ? ORDER BY ordinal
+            """,
+            (fingerprint,),
+        ).fetchall()
+        if not all(item.replaceable for item in dependencies):
+            return False
+        expected = tuple(
+            (
+                item.evidence_id,
+                item.evidence_fingerprint,
+                item.slot.slot_id,
+                item.slot.version,
+                ordinal,
+            )
+            for ordinal, item in enumerate(dependencies)
+        )
+        observed = tuple(
+            (
+                row["evidence_id"],
+                row["evidence_fingerprint"],
+                row["slot_id"],
+                row["slot_version"],
+                row["ordinal"],
+            )
+            for row in rows
+        )
+        if rows or not dependencies:
+            return observed == expected
+        if not create:
+            return False
+        for ordinal, item in enumerate(dependencies):
+            assert item.slot is not None
+            self._conn().execute(
+                """
+                INSERT INTO bundle_evidence_links(
+                    bundle_fingerprint, evidence_id, evidence_fingerprint,
+                    slot_id, slot_version, ordinal
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    fingerprint,
+                    item.evidence_id,
+                    item.evidence_fingerprint,
+                    item.slot.slot_id,
+                    item.slot.version,
+                    ordinal,
+                ),
+            )
+        return True
+
+    def put_bundle(
+        self,
+        bundle: VerificationBundle,
+        *,
+        evidence_slots: Mapping[str, EvidenceSlotVersion] | None = None,
+        evidence_artifacts: Mapping[str, str] | None = None,
+    ) -> StoredBundle:
+        with self._logical_write():
+            try:
+                validate_verification_bundle(bundle)
+            except BundleValidationError as exc:
+                raise StorageIntegrityError(str(exc)) from exc
+            supplied_slots = None if evidence_slots is None else dict(evidence_slots)
+            supplied_artifacts = (
+                None if evidence_artifacts is None else dict(evidence_artifacts)
+            )
+            record_rows = self._conn().execute(
+                "SELECT record_fingerprint FROM bundle_records WHERE bundle_fingerprint = ?",
+                (bundle.fingerprint,),
+            ).fetchall()
+            if (
+                supplied_slots is None
+                and supplied_artifacts is None
+                and record_rows
+            ):
+                stored = self.get_bundle(bundle.fingerprint)
+                if stored.bundle != bundle:
+                    raise StorageConflictError(
+                        "immutable bundle fingerprint has conflicting canonical content"
+                    )
+                return stored
+
+            slot_map = {} if supplied_slots is None else supplied_slots
+            artifact_map = {} if supplied_artifacts is None else supplied_artifacts
+            if set(slot_map) & set(artifact_map):
+                raise StorageIntegrityError(
+                    "bundle evidence cannot be both immutable and replaceable"
+                )
+            expected_ids = {item.id for item in bundle.evidence}
+            if (supplied_slots is not None or supplied_artifacts is not None) and (
+                set(slot_map) | set(artifact_map)
+            ) != expected_ids:
+                raise StorageIntegrityError(
+                    "bundle evidence dependency mappings must match exact evidence IDs"
+                )
+
+            dependencies: list[EvidenceDependency] = []
+            for evidence in bundle.evidence:
+                if supplied_slots is None and supplied_artifacts is None:
+                    written = self.put_evidence(evidence)
+                    dependency = EvidenceDependency(
+                        evidence.id,
+                        written.fingerprint,
+                    )
+                elif evidence.id in slot_map:
+                    slot = slot_map[evidence.id]
+                    if not isinstance(slot, EvidenceSlotVersion):
+                        raise StorageIntegrityError(
+                            "bundle evidence slots must contain EvidenceSlotVersion records"
+                        )
+                    slot = self._slot_version(slot.slot_id, slot.version)
+                    artifact = self.get_evidence(slot.evidence_fingerprint)
+                    if artifact.evidence != evidence:
+                        raise StorageIntegrityError(
+                            f"bundle evidence {evidence.id} does not match exact slot artifact"
+                        )
+                    dependency = EvidenceDependency(
+                        evidence.id,
+                        slot.evidence_fingerprint,
+                        slot,
+                    )
+                else:
+                    fingerprint = _sha256(
+                        artifact_map[evidence.id],
+                        name="bundle evidence artifact fingerprint",
+                    )
+                    artifact = self.get_evidence(fingerprint)
+                    if artifact.evidence != evidence:
+                        raise StorageIntegrityError(
+                            f"bundle evidence {evidence.id} does not match exact immutable artifact"
+                        )
+                    dependency = EvidenceDependency(evidence.id, fingerprint)
+                dependencies.append(dependency)
+
+            document = bundle.to_dict()
+            content, canonical, digest = _parts(document)
+            existing = self._conn().execute(
+                "SELECT * FROM bundles WHERE fingerprint = ?",
+                (bundle.fingerprint,),
+            ).fetchone()
+            if existing is None:
+                self._conn().execute(
+                    """
+                    INSERT INTO bundles(
+                        fingerprint, content_json, canonical_json, content_digest
+                    ) VALUES (?, ?, ?, ?)
+                    """,
+                    (bundle.fingerprint, content, canonical, digest),
+                )
+                for ordinal, claim_id in enumerate(bundle.claim_dependency_ids):
+                    self._conn().execute(
+                        """
+                        INSERT INTO bundle_claim_links(
+                            bundle_fingerprint, claim_dependency_id, ordinal
+                        ) VALUES (?, ?, ?)
+                        """,
+                        (bundle.fingerprint, claim_id, ordinal),
+                    )
+            elif self._read_bundle_domain(bundle.fingerprint) != bundle:
+                raise StorageConflictError(
+                    "immutable bundle fingerprint has conflicting canonical content"
+                )
+
+            legacy_projection = self._legacy_bundle_projection(
+                bundle.fingerprint,
+                dependencies,
+                create=True,
+            )
+            record_document = {
+                "schema_version": 2,
+                "kind": "gvr.stored_bundle_record",
+                "bundle_fingerprint": bundle.fingerprint,
+                "evidence_dependencies": tuple(
+                    self._dependency_document(item) for item in dependencies
+                ),
+                "legacy_projection": legacy_projection,
+            }
+            record_content, record_canonical, record_fingerprint = _parts(
+                record_document,
+                fingerprint_format=_BUNDLE_RECORD_FORMAT,
+            )
+            record = self._conn().execute(
+                "SELECT * FROM bundle_records WHERE record_fingerprint = ?",
+                (record_fingerprint,),
+            ).fetchone()
+            if record is None:
+                self._conn().execute(
+                    """
+                    INSERT INTO bundle_records(
+                        record_fingerprint, bundle_fingerprint, content_json,
+                        canonical_json, content_digest
+                    ) VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (
+                        record_fingerprint,
+                        bundle.fingerprint,
+                        record_content,
+                        record_canonical,
+                        record_fingerprint,
+                    ),
+                )
+                record_key = _object_key("bundle-record", record_fingerprint)
+                for ordinal, dependency in enumerate(dependencies):
+                    self._conn().execute(
+                        """
+                        INSERT INTO bundle_record_evidence_links(
+                            record_fingerprint, evidence_id, evidence_fingerprint,
+                            dependency_kind, slot_id, slot_version, ordinal
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            record_fingerprint,
+                            dependency.evidence_id,
+                            dependency.evidence_fingerprint,
+                            "SLOT" if dependency.replaceable else "IMMUTABLE",
+                            None if dependency.slot is None else dependency.slot.slot_id,
+                            None if dependency.slot is None else dependency.slot.version,
+                            ordinal,
+                        ),
+                    )
+                    self._put_dependency(
+                        record_key,
+                        dependency.object_key,
+                        (
+                            "evidence_slot_version"
+                            if dependency.replaceable
+                            else "immutable_evidence"
+                        ),
+                    )
+            else:
+                verified = _verified_document(
+                    content_json=record["content_json"],
+                    canonical_json_value=record["canonical_json"],
+                    content_digest=record["content_digest"],
+                    fingerprint_format=_BUNDLE_RECORD_FORMAT,
+                    identity=f"bundle record {record_fingerprint}",
+                )
+                if verified != _json_value(record_document):
+                    raise StorageConflictError(
+                        "bundle record identity has conflicting dependencies"
+                    )
+            return self.get_bundle(
+                bundle.fingerprint,
+                record_fingerprint=record_fingerprint,
+            )
+
+    def _bundle_record_current(self, record_fingerprint: str) -> bool:
+        if self._is_invalidated(
+            _object_key("bundle-record", record_fingerprint)
+        ):
+            return False
+        links = self._conn().execute(
+            """
+            SELECT * FROM bundle_record_evidence_links
+            WHERE record_fingerprint = ? ORDER BY ordinal
+            """,
+            (record_fingerprint,),
+        ).fetchall()
+        return all(
+            self._dependency_from_record_link(item).current for item in links
+        )
+
+    def _read_bundle_record(
+        self,
+        bundle: VerificationBundle,
+        row: sqlite3.Row,
+    ) -> StoredBundle:
+        document = _verified_document(
+            content_json=row["content_json"],
+            canonical_json_value=row["canonical_json"],
+            content_digest=row["content_digest"],
+            fingerprint_format=_BUNDLE_RECORD_FORMAT,
+            identity=f"bundle record {row['record_fingerprint']}",
+        )
+        if row["content_digest"] != row["record_fingerprint"]:
+            raise StorageIntegrityError("bundle record key is corrupt")
+        if document.get("bundle_fingerprint") != bundle.fingerprint:
+            raise StorageIntegrityError("bundle record domain reference is corrupt")
+        links = self._conn().execute(
+            """
+            SELECT * FROM bundle_record_evidence_links
+            WHERE record_fingerprint = ? ORDER BY ordinal
+            """,
+            (row["record_fingerprint"],),
+        ).fetchall()
+        if len(links) != len(bundle.evidence):
+            raise StorageIntegrityError("bundle record evidence links are incomplete")
+        dependencies = tuple(
+            self._dependency_from_record_link(item) for item in links
+        )
+        if tuple(item.evidence_id for item in dependencies) != tuple(
+            item.id for item in bundle.evidence
+        ):
+            raise StorageIntegrityError(
+                "bundle record evidence link order or identity is corrupt"
+            )
+        if tuple(self._dependency_document(item) for item in dependencies) != tuple(
+            document.get("evidence_dependencies", ())
+        ):
+            raise StorageIntegrityError(
+                "bundle record dependency document conflicts with exact links"
+            )
+        for evidence, dependency in zip(bundle.evidence, dependencies):
+            if self.get_evidence(dependency.evidence_fingerprint).evidence != evidence:
+                raise StorageIntegrityError(
+                    "bundle record evidence artifact content is corrupt"
+                )
+        if document.get("legacy_projection"):
+            if not self._legacy_bundle_projection(
+                bundle.fingerprint,
+                dependencies,
+                create=False,
+            ):
+                raise StorageIntegrityError(
+                    "bundle legacy evidence projection is corrupt"
+                )
+        return StoredBundle(
+            fingerprint=bundle.fingerprint,
+            bundle=bundle,
+            evidence_slots=tuple(
+                item.slot for item in dependencies if item.slot is not None
+            ),
+            current=self._bundle_record_current(row["record_fingerprint"]),
+            record_fingerprint=row["record_fingerprint"],
+            evidence_dependencies=dependencies,
+        )
+
+    def _get_legacy_bundle(self, fingerprint: str) -> StoredBundle:
+        bundle = self._read_bundle_domain(fingerprint)
+        links = self._conn().execute(
+            """
+            SELECT * FROM bundle_evidence_links
+            WHERE bundle_fingerprint = ? ORDER BY ordinal
+            """,
+            (fingerprint,),
+        ).fetchall()
+        if len(links) != len(bundle.evidence):
+            raise StorageIntegrityError("bundle evidence links are incomplete")
+        dependencies: list[EvidenceDependency] = []
+        for evidence, link in zip(bundle.evidence, links):
+            if link["evidence_id"] != evidence.id:
+                raise StorageIntegrityError(
+                    "bundle evidence link order or identity is corrupt"
+                )
+            slot = self._slot_version(link["slot_id"], link["slot_version"])
+            if slot.evidence_fingerprint != link["evidence_fingerprint"]:
+                raise StorageIntegrityError(
+                    "bundle evidence link fingerprint is corrupt"
+                )
+            artifact = self.get_evidence(link["evidence_fingerprint"])
+            if artifact.evidence != evidence:
+                raise StorageIntegrityError(
+                    "bundle evidence artifact content is corrupt"
+                )
+            dependencies.append(
+                EvidenceDependency(evidence.id, link["evidence_fingerprint"], slot)
+            )
+        current = (
+            not self._is_invalidated(_object_key("bundle", fingerprint))
+            and all(item.current for item in dependencies)
+        )
         return StoredBundle(
             fingerprint=fingerprint,
             bundle=bundle,
-            evidence_slots=tuple(slots),
-            current=self._bundle_current(fingerprint),
+            evidence_slots=tuple(item.slot for item in dependencies if item.slot),
+            current=current,
+            evidence_dependencies=tuple(dependencies),
         )
+
+    def get_bundle(
+        self,
+        fingerprint: str,
+        *,
+        record_fingerprint: str | None = None,
+    ) -> StoredBundle:
+        fingerprint = _sha256(fingerprint, name="bundle fingerprint")
+        bundle = self._read_bundle_domain(fingerprint)
+        if record_fingerprint is not None:
+            record_value = _sha256(
+                record_fingerprint,
+                name="bundle record fingerprint",
+            )
+            row = self._conn().execute(
+                """
+                SELECT * FROM bundle_records
+                WHERE record_fingerprint = ? AND bundle_fingerprint = ?
+                """,
+                (record_value, fingerprint),
+            ).fetchone()
+            if row is None:
+                raise StorageNotFoundError(
+                    f"unknown bundle record: {record_value}"
+                )
+            return self._read_bundle_record(bundle, row)
+        rows = self._conn().execute(
+            """
+            SELECT * FROM bundle_records
+            WHERE bundle_fingerprint = ? ORDER BY rowid
+            """,
+            (fingerprint,),
+        ).fetchall()
+        if not rows:
+            return self._get_legacy_bundle(fingerprint)
+        records = tuple(self._read_bundle_record(bundle, item) for item in rows)
+        return next(
+            (item for item in reversed(records) if item.current),
+            records[-1],
+        )
+
+    def bundle_history(self, fingerprint: str) -> tuple[StoredBundle, ...]:
+        fingerprint = _sha256(fingerprint, name="bundle fingerprint")
+        bundle = self._read_bundle_domain(fingerprint)
+        rows = self._conn().execute(
+            """
+            SELECT * FROM bundle_records
+            WHERE bundle_fingerprint = ? ORDER BY rowid
+            """,
+            (fingerprint,),
+        ).fetchall()
+        if not rows:
+            return (self._get_legacy_bundle(fingerprint),)
+        return tuple(self._read_bundle_record(bundle, item) for item in rows)
+
+    def _bundle_current(
+        self,
+        fingerprint: str,
+        record_fingerprint: str | None = None,
+    ) -> bool:
+        return self.get_bundle(
+            fingerprint,
+            record_fingerprint=record_fingerprint,
+        ).current
 
     def define_claim(
         self,
@@ -1771,40 +2605,54 @@ class SQLiteUnitOfWork:
         with self._logical_write():
             claim_id = _identifier(claim_id, name="claim id")
             definition = self._claim_definition(claim_id)
-            version_value = _identifier(verifier_version, name="verifier version")
+            version_value = _identifier(
+                verifier_version,
+                name="verifier version",
+            )
             if version_value != definition.verifier_version:
                 raise StorageConflictError(
-                    f"claim {claim_id} requires verifier version {definition.verifier_version}"
+                    f"claim {claim_id} requires verifier version "
+                    f"{definition.verifier_version}"
                 )
+
             stored_bundle: StoredBundle | None = None
             if bundle is not None:
                 existing_bundle = self._conn().execute(
                     "SELECT 1 FROM bundles WHERE fingerprint = ?",
                     (bundle.fingerprint,),
                 ).fetchone()
-                if existing_bundle is None:
-                    stored_bundle = self.put_bundle(bundle)
-                else:
-                    stored_bundle = self.get_bundle(bundle.fingerprint)
-                    if stored_bundle.bundle != bundle:
-                        raise StorageConflictError(
-                            "bundle fingerprint has conflicting canonical content"
-                        )
+                stored_bundle = (
+                    self.put_bundle(bundle)
+                    if existing_bundle is None
+                    else self.get_bundle(bundle.fingerprint)
+                )
+                if stored_bundle.bundle != bundle:
+                    raise StorageConflictError(
+                        "bundle fingerprint has conflicting canonical content"
+                    )
                 if not stored_bundle.current:
-                    raise StoredTruthError("cannot record a claim from a stale bundle")
+                    raise StoredTruthError(
+                        "cannot record a claim from a stale bundle"
+                    )
                 if report is not None and report != bundle.report:
-                    raise StorageConflictError("supplied report disagrees with bundle report")
+                    raise StorageConflictError(
+                        "supplied report disagrees with bundle report"
+                    )
                 report_value = bundle.report
                 expected_dependencies = bundle.claim_dependency_ids
             else:
                 if report is None:
-                    raise StorageIntegrityError("a claim record requires a bundle or report")
+                    raise StorageIntegrityError(
+                        "a claim record requires a bundle or report"
+                    )
                 report_value = report
                 expected_dependencies = ()
             if report_value.verifier != definition.definition.verifier:
                 raise StorageConflictError(
-                    f"claim {claim_id} requires verifier {definition.definition.verifier}"
+                    f"claim {claim_id} requires verifier "
+                    f"{definition.definition.verifier}"
                 )
+
             supplied_dependencies = (
                 expected_dependencies
                 if claim_dependency_ids is None
@@ -1812,37 +2660,52 @@ class SQLiteUnitOfWork:
             )
             dependencies = tuple(sorted(set(supplied_dependencies)))
             if tuple(supplied_dependencies) != dependencies:
-                raise StorageIntegrityError("claim dependency IDs must be unique and sorted")
+                raise StorageIntegrityError(
+                    "claim dependency IDs must be unique and sorted"
+                )
             if bundle is not None and dependencies != expected_dependencies:
-                raise StorageConflictError("claim dependency IDs disagree with bundle")
+                raise StorageConflictError(
+                    "claim dependency IDs disagree with bundle"
+                )
             if self._would_cycle(claim_id, dependencies):
                 from .dependencies import DependencyCycleError
 
-                raise DependencyCycleError(f"claim dependency cycle for {claim_id}")
+                raise DependencyCycleError(
+                    f"claim dependency cycle for {claim_id}"
+                )
 
             dependency_versions: list[tuple[str, int]] = []
             for dependency_id in dependencies:
                 _identifier(dependency_id, name="claim dependency id")
-                row = self._conn().execute(
+                pointer = self._conn().execute(
                     "SELECT current_version FROM claims WHERE claim_id = ?",
                     (dependency_id,),
                 ).fetchone()
-                if row is None:
+                if pointer is None:
                     raise StoredTruthError(
-                        f"claim {claim_id} references unverified dependency {dependency_id}"
+                        f"claim {claim_id} references unverified dependency "
+                        f"{dependency_id}"
                     )
-                dependency_version = row["current_version"]
-                if not self._claim_current(dependency_id, dependency_version, set()):
+                dependency_version = pointer["current_version"]
+                if not self._claim_current(
+                    dependency_id,
+                    dependency_version,
+                    set(),
+                ):
                     raise StoredTruthError(
-                        f"claim {claim_id} references stale dependency {dependency_id}"
+                        f"claim {claim_id} references stale dependency "
+                        f"{dependency_id}"
                     )
-                dependency_versions.append((dependency_id, dependency_version))
+                dependency_versions.append(
+                    (dependency_id, dependency_version)
+                )
 
             falsification_ids = tuple(sorted(set(falsification_fingerprints)))
             if tuple(falsification_fingerprints) != falsification_ids:
                 raise StorageIntegrityError(
                     "falsification fingerprints must be unique and sorted"
                 )
+            falsification_records: list[StoredFalsificationResult] = []
             for fingerprint in falsification_ids:
                 stored_falsification = self.get_falsification_result(fingerprint)
                 if not stored_falsification.current:
@@ -1855,21 +2718,33 @@ class SQLiteUnitOfWork:
                     != definition.definition.verifier
                 ):
                     raise StoredTruthError(
-                        f"claim {claim_id} references falsification for a different claim or verifier"
+                        f"claim {claim_id} references falsification for a "
+                        "different claim or verifier"
                     )
+                falsification_records.append(stored_falsification)
 
-            evidence_slots = () if stored_bundle is None else stored_bundle.evidence_slots
+            evidence_dependencies = (
+                ()
+                if stored_bundle is None
+                else stored_bundle.evidence_dependencies
+            )
+            evidence_slots = tuple(
+                item.slot
+                for item in evidence_dependencies
+                if item.slot is not None
+            )
             if (
                 report_value.verdict is VerificationVerdict.PASS
-                and not evidence_slots
+                and not evidence_dependencies
                 and not dependency_versions
                 and not falsification_ids
             ):
                 raise StoredTruthError(
                     "PASS requires stored evidence, claim, or falsification basis"
                 )
+
             basis_document = {
-                "schema_version": 1,
+                "schema_version": 2,
                 "kind": "gvr.claim_verification_basis",
                 "claim_id": claim_id,
                 "definition_fingerprint": definition.fingerprint,
@@ -1877,7 +2752,14 @@ class SQLiteUnitOfWork:
                 "verifier_version": version_value,
                 "verdict": report_value.verdict.value,
                 "report": _report_document(report_value),
-                "bundle_fingerprint": None if bundle is None else bundle.fingerprint,
+                "bundle_fingerprint": (
+                    None if bundle is None else bundle.fingerprint
+                ),
+                "bundle_record_fingerprint": (
+                    None
+                    if stored_bundle is None
+                    else stored_bundle.record_fingerprint
+                ),
                 "evidence_slots": [
                     {
                         "slot_id": slot.slot_id,
@@ -1886,11 +2768,19 @@ class SQLiteUnitOfWork:
                     }
                     for slot in evidence_slots
                 ],
+                "evidence_dependencies": [
+                    self._dependency_document(item)
+                    for item in evidence_dependencies
+                ],
                 "claim_dependency_versions": [
-                    {"claim_id": dependency_id, "version": dependency_version}
-                    for dependency_id, dependency_version in dependency_versions
+                    {"claim_id": item, "version": version}
+                    for item, version in dependency_versions
                 ],
                 "falsification_fingerprints": list(falsification_ids),
+                "falsification_record_fingerprints": [
+                    item.record_fingerprint
+                    for item in falsification_records
+                ],
             }
             content, canonical, basis_fingerprint = _parts(
                 basis_document,
@@ -1909,9 +2799,14 @@ class SQLiteUnitOfWork:
                     (claim_id, current["current_version"]),
                 ).fetchone()
                 if current_row is None:
-                    raise StorageIntegrityError("claim current pointer is corrupt")
+                    raise StorageIntegrityError(
+                        "claim current pointer is corrupt"
+                    )
                 if current_row["basis_fingerprint"] == basis_fingerprint:
-                    return self._read_claim_version(claim_id, current["current_version"])
+                    return self._read_claim_version(
+                        claim_id,
+                        current["current_version"],
+                    )
                 next_version = current["current_version"] + 1
                 previous_key = _object_key(
                     "claim-version",
@@ -1952,36 +2847,87 @@ class SQLiteUnitOfWork:
                     "UPDATE claims SET current_version = ? WHERE claim_id = ?",
                     (next_version, claim_id),
                 )
-            claim_key = _object_key("claim-version", f"{claim_id}:{next_version}")
-            if bundle is not None:
-                self._put_dependency(
-                    claim_key,
-                    _object_key("bundle", bundle.fingerprint),
-                    "bundle",
-                )
-            for ordinal, slot in enumerate(evidence_slots):
+
+            claim_key = _object_key(
+                "claim-version",
+                f"{claim_id}:{next_version}",
+            )
+            if stored_bundle is not None:
+                if stored_bundle.record_fingerprint is not None:
+                    self._conn().execute(
+                        """
+                        INSERT INTO claim_bundle_record_links(
+                            claim_id, claim_version, bundle_record_fingerprint
+                        ) VALUES (?, ?, ?)
+                        """,
+                        (
+                            claim_id,
+                            next_version,
+                            stored_bundle.record_fingerprint,
+                        ),
+                    )
+                    self._put_dependency(
+                        claim_key,
+                        stored_bundle.object_key,
+                        "bundle_record",
+                    )
+                else:
+                    self._put_dependency(
+                        claim_key,
+                        _object_key("bundle", bundle.fingerprint),
+                        "bundle",
+                    )
+
+            for ordinal, dependency in enumerate(evidence_dependencies):
                 self._conn().execute(
                     """
-                    INSERT INTO claim_evidence_links(
-                        claim_id, claim_version, evidence_fingerprint,
+                    INSERT INTO claim_evidence_dependency_links(
+                        claim_id, claim_version, evidence_id,
+                        evidence_fingerprint, dependency_kind,
                         slot_id, slot_version, ordinal
-                    ) VALUES (?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         claim_id,
                         next_version,
-                        slot.evidence_fingerprint,
-                        slot.slot_id,
-                        slot.version,
+                        dependency.evidence_id,
+                        dependency.evidence_fingerprint,
+                        "SLOT" if dependency.replaceable else "IMMUTABLE",
+                        None if dependency.slot is None else dependency.slot.slot_id,
+                        None if dependency.slot is None else dependency.slot.version,
                         ordinal,
                     ),
                 )
+                if dependency.slot is not None:
+                    self._conn().execute(
+                        """
+                        INSERT INTO claim_evidence_links(
+                            claim_id, claim_version, evidence_fingerprint,
+                            slot_id, slot_version, ordinal
+                        ) VALUES (?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            claim_id,
+                            next_version,
+                            dependency.evidence_fingerprint,
+                            dependency.slot.slot_id,
+                            dependency.slot.version,
+                            ordinal,
+                        ),
+                    )
                 self._put_dependency(
                     claim_key,
-                    slot.object_key,
-                    "evidence_slot_version",
+                    dependency.object_key,
+                    (
+                        "evidence_slot_version"
+                        if dependency.replaceable
+                        else "immutable_evidence"
+                    ),
                 )
-            for ordinal, (dependency_id, dependency_version) in enumerate(dependency_versions):
+
+            for ordinal, (dependency_id, dependency_version) in enumerate(
+                dependency_versions
+            ):
                 self._conn().execute(
                     """
                     INSERT INTO claim_dependency_links(
@@ -1999,23 +2945,54 @@ class SQLiteUnitOfWork:
                 )
                 self._put_dependency(
                     claim_key,
-                    _object_key("claim-version", f"{dependency_id}:{dependency_version}"),
+                    _object_key(
+                        "claim-version",
+                        f"{dependency_id}:{dependency_version}",
+                    ),
                     "claim_version",
                 )
-            for ordinal, fingerprint in enumerate(falsification_ids):
+
+            for ordinal, stored_falsification in enumerate(
+                falsification_records
+            ):
+                fingerprint = stored_falsification.fingerprint
                 self._conn().execute(
                     """
                     INSERT INTO claim_falsification_links(
-                        claim_id, claim_version, falsification_fingerprint, ordinal
+                        claim_id, claim_version,
+                        falsification_fingerprint, ordinal
                     ) VALUES (?, ?, ?, ?)
                     """,
                     (claim_id, next_version, fingerprint, ordinal),
                 )
-                self._put_dependency(
-                    claim_key,
-                    _object_key("falsification", fingerprint),
-                    "falsification_result",
-                )
+                if stored_falsification.record_fingerprint is not None:
+                    self._conn().execute(
+                        """
+                        INSERT INTO claim_falsification_record_links(
+                            claim_id, claim_version, falsification_fingerprint,
+                            falsification_record_fingerprint, ordinal
+                        ) VALUES (?, ?, ?, ?, ?)
+                        """,
+                        (
+                            claim_id,
+                            next_version,
+                            fingerprint,
+                            stored_falsification.record_fingerprint,
+                            ordinal,
+                        ),
+                    )
+                    self._put_dependency(
+                        claim_key,
+                        stored_falsification.object_key,
+                        "falsification_record",
+                    )
+                else:
+                    self._put_dependency(
+                        claim_key,
+                        _object_key("falsification", fingerprint),
+                        "falsification_result",
+                    )
+
             if previous_key is not None:
                 self._invalidate(
                     kind="claim_version_changed",
@@ -2024,82 +3001,189 @@ class SQLiteUnitOfWork:
                 )
             return self._read_claim_version(claim_id, next_version)
 
-    def _claim_current(self, claim_id: str, version: int, seen: set[tuple[str, int]]) -> bool:
+    def _claim_evidence_dependencies(
+        self,
+        claim_id: str,
+        version: int,
+    ) -> tuple[EvidenceDependency, ...]:
+        rows = self._conn().execute(
+            """
+            SELECT * FROM claim_evidence_dependency_links
+            WHERE claim_id = ? AND claim_version = ? ORDER BY ordinal
+            """,
+            (claim_id, version),
+        ).fetchall()
+        if rows:
+            return tuple(
+                self._dependency_from_record_link(item) for item in rows
+            )
+        legacy = self._conn().execute(
+            """
+            SELECT e.content_json, l.*
+            FROM claim_evidence_links AS l
+            JOIN evidence_artifacts AS e
+              ON e.fingerprint = l.evidence_fingerprint
+            WHERE l.claim_id = ? AND l.claim_version = ? ORDER BY l.ordinal
+            """,
+            (claim_id, version),
+        ).fetchall()
+        result: list[EvidenceDependency] = []
+        for item in legacy:
+            evidence_id = json.loads(item["content_json"])["evidence"]["id"]
+            slot = self._slot_version(item["slot_id"], item["slot_version"])
+            if slot.evidence_fingerprint != item["evidence_fingerprint"]:
+                raise StorageIntegrityError(
+                    "claim evidence link fingerprint is corrupt"
+                )
+            result.append(
+                EvidenceDependency(
+                    evidence_id,
+                    item["evidence_fingerprint"],
+                    slot,
+                )
+            )
+        return tuple(result)
+
+    def _claim_current(
+        self,
+        claim_id: str,
+        version: int,
+        seen: set[tuple[str, int]],
+    ) -> bool:
         identity = (claim_id, version)
         if identity in seen:
-            raise StorageIntegrityError("stored claim dependency cycle detected")
+            raise StorageIntegrityError(
+                "stored claim dependency cycle detected"
+            )
         seen.add(identity)
-        key = _object_key("claim-version", f"{claim_id}:{version}")
-        if self._is_invalidated(key):
-            seen.remove(identity)
-            return False
-        pointer = self._conn().execute(
-            "SELECT current_version FROM claims WHERE claim_id = ?",
-            (claim_id,),
-        ).fetchone()
-        if pointer is None or pointer["current_version"] != version:
-            seen.remove(identity)
-            return False
-        row = self._conn().execute(
-            "SELECT bundle_fingerprint FROM claim_versions WHERE claim_id = ? AND version = ?",
-            (claim_id, version),
-        ).fetchone()
-        if row is None:
-            raise StorageIntegrityError("claim version is missing")
-        if row["bundle_fingerprint"] is not None and not self._bundle_current(row["bundle_fingerprint"]):
-            seen.remove(identity)
-            return False
-        evidence_links = self._conn().execute(
-            "SELECT slot_id, slot_version FROM claim_evidence_links WHERE claim_id = ? AND claim_version = ?",
-            (claim_id, version),
-        ).fetchall()
-        if any(
-            not self._slot_version(item["slot_id"], item["slot_version"]).current
-            for item in evidence_links
-        ):
-            seen.remove(identity)
-            return False
-        dependencies = self._conn().execute(
-            """
-            SELECT dependency_claim_id, dependency_claim_version
-            FROM claim_dependency_links
-            WHERE claim_id = ? AND claim_version = ?
-            ORDER BY ordinal
-            """,
-            (claim_id, version),
-        ).fetchall()
-        for dependency in dependencies:
-            if not self._claim_current(
-                dependency["dependency_claim_id"],
-                dependency["dependency_claim_version"],
-                seen,
-            ):
-                seen.remove(identity)
+        try:
+            key = _object_key("claim-version", f"{claim_id}:{version}")
+            if self._is_invalidated(key):
                 return False
-        falsification_links = self._conn().execute(
-            """
-            SELECT falsification_fingerprint
-            FROM claim_falsification_links
-            WHERE claim_id = ? AND claim_version = ?
-            """,
-            (claim_id, version),
-        ).fetchall()
-        if any(
-            not self._falsification_current(item["falsification_fingerprint"])
-            for item in falsification_links
-        ):
+            pointer = self._conn().execute(
+                "SELECT current_version FROM claims WHERE claim_id = ?",
+                (claim_id,),
+            ).fetchone()
+            if pointer is None or pointer["current_version"] != version:
+                return False
+            row = self._conn().execute(
+                """
+                SELECT bundle_fingerprint, content_json FROM claim_versions
+                WHERE claim_id = ? AND version = ?
+                """,
+                (claim_id, version),
+            ).fetchone()
+            if row is None:
+                raise StorageIntegrityError("claim version is missing")
+            try:
+                basis_document = json.loads(row["content_json"])
+            except (TypeError, json.JSONDecodeError) as exc:
+                raise StorageIntegrityError(
+                    "claim current basis is not valid JSON"
+                ) from exc
+            bundle_record = self._conn().execute(
+                """
+                SELECT bundle_record_fingerprint
+                FROM claim_bundle_record_links
+                WHERE claim_id = ? AND claim_version = ?
+                """,
+                (claim_id, version),
+            ).fetchone()
+            if (
+                basis_document.get("schema_version") == 2
+                and row["bundle_fingerprint"] is not None
+                and bundle_record is None
+            ):
+                raise StorageIntegrityError(
+                    "v2 claim basis is missing its exact bundle record link"
+                )
+            if row["bundle_fingerprint"] is not None:
+                if not self._bundle_current(
+                    row["bundle_fingerprint"],
+                    None if bundle_record is None else bundle_record[0],
+                ):
+                    return False
+            evidence_dependencies = self._claim_evidence_dependencies(
+                claim_id,
+                version,
+            )
+            if (
+                "evidence_dependencies" in basis_document
+                and basis_document["evidence_dependencies"]
+                != [
+                    self._dependency_document(item)
+                    for item in evidence_dependencies
+                ]
+            ):
+                raise StorageIntegrityError(
+                    "v2 claim evidence dependency links are missing or corrupt"
+                )
+            if any(not item.current for item in evidence_dependencies):
+                return False
+            dependency_rows = self._conn().execute(
+                """
+                SELECT dependency_claim_id, dependency_claim_version
+                FROM claim_dependency_links
+                WHERE claim_id = ? AND claim_version = ?
+                """,
+                (claim_id, version),
+            ).fetchall()
+            for item in dependency_rows:
+                if not self._claim_current(
+                    item["dependency_claim_id"],
+                    item["dependency_claim_version"],
+                    seen,
+                ):
+                    return False
+            falsification_rows = self._conn().execute(
+                """
+                SELECT f.falsification_fingerprint,
+                       r.falsification_record_fingerprint
+                FROM claim_falsification_links AS f
+                LEFT JOIN claim_falsification_record_links AS r
+                  ON r.claim_id = f.claim_id
+                 AND r.claim_version = f.claim_version
+                 AND r.falsification_fingerprint = f.falsification_fingerprint
+                WHERE f.claim_id = ? AND f.claim_version = ?
+                ORDER BY f.ordinal
+                """,
+                (claim_id, version),
+            ).fetchall()
+            if "falsification_record_fingerprints" in basis_document and tuple(
+                basis_document["falsification_record_fingerprints"]
+            ) != tuple(
+                item["falsification_record_fingerprint"]
+                for item in falsification_rows
+            ):
+                raise StorageIntegrityError(
+                    "v2 claim falsification record links are missing or corrupt"
+                )
+            return all(
+                self._falsification_current(
+                    item["falsification_fingerprint"],
+                    item["falsification_record_fingerprint"],
+                )
+                for item in falsification_rows
+            )
+        finally:
             seen.remove(identity)
-            return False
-        seen.remove(identity)
-        return True
 
-    def _read_claim_version(self, claim_id: str, version: int) -> StoredClaimVersion:
+    def _read_claim_version(
+        self,
+        claim_id: str,
+        version: int,
+    ) -> StoredClaimVersion:
         row = self._conn().execute(
-            "SELECT * FROM claim_versions WHERE claim_id = ? AND version = ?",
+            """
+            SELECT * FROM claim_versions
+            WHERE claim_id = ? AND version = ?
+            """,
             (claim_id, version),
         ).fetchone()
         if row is None:
-            raise StorageNotFoundError(f"unknown claim version: {claim_id}:{version}")
+            raise StorageNotFoundError(
+                f"unknown claim version: {claim_id}:{version}"
+            )
         document = _verified_document(
             content_json=row["content_json"],
             canonical_json_value=row["canonical_json"],
@@ -2107,118 +3191,153 @@ class SQLiteUnitOfWork:
             fingerprint_format=_CLAIM_BASIS_FORMAT,
             identity=f"claim version {claim_id}:{version}",
         )
-        if row["basis_fingerprint"] != row["content_digest"]:
-            raise StorageIntegrityError("claim basis fingerprint is corrupt")
         if (
-            document.get("claim_id") != row["claim_id"]
-            or document.get("verdict") != row["verdict"]
+            row["basis_fingerprint"] != row["content_digest"]
+            or row["basis_fingerprint"]
+            != canonical_fingerprint(
+                document,
+                fingerprint_format=_CLAIM_BASIS_FORMAT,
+            )
+        ):
+            raise StorageIntegrityError("claim basis fingerprint is corrupt")
+        definition = self._claim_definition(claim_id)
+        report = _report_from_document(document["report"])
+        if (
+            document.get("claim_id") != claim_id
+            or document.get("definition_fingerprint") != definition.fingerprint
             or document.get("verifier_id") != row["verifier_id"]
             or document.get("verifier_version") != row["verifier_version"]
+            or document.get("verdict") != row["verdict"]
+            or report.verdict.value != row["verdict"]
+            or report.verifier != row["verifier_id"]
             or document.get("bundle_fingerprint") != row["bundle_fingerprint"]
         ):
-            raise StorageIntegrityError("claim columns conflict with canonical basis")
-        report = _report_from_document(document["report"])
-        if report.verdict.value != row["verdict"] or report.verifier != row["verifier_id"]:
-            raise StorageIntegrityError("claim report conflicts with stored verdict or verifier")
-        definition = self._claim_definition(claim_id)
-        if document.get("definition_fingerprint") != definition.fingerprint:
             raise StorageIntegrityError(
-                "claim basis does not reference the exact stored definition"
+                "claim basis columns or definition conflict with canonical content"
             )
-        evidence_rows = self._conn().execute(
+
+        bundle_record_row = self._conn().execute(
             """
-            SELECT * FROM claim_evidence_links
-            WHERE claim_id = ? AND claim_version = ? ORDER BY ordinal
+            SELECT bundle_record_fingerprint
+            FROM claim_bundle_record_links
+            WHERE claim_id = ? AND claim_version = ?
             """,
             (claim_id, version),
-        ).fetchall()
-        evidence_slots = tuple(
-            self._slot_version(item["slot_id"], item["slot_version"])
-            for item in evidence_rows
+        ).fetchone()
+        bundle_record_fingerprint = (
+            None if bundle_record_row is None else bundle_record_row[0]
         )
-        expected_evidence = tuple(
-            (
-                item["slot_id"],
-                item["slot_version"],
-                item["evidence_fingerprint"],
+        if row["bundle_fingerprint"] is not None:
+            stored_bundle = self.get_bundle(
+                row["bundle_fingerprint"],
+                record_fingerprint=bundle_record_fingerprint,
             )
-            for item in document.get("evidence_slots", ())
+            if stored_bundle.bundle.report != report:
+                raise StorageIntegrityError(
+                    "claim report conflicts with exact stored bundle"
+                )
+        if document.get("bundle_record_fingerprint") not in (
+            None,
+            bundle_record_fingerprint,
+        ):
+            raise StorageIntegrityError(
+                "claim bundle record reference is corrupt"
+            )
+
+        evidence_dependencies = self._claim_evidence_dependencies(
+            claim_id,
+            version,
         )
-        actual_evidence = tuple(
-            (slot.slot_id, slot.version, slot.evidence_fingerprint)
-            for slot in evidence_slots
-        )
-        if actual_evidence != expected_evidence:
-            raise StorageIntegrityError("claim evidence basis links are corrupt")
+        expected_slot_document = [
+            {
+                "slot_id": item.slot.slot_id,
+                "slot_version": item.slot.version,
+                "evidence_fingerprint": item.evidence_fingerprint,
+            }
+            for item in evidence_dependencies
+            if item.slot is not None
+        ]
+        if document.get("evidence_slots", []) != expected_slot_document:
+            raise StorageIntegrityError(
+                "claim evidence slot basis conflicts with exact links"
+            )
+        if "evidence_dependencies" in document and document[
+            "evidence_dependencies"
+        ] != [
+            self._dependency_document(item)
+            for item in evidence_dependencies
+        ]:
+            raise StorageIntegrityError(
+                "claim evidence dependency basis conflicts with exact links"
+            )
+
         dependency_versions = tuple(
             (item["dependency_claim_id"], item["dependency_claim_version"])
             for item in self._conn().execute(
                 """
-                SELECT * FROM claim_dependency_links
+                SELECT dependency_claim_id, dependency_claim_version
+                FROM claim_dependency_links
                 WHERE claim_id = ? AND claim_version = ? ORDER BY ordinal
                 """,
                 (claim_id, version),
             )
         )
-        expected_dependencies = tuple(
-            (item["claim_id"], item["version"])
-            for item in document.get("claim_dependency_versions", ())
-        )
-        if dependency_versions != expected_dependencies:
-            raise StorageIntegrityError("claim dependency basis links are corrupt")
+        if document.get("claim_dependency_versions", []) != [
+            {"claim_id": item, "version": dependency_version}
+            for item, dependency_version in dependency_versions
+        ]:
+            raise StorageIntegrityError(
+                "claim dependency basis conflicts with exact links"
+            )
+
+        falsification_rows = self._conn().execute(
+            """
+            SELECT f.falsification_fingerprint,
+                   r.falsification_record_fingerprint
+            FROM claim_falsification_links AS f
+            LEFT JOIN claim_falsification_record_links AS r
+              ON r.claim_id = f.claim_id
+             AND r.claim_version = f.claim_version
+             AND r.falsification_fingerprint = f.falsification_fingerprint
+            WHERE f.claim_id = ? AND f.claim_version = ? ORDER BY f.ordinal
+            """,
+            (claim_id, version),
+        ).fetchall()
         falsification_ids = tuple(
-            item[0]
-            for item in self._conn().execute(
-                """
-                SELECT falsification_fingerprint FROM claim_falsification_links
-                WHERE claim_id = ? AND claim_version = ? ORDER BY ordinal
-                """,
-                (claim_id, version),
-            )
+            item["falsification_fingerprint"]
+            for item in falsification_rows
         )
-        if falsification_ids != tuple(document.get("falsification_fingerprints", ())):
-            raise StorageIntegrityError("claim falsification basis links are corrupt")
-        if row["bundle_fingerprint"] is None:
-            if evidence_slots:
-                raise StorageIntegrityError(
-                    "claim without a bundle cannot have evidence links"
-                )
-        else:
-            stored_bundle = self.get_bundle(row["bundle_fingerprint"])
-            if stored_bundle.bundle.report != report:
-                raise StorageIntegrityError(
-                    "claim report does not match its exact bundle report"
-                )
-            if stored_bundle.evidence_slots != evidence_slots:
-                raise StorageIntegrityError(
-                    "claim evidence links do not match its exact bundle links"
-                )
-            if stored_bundle.bundle.claim_dependency_ids != tuple(
-                dependency_id for dependency_id, _version in dependency_versions
-            ):
-                raise StorageIntegrityError(
-                    "claim dependencies do not match its exact bundle dependencies"
-                )
-        for fingerprint in falsification_ids:
-            stored_falsification = self.get_falsification_result(fingerprint)
-            if (
-                stored_falsification.result.claim_id != claim_id
-                or stored_falsification.result.declared_verifier_id
-                != row["verifier_id"]
-            ):
-                raise StorageIntegrityError(
-                    "claim falsification basis belongs to a different claim or verifier"
-                )
-        if (
-            report.verdict is VerificationVerdict.PASS
-            and not evidence_slots
-            and not dependency_versions
-            and not falsification_ids
-        ):
-            raise StoredTruthError(
-                "stored PASS has no evidence, claim, or falsification basis"
+        falsification_record_fingerprints = tuple(
+            item["falsification_record_fingerprint"]
+            for item in falsification_rows
+            if item["falsification_record_fingerprint"] is not None
+        )
+        if tuple(document.get("falsification_fingerprints", ())) != falsification_ids:
+            raise StorageIntegrityError(
+                "claim falsification basis conflicts with exact links"
             )
-        current = self._claim_current(claim_id, version, set())
+        if "falsification_record_fingerprints" in document and tuple(
+            document["falsification_record_fingerprints"]
+        ) != tuple(
+            item["falsification_record_fingerprint"]
+            for item in falsification_rows
+        ):
+            raise StorageIntegrityError(
+                "claim falsification record basis conflicts with exact links"
+            )
+        for item in falsification_rows:
+            stored = self.get_falsification_result(
+                item["falsification_fingerprint"],
+                record_fingerprint=item["falsification_record_fingerprint"],
+            )
+            if (
+                stored.result.claim_id != claim_id
+                or stored.result.declared_verifier_id != row["verifier_id"]
+            ):
+                raise StorageIntegrityError(
+                    "claim falsification basis references a different claim or verifier"
+                )
+
         return StoredClaimVersion(
             claim_id=claim_id,
             version=version,
@@ -2228,10 +3347,17 @@ class SQLiteUnitOfWork:
             bundle_fingerprint=row["bundle_fingerprint"],
             report=report,
             basis_fingerprint=row["basis_fingerprint"],
-            evidence_slots=evidence_slots,
+            evidence_slots=tuple(
+                item.slot
+                for item in evidence_dependencies
+                if item.slot is not None
+            ),
             claim_dependency_versions=dependency_versions,
             falsification_fingerprints=falsification_ids,
-            current=current,
+            current=self._claim_current(claim_id, version, set()),
+            bundle_record_fingerprint=bundle_record_fingerprint,
+            evidence_dependencies=evidence_dependencies,
+            falsification_record_fingerprints=falsification_record_fingerprints,
         )
 
     def claim_status(self, claim_id: str) -> StoredClaimStatus:
@@ -2276,91 +3402,18 @@ class SQLiteUnitOfWork:
         )
         return tuple(claim_id for claim_id in claim_ids if not self.claim_status(claim_id).current)
 
-    def put_falsification_result(
+    def _read_falsification_domain(
         self,
-        result: FalsificationResult,
-        *,
-        evidence_slots: Iterable[EvidenceSlotVersion] | None = None,
-    ) -> StoredFalsificationResult:
-        with self._logical_write():
-            if not isinstance(result, FalsificationResult):
-                raise StorageIntegrityError("result must be a FalsificationResult")
-            document = result.to_dict()
-            content, canonical, digest = _parts(document)
-            slots = () if evidence_slots is None else tuple(evidence_slots)
-            resolved = tuple(self._slot_version(item.slot_id, item.version) for item in slots)
-            if len({(item.slot_id, item.version) for item in resolved}) != len(resolved):
-                raise StorageIntegrityError("falsification evidence slots contain duplicates")
-            existing = self._conn().execute(
-                "SELECT * FROM falsification_results WHERE fingerprint = ?",
-                (result.fingerprint,),
-            ).fetchone()
-            if existing is not None and evidence_slots is None:
-                stored = self.get_falsification_result(result.fingerprint)
-                if stored.result != result:
-                    raise StorageConflictError(
-                        "immutable falsification result has conflicting content"
-                    )
-                return stored
-            if existing is None:
-                self._conn().execute(
-                    """
-                    INSERT INTO falsification_results(
-                        fingerprint, content_json, canonical_json, content_digest
-                    ) VALUES (?, ?, ?, ?)
-                    """,
-                    (result.fingerprint, content, canonical, digest),
-                )
-                for ordinal, slot in enumerate(resolved):
-                    self._conn().execute(
-                        """
-                        INSERT INTO falsification_evidence_links(
-                            falsification_fingerprint, evidence_fingerprint,
-                            slot_id, slot_version, ordinal
-                        ) VALUES (?, ?, ?, ?, ?)
-                        """,
-                        (
-                            result.fingerprint,
-                            slot.evidence_fingerprint,
-                            slot.slot_id,
-                            slot.version,
-                            ordinal,
-                        ),
-                    )
-                    self._put_dependency(
-                        _object_key("falsification", result.fingerprint),
-                        slot.object_key,
-                        "evidence_slot_version",
-                    )
-            else:
-                stored = self.get_falsification_result(result.fingerprint)
-                if stored.result != result or stored.evidence_slots != resolved:
-                    raise StorageConflictError(
-                        "immutable falsification result has conflicting content or links"
-                    )
-            return self.get_falsification_result(result.fingerprint)
-
-    def _falsification_current(self, fingerprint: str) -> bool:
-        key = _object_key("falsification", fingerprint)
-        if self._is_invalidated(key):
-            return False
-        rows = self._conn().execute(
-            """
-            SELECT slot_id, slot_version FROM falsification_evidence_links
-            WHERE falsification_fingerprint = ?
-            """,
-            (fingerprint,),
-        ).fetchall()
-        return all(self._slot_version(row["slot_id"], row["slot_version"]).current for row in rows)
-
-    def get_falsification_result(self, fingerprint: str) -> StoredFalsificationResult:
-        fingerprint = _sha256(fingerprint, name="falsification fingerprint")
+        fingerprint: str,
+    ) -> FalsificationResult:
         row = self._conn().execute(
             "SELECT * FROM falsification_results WHERE fingerprint = ?",
             (fingerprint,),
         ).fetchone()
         if row is None:
-            raise StorageNotFoundError(f"unknown falsification result: {fingerprint}")
+            raise StorageNotFoundError(
+                f"unknown falsification result: {fingerprint}"
+            )
         document = _verified_document(
             content_json=row["content_json"],
             canonical_json_value=row["canonical_json"],
@@ -2370,6 +3423,305 @@ class SQLiteUnitOfWork:
         result = _falsification_from_document(document)
         if result.fingerprint != fingerprint:
             raise StorageIntegrityError("falsification result key is corrupt")
+        return result
+
+    def _legacy_falsification_projection(
+        self,
+        fingerprint: str,
+        dependencies: Sequence[EvidenceDependency],
+        *,
+        create: bool,
+    ) -> bool:
+        rows = self._conn().execute(
+            """
+            SELECT evidence_fingerprint, slot_id, slot_version, ordinal
+            FROM falsification_evidence_links
+            WHERE falsification_fingerprint = ? ORDER BY ordinal
+            """,
+            (fingerprint,),
+        ).fetchall()
+        if not all(item.replaceable for item in dependencies):
+            return False
+        expected = tuple(
+            (
+                item.evidence_fingerprint,
+                item.slot.slot_id,
+                item.slot.version,
+                ordinal,
+            )
+            for ordinal, item in enumerate(dependencies)
+        )
+        observed = tuple(
+            (
+                row["evidence_fingerprint"],
+                row["slot_id"],
+                row["slot_version"],
+                row["ordinal"],
+            )
+            for row in rows
+        )
+        if rows or not dependencies:
+            return observed == expected
+        if not create:
+            return False
+        for ordinal, item in enumerate(dependencies):
+            assert item.slot is not None
+            self._conn().execute(
+                """
+                INSERT INTO falsification_evidence_links(
+                    falsification_fingerprint, evidence_fingerprint,
+                    slot_id, slot_version, ordinal
+                ) VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    fingerprint,
+                    item.evidence_fingerprint,
+                    item.slot.slot_id,
+                    item.slot.version,
+                    ordinal,
+                ),
+            )
+        return True
+
+    def put_falsification_result(
+        self,
+        result: FalsificationResult,
+        *,
+        evidence_slots: Iterable[EvidenceSlotVersion] | None = None,
+        evidence_artifacts: Iterable[str] | None = None,
+    ) -> StoredFalsificationResult:
+        with self._logical_write():
+            if not isinstance(result, FalsificationResult):
+                raise StorageIntegrityError("result must be a FalsificationResult")
+            if evidence_slots is None and evidence_artifacts is None:
+                rows = self._conn().execute(
+                    """
+                    SELECT record_fingerprint FROM falsification_records
+                    WHERE falsification_fingerprint = ?
+                    """,
+                    (result.fingerprint,),
+                ).fetchall()
+                if rows:
+                    stored = self.get_falsification_result(result.fingerprint)
+                    if stored.result != result:
+                        raise StorageConflictError(
+                            "immutable falsification result has conflicting content"
+                        )
+                    return stored
+            slots = () if evidence_slots is None else tuple(evidence_slots)
+            artifacts = () if evidence_artifacts is None else tuple(evidence_artifacts)
+            dependencies: list[EvidenceDependency] = []
+            seen_ids: set[str] = set()
+            for supplied in slots:
+                if not isinstance(supplied, EvidenceSlotVersion):
+                    raise StorageIntegrityError(
+                        "falsification evidence slots must be EvidenceSlotVersion records"
+                    )
+                slot = self._slot_version(supplied.slot_id, supplied.version)
+                artifact = self.get_evidence(slot.evidence_fingerprint)
+                evidence_id = artifact.evidence.id
+                if evidence_id in seen_ids:
+                    raise StorageIntegrityError(
+                        "falsification evidence dependencies contain duplicate evidence IDs"
+                    )
+                seen_ids.add(evidence_id)
+                dependencies.append(
+                    EvidenceDependency(evidence_id, slot.evidence_fingerprint, slot)
+                )
+            for supplied in artifacts:
+                fingerprint = _sha256(
+                    supplied,
+                    name="falsification evidence artifact fingerprint",
+                )
+                artifact = self.get_evidence(fingerprint)
+                evidence_id = artifact.evidence.id
+                if evidence_id in seen_ids:
+                    raise StorageIntegrityError(
+                        "falsification evidence dependencies contain duplicate evidence IDs"
+                    )
+                seen_ids.add(evidence_id)
+                dependencies.append(EvidenceDependency(evidence_id, fingerprint))
+
+            document = result.to_dict()
+            content, canonical, digest = _parts(document)
+            existing = self._conn().execute(
+                "SELECT * FROM falsification_results WHERE fingerprint = ?",
+                (result.fingerprint,),
+            ).fetchone()
+            if existing is None:
+                self._conn().execute(
+                    """
+                    INSERT INTO falsification_results(
+                        fingerprint, content_json, canonical_json, content_digest
+                    ) VALUES (?, ?, ?, ?)
+                    """,
+                    (result.fingerprint, content, canonical, digest),
+                )
+            elif self._read_falsification_domain(result.fingerprint) != result:
+                raise StorageConflictError(
+                    "immutable falsification result has conflicting content"
+                )
+
+            legacy_projection = self._legacy_falsification_projection(
+                result.fingerprint,
+                dependencies,
+                create=True,
+            )
+            record_document = {
+                "schema_version": 2,
+                "kind": "gvr.stored_falsification_record",
+                "falsification_fingerprint": result.fingerprint,
+                "evidence_dependencies": tuple(
+                    self._dependency_document(item) for item in dependencies
+                ),
+                "legacy_projection": legacy_projection,
+            }
+            record_content, record_canonical, record_fingerprint = _parts(
+                record_document,
+                fingerprint_format=_FALSIFICATION_RECORD_FORMAT,
+            )
+            record = self._conn().execute(
+                "SELECT * FROM falsification_records WHERE record_fingerprint = ?",
+                (record_fingerprint,),
+            ).fetchone()
+            if record is None:
+                self._conn().execute(
+                    """
+                    INSERT INTO falsification_records(
+                        record_fingerprint, falsification_fingerprint,
+                        content_json, canonical_json, content_digest
+                    ) VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (
+                        record_fingerprint,
+                        result.fingerprint,
+                        record_content,
+                        record_canonical,
+                        record_fingerprint,
+                    ),
+                )
+                record_key = _object_key(
+                    "falsification-record",
+                    record_fingerprint,
+                )
+                for ordinal, dependency in enumerate(dependencies):
+                    self._conn().execute(
+                        """
+                        INSERT INTO falsification_record_evidence_links(
+                            record_fingerprint, evidence_id, evidence_fingerprint,
+                            dependency_kind, slot_id, slot_version, ordinal
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            record_fingerprint,
+                            dependency.evidence_id,
+                            dependency.evidence_fingerprint,
+                            "SLOT" if dependency.replaceable else "IMMUTABLE",
+                            None if dependency.slot is None else dependency.slot.slot_id,
+                            None if dependency.slot is None else dependency.slot.version,
+                            ordinal,
+                        ),
+                    )
+                    self._put_dependency(
+                        record_key,
+                        dependency.object_key,
+                        (
+                            "evidence_slot_version"
+                            if dependency.replaceable
+                            else "immutable_evidence"
+                        ),
+                    )
+            else:
+                verified = _verified_document(
+                    content_json=record["content_json"],
+                    canonical_json_value=record["canonical_json"],
+                    content_digest=record["content_digest"],
+                    fingerprint_format=_FALSIFICATION_RECORD_FORMAT,
+                    identity=f"falsification record {record_fingerprint}",
+                )
+                if verified != _json_value(record_document):
+                    raise StorageConflictError(
+                        "falsification record identity has conflicting dependencies"
+                    )
+            return self.get_falsification_result(
+                result.fingerprint,
+                record_fingerprint=record_fingerprint,
+            )
+
+    def _falsification_record_current(self, record_fingerprint: str) -> bool:
+        if self._is_invalidated(
+            _object_key("falsification-record", record_fingerprint)
+        ):
+            return False
+        rows = self._conn().execute(
+            """
+            SELECT * FROM falsification_record_evidence_links
+            WHERE record_fingerprint = ? ORDER BY ordinal
+            """,
+            (record_fingerprint,),
+        ).fetchall()
+        return all(
+            self._dependency_from_record_link(item).current for item in rows
+        )
+
+    def _read_falsification_record(
+        self,
+        result: FalsificationResult,
+        row: sqlite3.Row,
+    ) -> StoredFalsificationResult:
+        document = _verified_document(
+            content_json=row["content_json"],
+            canonical_json_value=row["canonical_json"],
+            content_digest=row["content_digest"],
+            fingerprint_format=_FALSIFICATION_RECORD_FORMAT,
+            identity=f"falsification record {row['record_fingerprint']}",
+        )
+        if row["content_digest"] != row["record_fingerprint"]:
+            raise StorageIntegrityError("falsification record key is corrupt")
+        if document.get("falsification_fingerprint") != result.fingerprint:
+            raise StorageIntegrityError(
+                "falsification record domain reference is corrupt"
+            )
+        links = self._conn().execute(
+            """
+            SELECT * FROM falsification_record_evidence_links
+            WHERE record_fingerprint = ? ORDER BY ordinal
+            """,
+            (row["record_fingerprint"],),
+        ).fetchall()
+        dependencies = tuple(
+            self._dependency_from_record_link(item) for item in links
+        )
+        if tuple(self._dependency_document(item) for item in dependencies) != tuple(
+            document.get("evidence_dependencies", ())
+        ):
+            raise StorageIntegrityError(
+                "falsification dependency document conflicts with exact links"
+            )
+        if document.get("legacy_projection") and not self._legacy_falsification_projection(
+            result.fingerprint,
+            dependencies,
+            create=False,
+        ):
+            raise StorageIntegrityError(
+                "falsification legacy evidence projection is corrupt"
+            )
+        return StoredFalsificationResult(
+            fingerprint=result.fingerprint,
+            result=result,
+            evidence_slots=tuple(
+                item.slot for item in dependencies if item.slot is not None
+            ),
+            current=self._falsification_record_current(row["record_fingerprint"]),
+            record_fingerprint=row["record_fingerprint"],
+            evidence_dependencies=dependencies,
+        )
+
+    def _get_legacy_falsification_result(
+        self,
+        fingerprint: str,
+    ) -> StoredFalsificationResult:
+        result = self._read_falsification_domain(fingerprint)
         links = self._conn().execute(
             """
             SELECT * FROM falsification_evidence_links
@@ -2377,18 +3729,103 @@ class SQLiteUnitOfWork:
             """,
             (fingerprint,),
         ).fetchall()
-        slots: list[EvidenceSlotVersion] = []
-        for link in links:
-            slot = self._slot_version(link["slot_id"], link["slot_version"])
-            if slot.evidence_fingerprint != link["evidence_fingerprint"]:
-                raise StorageIntegrityError("falsification evidence link is corrupt")
-            slots.append(slot)
+        dependencies: list[EvidenceDependency] = []
+        for item in links:
+            slot = self._slot_version(item["slot_id"], item["slot_version"])
+            if slot.evidence_fingerprint != item["evidence_fingerprint"]:
+                raise StorageIntegrityError(
+                    "falsification evidence link fingerprint is corrupt"
+                )
+            artifact = self.get_evidence(item["evidence_fingerprint"])
+            dependencies.append(
+                EvidenceDependency(
+                    artifact.evidence.id,
+                    item["evidence_fingerprint"],
+                    slot,
+                )
+            )
+        current = (
+            not self._is_invalidated(_object_key("falsification", fingerprint))
+            and all(item.current for item in dependencies)
+        )
         return StoredFalsificationResult(
             fingerprint=fingerprint,
             result=result,
-            evidence_slots=tuple(slots),
-            current=self._falsification_current(fingerprint),
+            evidence_slots=tuple(item.slot for item in dependencies if item.slot),
+            current=current,
+            evidence_dependencies=tuple(dependencies),
         )
+
+    def get_falsification_result(
+        self,
+        fingerprint: str,
+        *,
+        record_fingerprint: str | None = None,
+    ) -> StoredFalsificationResult:
+        fingerprint = _sha256(fingerprint, name="falsification fingerprint")
+        result = self._read_falsification_domain(fingerprint)
+        if record_fingerprint is not None:
+            record_value = _sha256(
+                record_fingerprint,
+                name="falsification record fingerprint",
+            )
+            row = self._conn().execute(
+                """
+                SELECT * FROM falsification_records
+                WHERE record_fingerprint = ? AND falsification_fingerprint = ?
+                """,
+                (record_value, fingerprint),
+            ).fetchone()
+            if row is None:
+                raise StorageNotFoundError(
+                    f"unknown falsification record: {record_value}"
+                )
+            return self._read_falsification_record(result, row)
+        rows = self._conn().execute(
+            """
+            SELECT * FROM falsification_records
+            WHERE falsification_fingerprint = ? ORDER BY rowid
+            """,
+            (fingerprint,),
+        ).fetchall()
+        if not rows:
+            return self._get_legacy_falsification_result(fingerprint)
+        records = tuple(
+            self._read_falsification_record(result, item) for item in rows
+        )
+        return next(
+            (item for item in reversed(records) if item.current),
+            records[-1],
+        )
+
+    def falsification_history(
+        self,
+        fingerprint: str,
+    ) -> tuple[StoredFalsificationResult, ...]:
+        fingerprint = _sha256(fingerprint, name="falsification fingerprint")
+        result = self._read_falsification_domain(fingerprint)
+        rows = self._conn().execute(
+            """
+            SELECT * FROM falsification_records
+            WHERE falsification_fingerprint = ? ORDER BY rowid
+            """,
+            (fingerprint,),
+        ).fetchall()
+        if not rows:
+            return (self._get_legacy_falsification_result(fingerprint),)
+        return tuple(
+            self._read_falsification_record(result, item) for item in rows
+        )
+
+    def _falsification_current(
+        self,
+        fingerprint: str,
+        record_fingerprint: str | None = None,
+    ) -> bool:
+        return self.get_falsification_result(
+            fingerprint,
+            record_fingerprint=record_fingerprint,
+        ).current
 
     def _put_document(self, kind: str, fingerprint: str, document: Mapping[str, Any]) -> None:
         kind = _identifier(kind, name="document kind")
@@ -2428,7 +3865,13 @@ class SQLiteUnitOfWork:
             content_digest=existing["content_digest"],
             identity=f"{kind} document {fingerprint}",
         )
-        if stored != _json_value(document):
+        candidate = _json_value(document)
+        if kind == "verification_execution":
+            stored = deepcopy(stored)
+            candidate = deepcopy(candidate)
+            stored.pop("correlation_id", None)
+            candidate.pop("correlation_id", None)
+        if stored != candidate:
             raise StorageConflictError(f"{kind} document identity has conflicting content")
 
     def _read_document(self, kind: str, fingerprint: str) -> dict[str, Any]:
@@ -2465,6 +3908,204 @@ class SQLiteUnitOfWork:
             )
         return document
 
+    def _read_session_domain(
+        self,
+        fingerprint: str,
+    ) -> tuple[sqlite3.Row, dict[str, Any], dict[str, Any]]:
+        row = self._conn().execute(
+            "SELECT * FROM sessions WHERE fingerprint = ?",
+            (fingerprint,),
+        ).fetchone()
+        if row is None:
+            raise StorageNotFoundError(f"unknown session: {fingerprint}")
+        document = _verified_document(
+            content_json=row["session_content_json"],
+            canonical_json_value=row["session_canonical_json"],
+            content_digest=row["session_content_digest"],
+            identity=f"session {fingerprint}",
+        )
+        if document.get("fingerprint") != fingerprint:
+            raise StorageIntegrityError(
+                "session document fingerprint is corrupt"
+            )
+        _verify_semantic_document_fingerprint(
+            document,
+            identity=f"session {fingerprint}",
+        )
+        graph_document = document.get("claim_graph")
+        if not isinstance(graph_document, Mapping):
+            raise StorageIntegrityError(
+                "session claim graph document is missing"
+            )
+        _verify_semantic_document_fingerprint(
+            graph_document,
+            identity=f"session {fingerprint} claim graph",
+        )
+        exact_graph = self._read_document(
+            "claim_graph",
+            row["graph_fingerprint"],
+        )
+        if exact_graph != graph_document:
+            raise StorageIntegrityError(
+                "session embedded graph conflicts with exact stored graph document"
+            )
+        if document.get("termination_reason") != row["termination"]:
+            raise StorageIntegrityError(
+                "session termination column is corrupt"
+            )
+        try:
+            counters = json.loads(row["counters_json"])
+        except (TypeError, json.JSONDecodeError) as exc:
+            raise StorageIntegrityError(
+                "session counters are not valid JSON"
+            ) from exc
+        if _content_json(counters) != row["counters_json"]:
+            raise StorageIntegrityError(
+                "session counters are not canonical JSON"
+            )
+        if counters != document.get("budget", {}).get("consumed", {}):
+            raise StorageIntegrityError(
+                "session counters conflict with session document"
+            )
+        return row, document, counters
+
+    def _session_record_document(
+        self,
+        session_fingerprint: str,
+        claim_versions: Sequence[tuple[str, int]],
+        bundles: Sequence[StoredBundle],
+        falsifications: Sequence[StoredFalsificationResult],
+    ) -> dict[str, Any]:
+        return {
+            "schema_version": 2,
+            "kind": "gvr.stored_session_record",
+            "session_fingerprint": session_fingerprint,
+            "claim_versions": tuple(
+                {"claim_id": claim_id, "version": version}
+                for claim_id, version in claim_versions
+            ),
+            "bundle_records": tuple(
+                {
+                    "bundle_fingerprint": item.fingerprint,
+                    "record_fingerprint": item.record_fingerprint,
+                }
+                for item in bundles
+            ),
+            "falsification_records": tuple(
+                {
+                    "falsification_fingerprint": item.fingerprint,
+                    "record_fingerprint": item.record_fingerprint,
+                }
+                for item in falsifications
+            ),
+        }
+
+    def _execution_request_ids(
+        self,
+        execution_document: Mapping[str, Any] | None,
+    ) -> tuple[str, ...]:
+        if execution_document is None:
+            return ()
+        values = {
+            item.get("request_id")
+            for item in execution_document.get("provider_results", ())
+            if isinstance(item, Mapping)
+            and isinstance(item.get("request_id"), str)
+        }
+        return tuple(sorted(values))
+
+    def _put_session_observation(
+        self,
+        *,
+        session_fingerprint: str,
+        session_record_fingerprint: str,
+        plan_fingerprint: str | None,
+        execution_fingerprint: str | None,
+        execution_document: Mapping[str, Any] | None,
+    ) -> SessionExecutionObservation:
+        request_ids = self._execution_request_ids(execution_document)
+        correlation_id = (
+            None
+            if execution_document is None
+            else execution_document.get("correlation_id")
+        )
+        document = {
+            "schema_version": 2,
+            "kind": "gvr.session_execution_observation",
+            "session_fingerprint": session_fingerprint,
+            "session_record_fingerprint": session_record_fingerprint,
+            "plan_fingerprint": plan_fingerprint,
+            "execution_fingerprint": execution_fingerprint,
+            "request_ids": request_ids,
+            "correlation_id": correlation_id,
+            "execution_document": (
+                None
+                if execution_document is None
+                else _json_value(execution_document)
+            ),
+        }
+        content, canonical, observation_fingerprint = _parts(
+            document,
+            fingerprint_format=_SESSION_OBSERVATION_FORMAT,
+        )
+        existing = self._conn().execute(
+            """
+            SELECT * FROM session_execution_observations
+            WHERE observation_fingerprint = ?
+            """,
+            (observation_fingerprint,),
+        ).fetchone()
+        if existing is None:
+            self._conn().execute(
+                """
+                INSERT INTO session_execution_observations(
+                    observation_fingerprint, session_fingerprint,
+                    session_record_fingerprint, plan_fingerprint,
+                    execution_fingerprint, request_ids_json,
+                    correlation_id, content_json, canonical_json,
+                    content_digest
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    observation_fingerprint,
+                    session_fingerprint,
+                    session_record_fingerprint,
+                    plan_fingerprint,
+                    execution_fingerprint,
+                    _content_json(request_ids),
+                    correlation_id,
+                    content,
+                    canonical,
+                    observation_fingerprint,
+                ),
+            )
+        else:
+            verified = _verified_document(
+                content_json=existing["content_json"],
+                canonical_json_value=existing["canonical_json"],
+                content_digest=existing["content_digest"],
+                fingerprint_format=_SESSION_OBSERVATION_FORMAT,
+                identity=f"session observation {observation_fingerprint}",
+            )
+            if verified != _json_value(document):
+                raise StorageConflictError(
+                    "session observation identity has conflicting content"
+                )
+        return SessionExecutionObservation(
+            observation_fingerprint=observation_fingerprint,
+            session_fingerprint=session_fingerprint,
+            session_record_fingerprint=session_record_fingerprint,
+            plan_fingerprint=plan_fingerprint,
+            execution_fingerprint=execution_fingerprint,
+            request_ids=request_ids,
+            correlation_id=correlation_id,
+            execution_document=(
+                None
+                if execution_document is None
+                else deepcopy(dict(execution_document))
+            ),
+        )
+
     def put_session(
         self,
         session: VerificationSession,
@@ -2476,24 +4117,39 @@ class SQLiteUnitOfWork:
     ) -> StoredSession:
         with self._logical_write():
             if type(session) is not VerificationSession or not session.sealed:
-                raise StorageIntegrityError("session must be an exact sealed VerificationSession")
+                raise StorageIntegrityError(
+                    "session must be an exact sealed VerificationSession"
+                )
             session_document = session.to_dict()
-            session_fingerprint = _sha256(session.fingerprint, name="session fingerprint")
-            graph_fingerprint = _sha256(session.graph.fingerprint, name="graph fingerprint")
+            session_fingerprint = _sha256(
+                session.fingerprint,
+                name="session fingerprint",
+            )
+            graph_fingerprint = _sha256(
+                session.graph.fingerprint,
+                name="graph fingerprint",
+            )
             if session_document.get("fingerprint") != session_fingerprint:
-                raise StorageIntegrityError("session fingerprint is inconsistent")
+                raise StorageIntegrityError(
+                    "session fingerprint is inconsistent"
+                )
             self._put_document(
                 "claim_graph",
                 graph_fingerprint,
                 session.graph.to_dict(),
             )
-            plan_value = None if plan_fingerprint is None else _sha256(
-                plan_fingerprint,
-                name="plan fingerprint",
+            plan_value = (
+                None
+                if plan_fingerprint is None
+                else _sha256(plan_fingerprint, name="plan fingerprint")
             )
-            execution_value = None if execution_fingerprint is None else _sha256(
-                execution_fingerprint,
-                name="execution fingerprint",
+            execution_value = (
+                None
+                if execution_fingerprint is None
+                else _sha256(
+                    execution_fingerprint,
+                    name="execution fingerprint",
+                )
             )
             if execution_document is not None:
                 if execution_value is None:
@@ -2501,7 +4157,9 @@ class SQLiteUnitOfWork:
                         "execution_document requires execution_fingerprint"
                     )
                 if not isinstance(execution_document, Mapping):
-                    raise StorageIntegrityError("execution_document must be a mapping")
+                    raise StorageIntegrityError(
+                        "execution_document must be a mapping"
+                    )
                 if execution_document.get("fingerprint") != execution_value:
                     raise StorageIntegrityError(
                         "execution document fingerprint does not match exact reference"
@@ -2511,17 +4169,25 @@ class SQLiteUnitOfWork:
                     execution_value,
                     execution_document,
                 )
+
             falsification_ids = tuple(sorted(set(falsification_fingerprints)))
             if tuple(falsification_fingerprints) != falsification_ids:
                 raise StorageIntegrityError(
                     "session falsification fingerprints must be unique and sorted"
                 )
-            for fingerprint in falsification_ids:
-                self.get_falsification_result(fingerprint)
+            falsifications = tuple(
+                self.get_falsification_result(item)
+                for item in falsification_ids
+            )
 
-            claim_ids = tuple(item["claim_id"] for item in session_document.get("claims", ()))
+            claim_ids = tuple(
+                item["claim_id"]
+                for item in session_document.get("claims", ())
+            )
             if len(set(claim_ids)) != len(claim_ids):
-                raise StorageIntegrityError("session contains duplicate claim states")
+                raise StorageIntegrityError(
+                    "session contains duplicate claim states"
+                )
             claim_versions: list[tuple[str, int]] = []
             for claim_id in claim_ids:
                 pointer = self._conn().execute(
@@ -2532,13 +4198,19 @@ class SQLiteUnitOfWork:
                     raise StorageIntegrityError(
                         f"session references claim without durable history: {claim_id}"
                     )
-                stored_claim = self._read_claim_version(claim_id, pointer["current_version"])
+                stored_claim = self._read_claim_version(
+                    claim_id,
+                    pointer["current_version"],
+                )
                 state = next(
-                    item for item in session_document["claims"] if item["claim_id"] == claim_id
+                    item
+                    for item in session_document["claims"]
+                    if item["claim_id"] == claim_id
                 )
                 if (
                     state["stored_verdict"] != stored_claim.verdict.value
-                    or state["bundle_fingerprint"] != stored_claim.bundle_fingerprint
+                    or state["bundle_fingerprint"]
+                    != stored_claim.bundle_fingerprint
                 ):
                     raise StorageIntegrityError(
                         f"session claim state for {claim_id} does not match durable basis"
@@ -2550,16 +4222,20 @@ class SQLiteUnitOfWork:
                 for item in session_document.get("atomic_verifications", ())
                 if item.get("bundle_fingerprint") is not None
             }))
-            for fingerprint in bundle_ids:
-                self.get_bundle(fingerprint)
-            session_content, session_canonical, session_digest = _parts(session_document)
+            bundles = tuple(self.get_bundle(item) for item in bundle_ids)
+            session_content, session_canonical, session_digest = _parts(
+                session_document
+            )
             counters = session.consumption.to_dict()
             counters_json = _content_json(counters)
-            execution_content: str | None = None
-            execution_canonical: str | None = None
-            execution_digest: str | None = None
+            execution_content = None
+            execution_canonical = None
+            execution_digest = None
             if execution_document is not None:
-                execution_content, execution_canonical, execution_digest = _parts(execution_document)
+                execution_content, execution_canonical, execution_digest = _parts(
+                    execution_document
+                )
+
             existing = self._conn().execute(
                 "SELECT * FROM sessions WHERE fingerprint = ?",
                 (session_fingerprint,),
@@ -2590,198 +4266,488 @@ class SQLiteUnitOfWork:
                         execution_digest,
                     ),
                 )
-                session_key = _object_key("session", session_fingerprint)
-                for ordinal, (claim_id, claim_version) in enumerate(claim_versions):
+                legacy_session_key = _object_key(
+                    "session",
+                    session_fingerprint,
+                )
+                for ordinal, (claim_id, claim_version) in enumerate(
+                    claim_versions
+                ):
                     self._conn().execute(
                         """
                         INSERT INTO session_claim_links(
-                            session_fingerprint, claim_id, claim_version, ordinal
+                            session_fingerprint, claim_id,
+                            claim_version, ordinal
                         ) VALUES (?, ?, ?, ?)
                         """,
-                        (session_fingerprint, claim_id, claim_version, ordinal),
+                        (
+                            session_fingerprint,
+                            claim_id,
+                            claim_version,
+                            ordinal,
+                        ),
                     )
                     self._put_dependency(
-                        session_key,
-                        _object_key("claim-version", f"{claim_id}:{claim_version}"),
+                        legacy_session_key,
+                        _object_key(
+                            "claim-version",
+                            f"{claim_id}:{claim_version}",
+                        ),
                         "claim_version",
                     )
-                for ordinal, fingerprint in enumerate(bundle_ids):
+                for ordinal, stored_bundle in enumerate(bundles):
                     self._conn().execute(
                         """
                         INSERT INTO session_bundle_links(
                             session_fingerprint, bundle_fingerprint, ordinal
                         ) VALUES (?, ?, ?)
                         """,
-                        (session_fingerprint, fingerprint, ordinal),
+                        (
+                            session_fingerprint,
+                            stored_bundle.fingerprint,
+                            ordinal,
+                        ),
                     )
                     self._put_dependency(
-                        session_key,
-                        _object_key("bundle", fingerprint),
+                        legacy_session_key,
+                        _object_key("bundle", stored_bundle.fingerprint),
                         "bundle",
                     )
-                for ordinal, fingerprint in enumerate(falsification_ids):
+                for ordinal, stored_falsification in enumerate(falsifications):
                     self._conn().execute(
                         """
                         INSERT INTO session_falsification_links(
-                            session_fingerprint, falsification_fingerprint, ordinal
+                            session_fingerprint,
+                            falsification_fingerprint, ordinal
                         ) VALUES (?, ?, ?)
                         """,
-                        (session_fingerprint, fingerprint, ordinal),
+                        (
+                            session_fingerprint,
+                            stored_falsification.fingerprint,
+                            ordinal,
+                        ),
                     )
                     self._put_dependency(
-                        session_key,
-                        _object_key("falsification", fingerprint),
+                        legacy_session_key,
+                        _object_key(
+                            "falsification",
+                            stored_falsification.fingerprint,
+                        ),
                         "falsification_result",
                     )
             else:
-                stored = self.get_session(session_fingerprint)
-                candidate = (
-                    _json_value(session_document),
-                    graph_fingerprint,
-                    plan_value,
-                    execution_value,
-                    None if execution_document is None else _json_value(execution_document),
-                    tuple(claim_versions),
-                    bundle_ids,
-                    falsification_ids,
+                _, stored_document, stored_counters = self._read_session_domain(
+                    session_fingerprint
                 )
-                observed = (
-                    _json_value(stored.session_document),
-                    stored.graph_fingerprint,
-                    stored.plan_fingerprint,
-                    stored.execution_fingerprint,
-                    None if stored.execution_document is None else _json_value(stored.execution_document),
-                    stored.claim_versions,
-                    stored.bundle_fingerprints,
-                    stored.falsification_fingerprints,
-                )
-                if observed != candidate:
+                if (
+                    stored_document != _json_value(session_document)
+                    or existing["graph_fingerprint"] != graph_fingerprint
+                    or existing["termination"]
+                    != session.termination_reason.value
+                    or stored_counters != counters
+                ):
                     raise StorageConflictError(
-                        "immutable session fingerprint has conflicting content or references"
+                        "immutable session fingerprint has conflicting semantic content"
                     )
-            return self.get_session(session_fingerprint)
 
-    def _session_current(self, fingerprint: str) -> bool:
-        if self._is_invalidated(_object_key("session", fingerprint)):
+            record_document = self._session_record_document(
+                session_fingerprint,
+                claim_versions,
+                bundles,
+                falsifications,
+            )
+            record_content, record_canonical, record_fingerprint = _parts(
+                record_document,
+                fingerprint_format=_SESSION_RECORD_FORMAT,
+            )
+            record = self._conn().execute(
+                "SELECT * FROM session_records WHERE record_fingerprint = ?",
+                (record_fingerprint,),
+            ).fetchone()
+            if record is None:
+                self._conn().execute(
+                    """
+                    INSERT INTO session_records(
+                        record_fingerprint, session_fingerprint,
+                        content_json, canonical_json, content_digest
+                    ) VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (
+                        record_fingerprint,
+                        session_fingerprint,
+                        record_content,
+                        record_canonical,
+                        record_fingerprint,
+                    ),
+                )
+                record_key = _object_key(
+                    "session-record",
+                    record_fingerprint,
+                )
+                for ordinal, (claim_id, claim_version) in enumerate(
+                    claim_versions
+                ):
+                    self._conn().execute(
+                        """
+                        INSERT INTO session_record_claim_links(
+                            record_fingerprint, claim_id,
+                            claim_version, ordinal
+                        ) VALUES (?, ?, ?, ?)
+                        """,
+                        (
+                            record_fingerprint,
+                            claim_id,
+                            claim_version,
+                            ordinal,
+                        ),
+                    )
+                    self._put_dependency(
+                        record_key,
+                        _object_key(
+                            "claim-version",
+                            f"{claim_id}:{claim_version}",
+                        ),
+                        "claim_version",
+                    )
+                for ordinal, stored_bundle in enumerate(bundles):
+                    if stored_bundle.record_fingerprint is None:
+                        continue
+                    self._conn().execute(
+                        """
+                        INSERT INTO session_record_bundle_links(
+                            record_fingerprint, bundle_fingerprint,
+                            bundle_record_fingerprint, ordinal
+                        ) VALUES (?, ?, ?, ?)
+                        """,
+                        (
+                            record_fingerprint,
+                            stored_bundle.fingerprint,
+                            stored_bundle.record_fingerprint,
+                            ordinal,
+                        ),
+                    )
+                    self._put_dependency(
+                        record_key,
+                        stored_bundle.object_key,
+                        "bundle_record",
+                    )
+                for ordinal, stored_falsification in enumerate(falsifications):
+                    if stored_falsification.record_fingerprint is None:
+                        continue
+                    self._conn().execute(
+                        """
+                        INSERT INTO session_record_falsification_links(
+                            record_fingerprint, falsification_fingerprint,
+                            falsification_record_fingerprint, ordinal
+                        ) VALUES (?, ?, ?, ?)
+                        """,
+                        (
+                            record_fingerprint,
+                            stored_falsification.fingerprint,
+                            stored_falsification.record_fingerprint,
+                            ordinal,
+                        ),
+                    )
+                    self._put_dependency(
+                        record_key,
+                        stored_falsification.object_key,
+                        "falsification_record",
+                    )
+            else:
+                verified = _verified_document(
+                    content_json=record["content_json"],
+                    canonical_json_value=record["canonical_json"],
+                    content_digest=record["content_digest"],
+                    fingerprint_format=_SESSION_RECORD_FORMAT,
+                    identity=f"session record {record_fingerprint}",
+                )
+                if verified != _json_value(record_document):
+                    raise StorageConflictError(
+                        "session record identity has conflicting dependencies"
+                    )
+
+            self._put_session_observation(
+                session_fingerprint=session_fingerprint,
+                session_record_fingerprint=record_fingerprint,
+                plan_fingerprint=plan_value,
+                execution_fingerprint=execution_value,
+                execution_document=execution_document,
+            )
+            return self.get_session(
+                session_fingerprint,
+                record_fingerprint=record_fingerprint,
+            )
+
+    def _session_record_current(self, record_fingerprint: str) -> bool:
+        if self._is_invalidated(
+            _object_key("session-record", record_fingerprint)
+        ):
             return False
         claims = self._conn().execute(
-            "SELECT claim_id, claim_version FROM session_claim_links WHERE session_fingerprint = ?",
-            (fingerprint,),
+            """
+            SELECT claim_id, claim_version FROM session_record_claim_links
+            WHERE record_fingerprint = ?
+            """,
+            (record_fingerprint,),
         ).fetchall()
         if any(
-            not self._claim_current(item["claim_id"], item["claim_version"], set())
+            not self._claim_current(
+                item["claim_id"],
+                item["claim_version"],
+                set(),
+            )
             for item in claims
         ):
             return False
         bundles = self._conn().execute(
-            "SELECT bundle_fingerprint FROM session_bundle_links WHERE session_fingerprint = ?",
-            (fingerprint,),
+            """
+            SELECT bundle_fingerprint, bundle_record_fingerprint
+            FROM session_record_bundle_links
+            WHERE record_fingerprint = ?
+            """,
+            (record_fingerprint,),
         ).fetchall()
-        if any(not self._bundle_current(item[0]) for item in bundles):
+        if any(
+            not self._bundle_current(
+                item["bundle_fingerprint"],
+                item["bundle_record_fingerprint"],
+            )
+            for item in bundles
+        ):
             return False
-        falsification = self._conn().execute(
-            "SELECT falsification_fingerprint FROM session_falsification_links WHERE session_fingerprint = ?",
-            (fingerprint,),
+        falsifications = self._conn().execute(
+            """
+            SELECT falsification_fingerprint,
+                   falsification_record_fingerprint
+            FROM session_record_falsification_links
+            WHERE record_fingerprint = ?
+            """,
+            (record_fingerprint,),
         ).fetchall()
-        return all(self._falsification_current(item[0]) for item in falsification)
+        return all(
+            self._falsification_current(
+                item["falsification_fingerprint"],
+                item["falsification_record_fingerprint"],
+            )
+            for item in falsifications
+        )
 
-    def get_session(self, fingerprint: str) -> StoredSession:
-        fingerprint = _sha256(fingerprint, name="session fingerprint")
-        row = self._conn().execute(
-            "SELECT * FROM sessions WHERE fingerprint = ?",
-            (fingerprint,),
-        ).fetchone()
-        if row is None:
-            raise StorageNotFoundError(f"unknown session: {fingerprint}")
+    def _read_session_observation_row(
+        self,
+        row: sqlite3.Row,
+    ) -> SessionExecutionObservation:
         document = _verified_document(
-            content_json=row["session_content_json"],
-            canonical_json_value=row["session_canonical_json"],
-            content_digest=row["session_content_digest"],
-            identity=f"session {fingerprint}",
+            content_json=row["content_json"],
+            canonical_json_value=row["canonical_json"],
+            content_digest=row["content_digest"],
+            fingerprint_format=_SESSION_OBSERVATION_FORMAT,
+            identity=f"session observation {row['observation_fingerprint']}",
         )
-        if document.get("fingerprint") != fingerprint:
-            raise StorageIntegrityError("session document fingerprint is corrupt")
-        _verify_semantic_document_fingerprint(document, identity=f"session {fingerprint}")
-        claim_graph_document = document.get("claim_graph")
-        if not isinstance(claim_graph_document, Mapping):
-            raise StorageIntegrityError("session claim graph document is missing")
-        _verify_semantic_document_fingerprint(
-            claim_graph_document,
-            identity=f"session {fingerprint} claim graph",
-        )
-        exact_graph_document = self._read_document(
-            "claim_graph",
-            row["graph_fingerprint"],
-        )
-        if exact_graph_document != claim_graph_document:
+        if row["content_digest"] != row["observation_fingerprint"]:
             raise StorageIntegrityError(
-                "session embedded graph conflicts with exact stored graph document"
+                "session observation key is corrupt"
             )
-        if row["plan_fingerprint"] is not None:
-            plan_row = self._conn().execute(
-                """
-                SELECT 1 FROM documents
-                WHERE document_kind = 'verification_plan' AND fingerprint = ?
-                """,
-                (row["plan_fingerprint"],),
-            ).fetchone()
-            if plan_row is None and row["execution_content_json"] is not None:
+        request_ids = tuple(document.get("request_ids", ()))
+        if row["request_ids_json"] != _content_json(request_ids):
+            raise StorageIntegrityError(
+                "session observation request IDs are corrupt"
+            )
+        if (
+            document.get("session_fingerprint")
+            != row["session_fingerprint"]
+            or document.get("session_record_fingerprint")
+            != row["session_record_fingerprint"]
+            or document.get("plan_fingerprint") != row["plan_fingerprint"]
+            or document.get("execution_fingerprint")
+            != row["execution_fingerprint"]
+            or document.get("correlation_id") != row["correlation_id"]
+        ):
+            raise StorageIntegrityError(
+                "session observation columns conflict with canonical content"
+            )
+        execution_document = document.get("execution_document")
+        if execution_document is not None:
+            if not isinstance(execution_document, Mapping):
                 raise StorageIntegrityError(
-                    "executor-produced session is missing its exact plan document"
+                    "session observation execution document is invalid"
                 )
-            if plan_row is not None:
-                plan_document = self._read_document(
-                    "verification_plan",
-                    row["plan_fingerprint"],
-                )
-                if plan_document.get("claim_graph_fingerprint") != row["graph_fingerprint"]:
-                    raise StorageIntegrityError(
-                        "session plan references a different claim graph"
-                    )
-        if document.get("claim_graph", {}).get("fingerprint") != row["graph_fingerprint"]:
-            raise StorageIntegrityError("session graph reference is corrupt")
-        if document.get("termination_reason") != row["termination"]:
-            raise StorageIntegrityError("session termination column is corrupt")
-        counters = json.loads(row["counters_json"])
-        if _content_json(counters) != row["counters_json"]:
-            raise StorageIntegrityError("session counters are not canonical JSON")
-        expected_counters = document.get("budget", {}).get("consumed", {})
-        if counters != expected_counters:
-            raise StorageIntegrityError("session counters conflict with session document")
-        execution_document: dict[str, Any] | None = None
-        if row["execution_content_json"] is not None:
-            if (
-                row["execution_canonical_json"] is None
-                or row["execution_content_digest"] is None
-                or row["execution_fingerprint"] is None
-            ):
-                raise StorageIntegrityError("session execution reference is incomplete")
-            execution_document = _verified_document(
-                content_json=row["execution_content_json"],
-                canonical_json_value=row["execution_canonical_json"],
-                content_digest=row["execution_content_digest"],
-                identity=f"session execution {row['execution_fingerprint']}",
-            )
             if execution_document.get("fingerprint") != row["execution_fingerprint"]:
-                raise StorageIntegrityError("session execution document fingerprint is corrupt")
-            exact_execution_document = self._read_document(
-                "verification_execution",
-                row["execution_fingerprint"],
-            )
-            if exact_execution_document != execution_document:
                 raise StorageIntegrityError(
-                    "session execution document conflicts with exact stored execution"
+                    "session observation execution fingerprint is corrupt"
                 )
-            if (
-                execution_document.get("session", {}).get("fingerprint") != fingerprint
-                or execution_document.get("claim_graph_fingerprint")
-                != row["graph_fingerprint"]
-                or execution_document.get("plan_fingerprint")
-                != row["plan_fingerprint"]
+            _verify_formatted_document_fingerprint(
+                execution_document,
+                identity="verification_execution",
+                nonsemantic_fields=("correlation_id",),
+            )
+        return SessionExecutionObservation(
+            observation_fingerprint=row["observation_fingerprint"],
+            session_fingerprint=row["session_fingerprint"],
+            session_record_fingerprint=row["session_record_fingerprint"],
+            plan_fingerprint=row["plan_fingerprint"],
+            execution_fingerprint=row["execution_fingerprint"],
+            request_ids=request_ids,
+            correlation_id=row["correlation_id"],
+            execution_document=deepcopy(execution_document),
+        )
+
+    def _read_session_record(
+        self,
+        domain_row: sqlite3.Row,
+        session_document: Mapping[str, Any],
+        counters: Mapping[str, Any],
+        row: sqlite3.Row,
+    ) -> StoredSession:
+        document = _verified_document(
+            content_json=row["content_json"],
+            canonical_json_value=row["canonical_json"],
+            content_digest=row["content_digest"],
+            fingerprint_format=_SESSION_RECORD_FORMAT,
+            identity=f"session record {row['record_fingerprint']}",
+        )
+        if row["content_digest"] != row["record_fingerprint"]:
+            raise StorageIntegrityError("session record key is corrupt")
+        if document.get("session_fingerprint") != row["session_fingerprint"]:
+            raise StorageIntegrityError(
+                "session record domain reference is corrupt"
+            )
+        claim_versions = tuple(
+            (item["claim_id"], item["claim_version"])
+            for item in self._conn().execute(
+                """
+                SELECT claim_id, claim_version
+                FROM session_record_claim_links
+                WHERE record_fingerprint = ? ORDER BY ordinal
+                """,
+                (row["record_fingerprint"],),
+            )
+        )
+        states = {
+            item["claim_id"]: item
+            for item in session_document.get("claims", ())
+        }
+        for claim_id, claim_version in claim_versions:
+            stored_claim = self._read_claim_version(claim_id, claim_version)
+            state = states.get(claim_id)
+            if state is None or (
+                state.get("stored_verdict") != stored_claim.verdict.value
+                or state.get("bundle_fingerprint")
+                != stored_claim.bundle_fingerprint
+                or tuple(state.get("evidence_ids", ()))
+                != stored_claim.report.evidence_ids
             ):
                 raise StorageIntegrityError(
-                    "session execution references conflict with session identity"
+                    f"session claim state for {claim_id} conflicts with durable basis"
                 )
+        bundle_rows = self._conn().execute(
+            """
+            SELECT bundle_fingerprint, bundle_record_fingerprint
+            FROM session_record_bundle_links
+            WHERE record_fingerprint = ? ORDER BY ordinal
+            """,
+            (row["record_fingerprint"],),
+        ).fetchall()
+        bundle_fingerprints = tuple(
+            item["bundle_fingerprint"] for item in bundle_rows
+        )
+        bundle_record_fingerprints = tuple(
+            item["bundle_record_fingerprint"] for item in bundle_rows
+        )
+        for item in bundle_rows:
+            self.get_bundle(
+                item["bundle_fingerprint"],
+                record_fingerprint=item["bundle_record_fingerprint"],
+            )
+        falsification_rows = self._conn().execute(
+            """
+            SELECT falsification_fingerprint,
+                   falsification_record_fingerprint
+            FROM session_record_falsification_links
+            WHERE record_fingerprint = ? ORDER BY ordinal
+            """,
+            (row["record_fingerprint"],),
+        ).fetchall()
+        falsification_fingerprints = tuple(
+            item["falsification_fingerprint"]
+            for item in falsification_rows
+        )
+        falsification_record_fingerprints = tuple(
+            item["falsification_record_fingerprint"]
+            for item in falsification_rows
+        )
+        for item in falsification_rows:
+            self.get_falsification_result(
+                item["falsification_fingerprint"],
+                record_fingerprint=item["falsification_record_fingerprint"],
+            )
+        expected_record = self._session_record_document(
+            row["session_fingerprint"],
+            claim_versions,
+            tuple(
+                self.get_bundle(
+                    item["bundle_fingerprint"],
+                    record_fingerprint=item["bundle_record_fingerprint"],
+                )
+                for item in bundle_rows
+            ),
+            tuple(
+                self.get_falsification_result(
+                    item["falsification_fingerprint"],
+                    record_fingerprint=item[
+                        "falsification_record_fingerprint"
+                    ],
+                )
+                for item in falsification_rows
+            ),
+        )
+        if document != _json_value(expected_record):
+            raise StorageIntegrityError(
+                "session record document conflicts with exact links"
+            )
+        observation_row = self._conn().execute(
+            """
+            SELECT * FROM session_execution_observations
+            WHERE session_record_fingerprint = ? ORDER BY rowid DESC LIMIT 1
+            """,
+            (row["record_fingerprint"],),
+        ).fetchone()
+        observation = (
+            None
+            if observation_row is None
+            else self._read_session_observation_row(observation_row)
+        )
+        return StoredSession(
+            fingerprint=row["session_fingerprint"],
+            session_document=deepcopy(dict(session_document)),
+            graph_fingerprint=domain_row["graph_fingerprint"],
+            plan_fingerprint=(
+                None if observation is None else observation.plan_fingerprint
+            ),
+            execution_fingerprint=(
+                None
+                if observation is None
+                else observation.execution_fingerprint
+            ),
+            execution_document=(
+                None
+                if observation is None
+                else observation.execution_document
+            ),
+            termination=domain_row["termination"],
+            counters=deepcopy(dict(counters)),
+            claim_versions=claim_versions,
+            bundle_fingerprints=bundle_fingerprints,
+            falsification_fingerprints=falsification_fingerprints,
+            current=self._session_record_current(row["record_fingerprint"]),
+            record_fingerprint=row["record_fingerprint"],
+            bundle_record_fingerprints=bundle_record_fingerprints,
+            falsification_record_fingerprints=(
+                falsification_record_fingerprints
+            ),
+        )
+
+    def _get_legacy_session(self, fingerprint: str) -> StoredSession:
+        row, document, counters = self._read_session_domain(fingerprint)
         claim_versions = tuple(
             (item["claim_id"], item["claim_version"])
             for item in self._conn().execute(
@@ -2792,39 +4758,22 @@ class SQLiteUnitOfWork:
                 (fingerprint,),
             )
         )
-        document_claim_ids = tuple(item["claim_id"] for item in document.get("claims", ()))
-        if tuple(item[0] for item in claim_versions) != document_claim_ids:
-            raise StorageIntegrityError("session claim links are corrupt")
-        states_by_id = {
+        states = {
             item["claim_id"]: item
             for item in document.get("claims", ())
         }
         for claim_id, claim_version in claim_versions:
             stored_claim = self._read_claim_version(claim_id, claim_version)
-            state = states_by_id[claim_id]
-            if (
+            state = states.get(claim_id)
+            if state is None or (
                 state.get("stored_verdict") != stored_claim.verdict.value
                 or state.get("bundle_fingerprint")
                 != stored_claim.bundle_fingerprint
-                or tuple(state.get("evidence_ids", ()))
-                != stored_claim.report.evidence_ids
-                or tuple(state.get("claim_dependency_ids", ()))
-                != tuple(
-                    dependency_id
-                    for dependency_id, _version
-                    in stored_claim.claim_dependency_versions
-                )
             ):
                 raise StorageIntegrityError(
-                    f"session claim state for {claim_id} conflicts with its durable basis"
+                    f"session claim state for {claim_id} conflicts with durable basis"
                 )
-        for root, verdict in document.get("root_verdicts", {}).items():
-            state = states_by_id.get(root)
-            if state is None or state.get("effective_verdict") != verdict:
-                raise StorageIntegrityError(
-                    "session root verdicts conflict with stored claim states"
-                )
-        bundle_ids = tuple(
+        bundle_fingerprints = tuple(
             item[0]
             for item in self._conn().execute(
                 """
@@ -2834,27 +4783,41 @@ class SQLiteUnitOfWork:
                 (fingerprint,),
             )
         )
-        expected_bundles = tuple(sorted({
-            item["bundle_fingerprint"]
-            for item in document.get("atomic_verifications", ())
-            if item.get("bundle_fingerprint") is not None
-        }))
-        if bundle_ids != expected_bundles:
-            raise StorageIntegrityError("session bundle links are corrupt")
-        for bundle_id in bundle_ids:
-            self.get_bundle(bundle_id)
-        falsification_ids = tuple(
+        falsification_fingerprints = tuple(
             item[0]
             for item in self._conn().execute(
                 """
-                SELECT falsification_fingerprint FROM session_falsification_links
+                SELECT falsification_fingerprint
+                FROM session_falsification_links
                 WHERE session_fingerprint = ? ORDER BY ordinal
                 """,
                 (fingerprint,),
             )
         )
-        for falsification_id in falsification_ids:
-            self.get_falsification_result(falsification_id)
+        execution_document = None
+        if row["execution_content_json"] is not None:
+            execution_document = _verified_document(
+                content_json=row["execution_content_json"],
+                canonical_json_value=row["execution_canonical_json"],
+                content_digest=row["execution_content_digest"],
+                identity=f"session execution {row['execution_fingerprint']}",
+            )
+            if execution_document.get("fingerprint") != row["execution_fingerprint"]:
+                raise StorageIntegrityError(
+                    "session execution document fingerprint is corrupt"
+                )
+        current = (
+            not self._is_invalidated(_object_key("session", fingerprint))
+            and all(
+                self._claim_current(claim_id, version, set())
+                for claim_id, version in claim_versions
+            )
+            and all(self._bundle_current(item) for item in bundle_fingerprints)
+            and all(
+                self._falsification_current(item)
+                for item in falsification_fingerprints
+            )
+        )
         return StoredSession(
             fingerprint=fingerprint,
             session_document=deepcopy(document),
@@ -2865,10 +4828,93 @@ class SQLiteUnitOfWork:
             termination=row["termination"],
             counters=deepcopy(counters),
             claim_versions=claim_versions,
-            bundle_fingerprints=bundle_ids,
-            falsification_fingerprints=falsification_ids,
-            current=self._session_current(fingerprint),
+            bundle_fingerprints=bundle_fingerprints,
+            falsification_fingerprints=falsification_fingerprints,
+            current=current,
         )
+
+    def get_session(
+        self,
+        fingerprint: str,
+        *,
+        record_fingerprint: str | None = None,
+    ) -> StoredSession:
+        fingerprint = _sha256(fingerprint, name="session fingerprint")
+        domain_row, document, counters = self._read_session_domain(fingerprint)
+        if record_fingerprint is not None:
+            record_value = _sha256(
+                record_fingerprint,
+                name="session record fingerprint",
+            )
+            row = self._conn().execute(
+                """
+                SELECT * FROM session_records
+                WHERE record_fingerprint = ? AND session_fingerprint = ?
+                """,
+                (record_value, fingerprint),
+            ).fetchone()
+            if row is None:
+                raise StorageNotFoundError(
+                    f"unknown session record: {record_value}"
+                )
+            return self._read_session_record(
+                domain_row,
+                document,
+                counters,
+                row,
+            )
+        rows = self._conn().execute(
+            """
+            SELECT * FROM session_records
+            WHERE session_fingerprint = ? ORDER BY rowid
+            """,
+            (fingerprint,),
+        ).fetchall()
+        if not rows:
+            return self._get_legacy_session(fingerprint)
+        records = tuple(
+            self._read_session_record(domain_row, document, counters, item)
+            for item in rows
+        )
+        return next(
+            (item for item in reversed(records) if item.current),
+            records[-1],
+        )
+
+    def session_record_history(
+        self,
+        fingerprint: str,
+    ) -> tuple[StoredSession, ...]:
+        fingerprint = _sha256(fingerprint, name="session fingerprint")
+        domain_row, document, counters = self._read_session_domain(fingerprint)
+        rows = self._conn().execute(
+            """
+            SELECT * FROM session_records
+            WHERE session_fingerprint = ? ORDER BY rowid
+            """,
+            (fingerprint,),
+        ).fetchall()
+        if not rows:
+            return (self._get_legacy_session(fingerprint),)
+        return tuple(
+            self._read_session_record(domain_row, document, counters, item)
+            for item in rows
+        )
+
+    def session_execution_observations(
+        self,
+        fingerprint: str,
+    ) -> tuple[SessionExecutionObservation, ...]:
+        fingerprint = _sha256(fingerprint, name="session fingerprint")
+        self._read_session_domain(fingerprint)
+        rows = self._conn().execute(
+            """
+            SELECT * FROM session_execution_observations
+            WHERE session_fingerprint = ? ORDER BY rowid
+            """,
+            (fingerprint,),
+        ).fetchall()
+        return tuple(self._read_session_observation_row(item) for item in rows)
 
     def session_history(self) -> tuple[StoredSession, ...]:
         fingerprints = tuple(
@@ -2896,70 +4942,177 @@ class SQLiteUnitOfWork:
             self._put_document("claim_graph", request.claim_graph.fingerprint, request.claim_graph.to_dict())
             self._put_document("verification_plan", request.plan.fingerprint, request.plan.to_dict())
 
-            acquisition_slots: dict[str, tuple[EvidenceSlotVersion, ...]] = {}
+            acquisition_dependencies: dict[
+                str,
+                tuple[EvidenceDependency, ...],
+            ] = {}
             steps_by_request: dict[tuple[str, str], str] = {}
+            plan_steps = {step.step_id: step for step in request.plan.steps}
+            verify_step_by_claim: dict[str, Any] = {}
             for step in request.plan.steps:
                 if step.kind is VerificationPlanStepKind.ACQUIRE_EVIDENCE:
-                    assert step.request_id is not None and step.request_fingerprint is not None
-                    steps_by_request[(step.request_id, step.request_fingerprint)] = step.step_id
-            evidence_slots_by_semantics: dict[str, EvidenceSlotVersion] = {}
+                    assert (
+                        step.request_id is not None
+                        and step.request_fingerprint is not None
+                    )
+                    steps_by_request[
+                        (step.request_id, step.request_fingerprint)
+                    ] = step.step_id
+                elif step.kind is VerificationPlanStepKind.VERIFY_ATOMIC_CLAIM:
+                    assert step.claim_id is not None
+                    verify_step_by_claim[step.claim_id] = step
+
             for key, provider_result in result.provider_results.items():
                 coverage = provider_result.coverage
-                slots: list[EvidenceSlotVersion] = []
+                exact_request = request.evidence_requests[key]
+                slot_identities = {
+                    item.evidence_id: item
+                    for item in provider_result.evidence_slot_identities
+                }
+                for item in provider_result.evidence_slot_identities:
+                    expected_identity = exact_request.evidence_slot_identity(
+                        item.evidence_id,
+                        source_identity=coverage.source_identity,
+                    )
+                    if item != expected_identity:
+                        raise StorageIntegrityError(
+                            "provider result semantic slot identity conflicts with exact request and source"
+                        )
+                dependencies: list[EvidenceDependency] = []
                 for evidence in provider_result.evidence:
+                    slot_identity = slot_identities.get(evidence.id)
                     written = self.put_evidence(
                         evidence,
-                        slot_id=evidence.id,
+                        slot_identity=slot_identity,
                         provenance={
                             "provider_id": provider_result.provider_id,
                             "provider_version": provider_result.provider_version,
-                            "request_id": provider_result.request_id,
-                            "request_fingerprint": provider_result.request_fingerprint,
-                            "result_fingerprint": provider_result.fingerprint,
+                            "request_fingerprint": (
+                                provider_result.request_fingerprint
+                            ),
+                            "capability_fingerprint": (
+                                provider_result.capability_fingerprint
+                            ),
                             "source_identity": coverage.source_identity,
                         },
                         source_snapshot=coverage.snapshot_identity,
                         bounds=coverage.declared_bounds,
                         coverage=coverage.to_dict(),
                     )
-                    assert written.slot_version is not None
-                    slot = self._slot_version(evidence.id, written.slot_version)
-                    slots.append(slot)
-                    evidence_slots_by_semantics[_content_json(_evidence_document(evidence))] = slot
+                    if slot_identity is None:
+                        dependency = EvidenceDependency(
+                            evidence.id,
+                            written.fingerprint,
+                        )
+                    else:
+                        if written.slot_version is None:
+                            raise StorageIntegrityError(
+                                "semantic slot write did not publish a version"
+                            )
+                        slot = self._slot_version(
+                            slot_identity.slot_id,
+                            written.slot_version,
+                        )
+                        dependency = EvidenceDependency(
+                            evidence.id,
+                            written.fingerprint,
+                            slot,
+                        )
+                    dependencies.append(dependency)
                 step_id = steps_by_request.get(key)
-                if step_id is not None:
-                    acquisition_slots[step_id] = tuple(slots)
+                if step_id is None:
+                    raise StorageIntegrityError(
+                        "provider result has no exact acquisition plan step"
+                    )
+                if exact_request.request_id != provider_result.request_id:
+                    raise StorageIntegrityError(
+                        "provider result audit request ID conflicts with exact request"
+                    )
+                acquisition_dependencies[step_id] = tuple(dependencies)
 
-            plan_steps = {step.step_id: step for step in request.plan.steps}
             falsification_ids_by_step: dict[str, str] = {}
             for step_id, falsification_result in result.falsification_results.items():
                 step = plan_steps[step_id]
-                slots = tuple(
-                    slot
+                dependencies = tuple(
+                    dependency
                     for dependency_step_id in step.dependency_step_ids
-                    for slot in acquisition_slots.get(dependency_step_id, ())
+                    for dependency in acquisition_dependencies.get(
+                        dependency_step_id,
+                        (),
+                    )
                 )
                 self.put_falsification_result(
                     falsification_result,
-                    evidence_slots=slots,
+                    evidence_slots=tuple(
+                        item.slot
+                        for item in dependencies
+                        if item.slot is not None
+                    ),
+                    evidence_artifacts=tuple(
+                        item.evidence_fingerprint
+                        for item in dependencies
+                        if item.slot is None
+                    ),
                 )
-                falsification_ids_by_step[step_id] = falsification_result.fingerprint
+                falsification_ids_by_step[
+                    step_id
+                ] = falsification_result.fingerprint
 
             stored_bundles: dict[str, StoredBundle] = {}
             for claim_id, bundle in result.bundles.items():
-                exact_slots: dict[str, EvidenceSlotVersion] = {}
+                step = verify_step_by_claim.get(claim_id)
+                candidates: dict[str, list[EvidenceDependency]] = {}
+                if step is not None:
+                    for dependency_step_id in step.dependency_step_ids:
+                        for dependency in acquisition_dependencies.get(
+                            dependency_step_id,
+                            (),
+                        ):
+                            candidates.setdefault(
+                                dependency.evidence_id,
+                                [],
+                            ).append(dependency)
+                exact_dependencies: dict[str, EvidenceDependency] = {}
                 for evidence in bundle.evidence:
-                    slot = evidence_slots_by_semantics.get(
-                        _content_json(_evidence_document(evidence))
-                    )
-                    if slot is None:
-                        written = self.put_evidence(evidence, slot_id=evidence.id)
-                        assert written.slot_version is not None
-                        slot = self._slot_version(evidence.id, written.slot_version)
-                    exact_slots[evidence.id] = slot
+                    matches = [
+                        item
+                        for item in candidates.get(evidence.id, ())
+                        if self.get_evidence(
+                            item.evidence_fingerprint
+                        ).evidence
+                        == evidence
+                    ]
+                    unique = {
+                        _content_json(self._dependency_document(item)): item
+                        for item in matches
+                    }
+                    if len(unique) > 1:
+                        raise StorageIntegrityError(
+                            f"bundle evidence {evidence.id} has ambiguous durable acquisition identities"
+                        )
+                    if unique:
+                        dependency = next(iter(unique.values()))
+                    else:
+                        written = self.put_evidence(evidence)
+                        dependency = EvidenceDependency(
+                            evidence.id,
+                            written.fingerprint,
+                        )
+                    exact_dependencies[evidence.id] = dependency
+                exact_slots = {
+                    evidence_id: dependency.slot
+                    for evidence_id, dependency in exact_dependencies.items()
+                    if dependency.slot is not None
+                }
+                exact_artifacts = {
+                    evidence_id: dependency.evidence_fingerprint
+                    for evidence_id, dependency in exact_dependencies.items()
+                    if dependency.slot is None
+                }
                 stored_bundles[claim_id] = self.put_bundle(
                     bundle,
                     evidence_slots=exact_slots,
+                    evidence_artifacts=exact_artifacts,
                 )
 
             verifier_versions: dict[str, str] = {}

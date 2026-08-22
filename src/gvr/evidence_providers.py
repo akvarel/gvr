@@ -15,6 +15,11 @@ from .model import Evidence
 EVIDENCE_REQUEST_SCHEMA_VERSION = 1
 EVIDENCE_REQUEST_KIND = "gvr.evidence_request"
 EVIDENCE_REQUEST_FINGERPRINT_FORMAT = "gvr.evidence_request.ieee754-json.v1"
+EVIDENCE_SLOT_IDENTITY_SCHEMA_VERSION = 1
+EVIDENCE_SLOT_IDENTITY_KIND = "gvr.evidence_slot_identity"
+EVIDENCE_SLOT_IDENTITY_FINGERPRINT_FORMAT = (
+    "gvr.evidence_slot_identity.ieee754-json.v1"
+)
 EVIDENCE_COVERAGE_SCHEMA_VERSION = 1
 EVIDENCE_COVERAGE_KIND = "gvr.evidence_coverage"
 EVIDENCE_COVERAGE_FINGERPRINT_FORMAT = "gvr.evidence_coverage.ieee754-json.v1"
@@ -237,6 +242,90 @@ def _validate_versioned_domain(
 
 
 @dataclass(frozen=True, kw_only=True)
+class EvidenceSlotIdentity:
+    """Canonical identity for one explicitly replaceable semantic evidence slot.
+
+    The identity deliberately excludes acquisition correlation, provider version,
+    source snapshot, and evidence content. Those values may advance the slot but
+    cannot rename it.
+    """
+
+    provider_id: str
+    evidence_id: str
+    source_identity: Mapping[str, Any]
+    request_identity: Mapping[str, Any]
+    schema_version: int = EVIDENCE_SLOT_IDENTITY_SCHEMA_VERSION
+    kind: str = EVIDENCE_SLOT_IDENTITY_KIND
+    fingerprint_format: str = EVIDENCE_SLOT_IDENTITY_FINGERPRINT_FORMAT
+    fingerprint: str = field(init=False)
+
+    def __post_init__(self) -> None:
+        _validate_versioned_domain(
+            schema_version=self.schema_version,
+            expected_schema_version=EVIDENCE_SLOT_IDENTITY_SCHEMA_VERSION,
+            kind=self.kind,
+            expected_kind=EVIDENCE_SLOT_IDENTITY_KIND,
+            fingerprint_format=self.fingerprint_format,
+            expected_fingerprint_format=EVIDENCE_SLOT_IDENTITY_FINGERPRINT_FORMAT,
+            noun="evidence slot identity",
+        )
+        object.__setattr__(
+            self,
+            "provider_id",
+            _strict_identifier(self.provider_id, name="slot provider_id"),
+        )
+        object.__setattr__(
+            self,
+            "evidence_id",
+            _strict_identifier(self.evidence_id, name="slot evidence_id"),
+        )
+        object.__setattr__(
+            self,
+            "source_identity",
+            _strict_mapping(self.source_identity, name="slot source_identity"),
+        )
+        object.__setattr__(
+            self,
+            "request_identity",
+            _strict_mapping(self.request_identity, name="slot request_identity"),
+        )
+        object.__setattr__(
+            self,
+            "fingerprint",
+            _fingerprint(
+                self.semantic_definition(),
+                fingerprint_format=self.fingerprint_format,
+            ),
+        )
+
+    @property
+    def slot_id(self) -> str:
+        return f"semantic-evidence-slot:{self.fingerprint}"
+
+    def semantic_definition(self) -> dict[str, Any]:
+        return {
+            "schema_version": self.schema_version,
+            "kind": self.kind,
+            "provider_id": self.provider_id,
+            "evidence_id": self.evidence_id,
+            "source_identity": self.source_identity,
+            "request_identity": self.request_identity,
+        }
+
+    def to_dict(self) -> dict[str, Any]:
+        value = _export_value(self.semantic_definition())
+        value.update({
+            "fingerprint_format": self.fingerprint_format,
+            "fingerprint": self.fingerprint,
+            "slot_id": self.slot_id,
+        })
+        return value
+
+    def export(self) -> dict[str, Any]:
+        return self.to_dict()
+
+
+@dataclass(frozen=True, kw_only=True)
 class EvidenceRequest:
     request_id: str
     provider_id: str
@@ -298,6 +387,47 @@ class EvidenceRequest:
             "snapshot_context": self.snapshot_context,
             "bounds": self.bounds,
         }
+
+    def slot_request_identity(self) -> dict[str, Any]:
+        """Return stable request semantics for replaceable slot namespacing.
+
+        Provider version and snapshot context describe an acquisition version,
+        not the logical source/request slot. ``request_id`` remains transport
+        correlation and is already absent from this definition.
+        """
+
+        return {
+            "schema_version": 1,
+            "kind": "gvr.evidence_slot_request_identity",
+            "request_kind": self.request_kind,
+            "requested_evidence_kinds": self.requested_evidence_kinds,
+            "source_class": self.source_class,
+            "snapshot_class": self.snapshot_class,
+            "subject": self.subject,
+            "spec": self.spec,
+            "semantic_scope": self.semantic_scope,
+            "source_context": self.source_context,
+            "bounds": self.bounds,
+        }
+
+    def evidence_slot_identity(
+        self,
+        evidence_id: str,
+        *,
+        source_identity: Mapping[str, Any] | None = None,
+    ) -> EvidenceSlotIdentity:
+        """Explicitly bind one evidence ID to this request's semantic slot."""
+
+        return EvidenceSlotIdentity(
+            provider_id=self.provider_id,
+            evidence_id=evidence_id,
+            source_identity=(
+                self.source_context
+                if source_identity is None
+                else source_identity
+            ),
+            request_identity=self.slot_request_identity(),
+        )
 
     def to_dict(self) -> dict[str, Any]:
         value = _export_value(self.semantic_definition())
@@ -467,6 +597,7 @@ class EvidenceProviderResult:
     evidence: tuple[Evidence, ...] = ()
     issues: tuple[EvidenceProviderIssue, ...] = ()
     capability_fingerprint: str
+    evidence_slot_identities: tuple[EvidenceSlotIdentity, ...] = ()
     schema_version: int = EVIDENCE_PROVIDER_RESULT_SCHEMA_VERSION
     kind: str = EVIDENCE_PROVIDER_RESULT_KIND
     fingerprint_format: str = EVIDENCE_PROVIDER_RESULT_FINGERPRINT_FORMAT
@@ -508,6 +639,42 @@ class EvidenceProviderResult:
         object.__setattr__(self, "evidence", normalized_evidence)
 
         try:
+            slot_identities = tuple(self.evidence_slot_identities)
+        except TypeError as exc:
+            raise EvidenceProviderError(
+                "evidence_slot_identities must be iterable"
+            ) from exc
+        if any(type(item) is not EvidenceSlotIdentity for item in slot_identities):
+            raise EvidenceProviderError(
+                "evidence_slot_identities must contain exact EvidenceSlotIdentity records"
+            )
+        slot_identities = tuple(sorted(
+            slot_identities,
+            key=lambda item: (
+                canonical_utf8_key(item.evidence_id, path="slot evidence_id"),
+                canonical_utf8_key(item.fingerprint, path="slot fingerprint"),
+            ),
+        ))
+        slot_evidence_ids = tuple(item.evidence_id for item in slot_identities)
+        if len(set(slot_evidence_ids)) != len(slot_evidence_ids):
+            raise EvidenceProviderError(
+                "evidence_slot_identities contain a duplicate evidence ID"
+            )
+        if len({item.slot_id for item in slot_identities}) != len(slot_identities):
+            raise EvidenceProviderError(
+                "evidence_slot_identities contain a duplicate semantic slot"
+            )
+        if not set(slot_evidence_ids) <= set(evidence_by_id):
+            raise EvidenceProviderError(
+                "evidence_slot_identities reference evidence absent from result"
+            )
+        if any(item.provider_id != self.provider_id for item in slot_identities):
+            raise EvidenceProviderError(
+                "evidence slot provider identity does not match provider result"
+            )
+        object.__setattr__(self, "evidence_slot_identities", slot_identities)
+
+        try:
             normalized_issues = tuple(_normalize_issue(item) for item in self.issues)
         except TypeError as exc:
             raise EvidenceProviderError("issues must be iterable") from exc
@@ -531,7 +698,7 @@ class EvidenceProviderResult:
         object.__setattr__(self, "fingerprint", _fingerprint(self.semantic_definition(), fingerprint_format=self.fingerprint_format))
 
     def semantic_definition(self) -> dict[str, Any]:
-        return {
+        definition = {
             "schema_version": self.schema_version,
             "kind": self.kind,
             "request_fingerprint": self.request_fingerprint,
@@ -543,6 +710,11 @@ class EvidenceProviderResult:
             "issues": tuple(_issue_definition(item) for item in self.issues),
             "capability_fingerprint": self.capability_fingerprint,
         }
+        if self.evidence_slot_identities:
+            definition["evidence_slot_identities"] = tuple(
+                item.to_dict() for item in self.evidence_slot_identities
+            )
+        return definition
 
     def to_dict(self) -> dict[str, Any]:
         value = _export_value(self.semantic_definition())
@@ -693,6 +865,31 @@ class EvidenceProviderVerifierInput:
     present_required_evidence_kinds: tuple[str, ...]
     missing_required_evidence_kinds: tuple[str, ...]
 
+    def to_dict(self) -> dict[str, Any]:
+        return _export_value({
+            "status": self.status.value,
+            "coverage": self.coverage.to_dict(),
+            "evidence": tuple(
+                _evidence_definition(item) for item in self.evidence
+            ),
+            "issues": tuple(_issue_definition(item) for item in self.issues),
+            "result_fingerprint": self.result_fingerprint,
+            "verifier_capability_fingerprint": (
+                self.verifier_capability_fingerprint
+            ),
+            "compatible": self.compatible,
+            "emitted_evidence_kinds": self.emitted_evidence_kinds,
+            "present_required_evidence_kinds": (
+                self.present_required_evidence_kinds
+            ),
+            "missing_required_evidence_kinds": (
+                self.missing_required_evidence_kinds
+            ),
+        })
+
+    def export(self) -> dict[str, Any]:
+        return self.to_dict()
+
 
 def provider_result_for_verifier(result: EvidenceProviderResult, verifier: VerifierCapability) -> EvidenceProviderVerifierInput:
     if not isinstance(result, EvidenceProviderResult):
@@ -807,6 +1004,18 @@ def validate_evidence_provider_result(result: EvidenceProviderResult, request: E
         raise EvidenceProviderError("coverage source identity does not match request source context")
     if result.coverage.snapshot_identity != request.snapshot_context:
         raise EvidenceProviderError("coverage snapshot identity does not match request snapshot context")
+    expected_slot_identities = {
+        item.evidence_id: request.evidence_slot_identity(
+            item.evidence_id,
+            source_identity=result.coverage.source_identity,
+        )
+        for item in result.evidence_slot_identities
+    }
+    for item in result.evidence_slot_identities:
+        if item != expected_slot_identities[item.evidence_id]:
+            raise EvidenceProviderError(
+                "evidence slot identity does not match canonical provider/source/request semantics"
+            )
     if result.status is EvidenceAcquisitionStatus.COMPLETE:
         if not requested <= covered:
             raise EvidenceProviderError("complete result does not cover all requested evidence kinds")

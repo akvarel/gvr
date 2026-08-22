@@ -81,7 +81,7 @@ All tests use the real provider runtime, verifier runtime, executor, and SQLite 
 | 6 | B/C | Provider identity scopes slots; provider version is excluded from slot identity but advances the same slot and exact basis. | `test_task22_06_provider_identity_scopes_slots_but_provider_version_advances_same_slot` |
 | 7 | C | Snapshot-only change with identical `Evidence` content versions the same slot, bundle basis, claim basis, and session basis once; replay is idempotent. | `test_task22_07_snapshot_change_with_identical_content_versions_bundle_claim_and_session_once` |
 | 8 | C | Content change advances once and leaves an unrelated source's bundle, claim, and session current. | `test_task22_08_content_change_stales_exact_only_and_leaves_unrelated_current` |
-| 9 | C | Falsification records preserve and invalidate the exact semantic slot version transitively. | `test_task22_09_falsification_tracks_exact_semantic_slot_version_transitively` |
+| 9 | C | Falsification records preserve and invalidate the exact semantic slot version transitively, whether the snapshot also changes the domain result fingerprint or only its durable basis. | `test_task22_09_falsification_tracks_exact_semantic_slot_version_transitively` |
 | 10 | D | Undeclared evidence remains immutable, creates no slot, and persists direct immutable bundle dependencies. | `test_task22_10_undeclared_evidence_remains_immutable_without_fake_slots` |
 | 11 | E | An outer transaction rollback removes artifact/slot advances, invalidation, bundle/falsification records, claim versions, session records, and audit observations together. | `test_task22_11_outer_rollback_removes_slot_advance_and_all_transitive_records` |
 | 12 | E | v1 migration marks ambiguous raw-ID slots stale; explicit semantic replacement and restart replay are safe and idempotent. | `test_task22_12_v1_migration_marks_ambiguous_raw_slots_stale_and_restart_replay_is_idempotent` |
@@ -111,8 +111,90 @@ The full repository now collects 566 tests: the approved-base 554 plus these 12 
 
 ## GREEN evidence
 
-Pending implementation and rerun from the RED checkpoint.
+Implementation:
+
+- `EvidenceSlotIdentity` is a frozen public provider/storage contract with a canonical fingerprint and derived `slot_id`.
+- `EvidenceRequest.slot_request_identity()` and `evidence_slot_identity()` deliberately exclude correlation request ID, provider version, snapshot, and evidence content while including provider/source/stable-request semantics.
+- `EvidenceProviderResult.evidence_slot_identities` is optional, fingerprinted, protocol-round-trippable, and revalidated both after provider execution and again at durable recording.
+- `record_execution()` writes a semantic slot only for an explicit declaration. Otherwise it records a direct immutable dependency. No production path infers a slot from raw `Evidence.id`.
+- Evidence provenance excludes audit `request_id` and aggregate result fingerprint. Exact request/execution/session correlation remains available in session execution observations.
+- Domain bundles, falsification results, and sessions now have separate durable record fingerprints for exact dependency bases. This permits snapshot or provider-version changes to advance the same slot even when the language-level domain artifact remains identical.
+- Claims link exact bundle records, mutable or immutable evidence dependencies, upstream claim versions, and exact falsification records. Missing or substituted v2 links fail closed during reads and currentness checks.
+- Session semantic records are separate from `SessionExecutionObservation` audit records, so correlation-only replay does not create a new truth basis or invalidation.
+- Provider-backed falsification inputs now expose canonical acquisition serialization and use the public `Evidence` fields correctly.
+- Durable schema version 2 adds slot authority metadata, mutable-or-immutable dependency records, versioned bundle/falsification/session records, and audit observations. Transactional v1 migration marks every ambiguous old slot non-authoritative without deleting history.
+
+Validation commands and observed results:
+
+```text
+python -m pytest -q -p no:cacheprovider tests/test_durable_storage_slot_identity.py
+12 passed
+
+python -m pytest -q -p no:cacheprovider \
+  tests/test_durable_storage.py \
+  tests/test_durable_storage_impossible_states.py \
+  tests/test_durable_storage_slot_identity.py
+50 passed
+
+python -m pytest -q -p no:cacheprovider \
+  tests/test_evidence_providers.py \
+  tests/test_evidence_provider_hardening.py \
+  tests/test_evidence_provider_task_17b.py \
+  tests/test_evidence_provider_task_17c.py \
+  tests/test_verification_execution.py \
+  tests/test_falsification.py
+217 passed
+
+python -m pytest -q -p no:cacheprovider
+566 passed
+
+python -m compileall -q src tests
+passed
+
+git diff --check
+passed
+```
+
+Wheel and installed-package evidence:
+
+```text
+wheel: gvr-0.2.0-py3-none-any.whl
+sha256: 4f239ed2a111f603f5ad868037b9a52f3d4a12e2da774a73d9ae79a1336801f1
+installed DURABLE_STORAGE_SCHEMA_VERSION: 2
+installed public slot contract: EvidenceSlotIdentity
+fresh installed Task 22 SQLite matrix: 12 passed
+```
+
+The installed test ran outside the source tree with `PYTHONPATH` removed. It exercised correlation-only replay, raw-ID namespace isolation, request/provider/source/version/snapshot/content variation, direct immutable evidence, exact falsification invalidation, transaction rollback, migration rollback, successful migration/reopen, and restart replay against the built wheel.
+
+## Post-GREEN adversarial alias review
+
+After the GREEN checkpoint, a separate real provider/executor/SQLite probe varied provider request correlation, execution correlation, canonical mapping insertion order, raw evidence IDs, provider identity, source identity, request parameters, provider version, snapshot, immutable content, claim/session identity, replay, and two database reopens.
+
+Observed results:
+
+```text
+correlation + canonical key order: 1 slot version, 0 slot events,
+  2 current claims/sessions, 2 separate audit observations
+provider version + snapshot + correlation replay: 2 slot versions,
+  1 slot event, 2 claim/session records, 3 audit observations
+same raw ID + same request ID across provider/source/request variants:
+  4 distinct semantic slots, 0 slot events, 4 current claims
+undeclared immutable evidence across version/snapshot/content changes:
+  0 slot rows, 0 slot events, 2 current claims
+content-only replacement plus unrelated source: 2 target slot versions,
+  1 slot event, unrelated claim/session still current
+two reopen/replay cycles: 2 slot versions, 1 slot event,
+  2 claim/session records, 4 audit observations
+POST_GREEN_ADVERSARIAL_REVIEW=PASS
+```
+
+A second transitive fingerprint audit proved that a correlation-only change keeps the `EvidenceRequest`, `EvidenceProviderResult`, semantic slot, stored evidence version, bundle record, claim version, and session record identical while adding only an audit observation. A snapshot change kept the slot identity stable, produced a distinct immutable artifact and exact bundle/claim/session basis, emitted one slot-version event, and staled the exact old falsification record. It completed with `TRANSITIVE_FINGERPRINT_AUDIT=PASS`.
+
+No remaining alias or correlation leakage was found, so the review required no production-code correction.
 
 ## Coverage and known gaps
 
-Pending GREEN validation, full-suite execution, compileall, wheel build/install, migration/reopen smoke, and separate post-GREEN adversarial review.
+The local `coverage` module is unavailable, so no percentage is claimed. Acceptance-aligned integration coverage is provided by the 12 real executor/provider/SQLite tests, 50 durable storage tests, 217 touched-boundary tests, the 566-test full suite, and the fresh installed-wheel matrix.
+
+No product-specific schema, TTL policy, remote database protocol, deployment, push, PR, or Drive report is included. The required post-GREEN adversarial alias review completed without finding another alias.

@@ -2080,6 +2080,7 @@ def _revalidate_provider_result(
         evidence=result.evidence,
         issues=result.issues,
         capability_fingerprint=result.capability_fingerprint,
+        evidence_slot_identities=result.evidence_slot_identities,
         schema_version=result.schema_version,
         kind=result.kind,
         fingerprint_format=result.fingerprint_format,

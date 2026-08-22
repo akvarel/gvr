@@ -80,6 +80,7 @@ This defines the generic durable storage boundary:
 
 - `EvidenceStore`, `BundleStore`, `ClaimStore`, `SessionStore`, and `DependencyIndex`;
 - `StorageUnitOfWork` and `UnitOfWorkFactory`;
+- `EvidenceDependency`, `EvidenceSlotVersion`, versioned stored-record views, and nonsemantic `SessionExecutionObservation` audit records;
 - immutable stored-record views and durable storage errors;
 - the explicit completed-execution persistence hook.
 
@@ -87,7 +88,7 @@ The interfaces contain no product-specific fields and do not require SQL.
 
 ## `src/gvr/sqlite_storage.py`
 
-This is the standard-library SQLite reference adapter. It implements explicit schema versioning and transactional migrations, immutable evidence plus versioned slots, exact bundle and claim bases, falsification and session persistence, indexed reverse dependencies, idempotent invalidation events, corruption checks, rollback, and completed-execution recording.
+This is the standard-library SQLite reference adapter. It implements schema-v2 transactional migration, fail-closed legacy slot authority, immutable evidence plus canonical semantic slot identities, versioned bundle/falsification/session dependency records, direct immutable evidence links, exact claim bases, separate execution audit observations, indexed reverse dependencies, idempotent invalidation events, corruption checks, rollback, and completed-execution recording without raw-ID slot inference.
 
 Read [Durable storage](DURABLE_STORAGE.md) before changing schema or current/stale semantics.
 
@@ -237,9 +238,10 @@ Read [Verifier capabilities](VERIFIER_CAPABILITIES.md) before adding or changing
 
 This contains the evidence acquisition contract layer:
 
-- `EvidenceRequest`;
+- `EvidenceRequest` and its stable slot-request identity;
+- canonical `EvidenceSlotIdentity` for explicit replaceable acquisition semantics;
 - `EvidenceCoverage`;
-- `EvidenceProviderResult` and stable code/category `EvidenceProviderIssue` without free text or verdicts;
+- `EvidenceProviderResult`, optional exact slot declarations, and stable code/category `EvidenceProviderIssue` without free text or verdicts;
 - `EvidenceProviderCapability` with possibly empty source/snapshot class metadata;
 - pure `EvidenceProviderCapabilityRegistry` with public exact request validation;
 - executable `EvidenceProviderRuntimeRegistry`;

@@ -236,11 +236,11 @@ def _enum(value: Any, enum_type: type[Enum], *, name: str) -> Enum:
 
 def _evidence_definition(evidence: Evidence) -> dict[str, Any]:
     return {
-        "evidence_id": evidence.evidence_id,
+        "evidence_id": evidence.id,
         "kind": evidence.kind,
         "payload": evidence.payload,
         "source": evidence.source,
-        "producer_fingerprint": evidence.producer_fingerprint,
+        "producer_fingerprint": evidence.fingerprint,
         "fingerprint": evidence.fingerprint,
     }
 

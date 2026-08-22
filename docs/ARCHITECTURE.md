@@ -113,16 +113,18 @@ Before invocation it reconstructs every nested fingerprinted contract, recompile
 
 See [Verification execution](VERIFICATION_EXECUTION.md) for the full contract.
 
-When the caller explicitly supplies storage or a unit of work, the executor records the completed provider evidence metadata, falsification results, bundles, claim bases, graph and plan references, execution document, and sealed session in one logical transaction before returning. Persistence failure raises rather than returning an unstored `PASS`.
+When the caller explicitly supplies storage or a unit of work, the executor records completed provider evidence metadata, explicit semantic slot versions or direct immutable evidence, falsification and bundle records, claim bases, graph and plan references, execution audit observations, and the sealed session in one logical transaction before returning. Persistence failure raises rather than returning an unstored `PASS`.
 
 ## Durable storage layer
 
 The durable layer is optional and has no effect on execution fingerprints when omitted. Five generic protocols separate evidence, bundles, claims, sessions, and reverse dependencies. `SQLiteStorage` is the standard-library reference adapter.
 
-Evidence artifacts are immutable and content-addressed. Replaceable slots append versions and atomically move one current pointer. Bundles, claim versions, falsification results, and sessions point to exact historical versions. Reverse edges are indexed, so a slot change invalidates only reachable dependents:
+Evidence artifacts are immutable and content-addressed. Replacement is opt-in: an `EvidenceProviderResult` may carry canonical `EvidenceSlotIdentity` records built from stable provider/source/request semantics. The identity excludes request correlation, provider version, snapshot, and evidence content. Raw `Evidence.id` is never a global mutable slot. Evidence without a declaration remains a direct immutable dependency.
+
+Replaceable slots append versions and atomically move one authoritative current pointer. Domain bundles, falsification results, and sessions use separate durable record fingerprints for exact historical dependency bases. Session plan/execution documents and correlation IDs are audit observations, not truth-currentness inputs. Reverse edges are indexed, so a slot change invalidates only reachable exact records:
 
 ```text
-slot version -> bundle or falsification result -> claim versions -> sessions
+slot version -> bundle or falsification record -> claim versions -> session records
 ```
 
 Current and stale state is structural. No TTL, cache entry, file timestamp, or session scan decides truth. Historical artifacts remain immutable and readable. See [Durable storage](DURABLE_STORAGE.md).
@@ -178,7 +180,7 @@ GVR does not secretly build another source graph in the verifier.
 
 An evidence provider is an acquisition contract, not a truth-producing verifier.
 
-`EvidenceRequest` names one exact provider ID and version, a request kind, requested evidence kinds, optional explicit source/snapshot classes, subject/spec, semantic scope, source/snapshot context, and bounds. Its semantic fingerprint excludes only the correlation request ID. `EvidenceProviderCapability` publishes exact request kinds, produced evidence kinds, source classes, and snapshot classes; empty class lists explicitly accept only unclassified requests. `EvidenceProviderResult` references the exact request fingerprint and carries exact provider identity, acquisition status, explicit fingerprinted coverage, deeply snapshotted evidence, stable code/category `EvidenceProviderIssue` diagnostics with no free text or verdict, and the capability fingerprint used for validation.
+`EvidenceRequest` names one exact provider ID and version, a request kind, requested evidence kinds, optional explicit source/snapshot classes, subject/spec, semantic scope, source/snapshot context, and bounds. Its semantic fingerprint excludes only the correlation request ID. Its separate slot-request identity also excludes provider version and snapshot context. `EvidenceProviderCapability` publishes exact request kinds, produced evidence kinds, source classes, and snapshot classes; empty class lists explicitly accept only unclassified requests. `EvidenceProviderResult` references the exact request fingerprint and carries exact provider identity, acquisition status, explicit fingerprinted coverage, deeply snapshotted evidence, stable code/category `EvidenceProviderIssue` diagnostics with no free text or verdict, the capability fingerprint used for validation, and optional exact `EvidenceSlotIdentity` declarations for explicitly replaceable evidence.
 
 The built-in schema-v1 `EvidenceProviderCapabilityRegistry` is honestly empty and purely descriptive. Its public request validator enforces exact source/snapshot class compatibility. `EvidenceProviderRuntimeRegistry` separately owns detached immutable runtime bindings, fingerprints the exact capability snapshot and registered runtime keys, and uses the validator before every invocation. It rechecks provider identity, converts only real execution exceptions to deterministic allowlisted secret-safe categories, and leaves malformed returned results as contract errors. Provider-to-verifier adapters expose structural evidence-kind facts without a generic sufficiency or truth field.
 

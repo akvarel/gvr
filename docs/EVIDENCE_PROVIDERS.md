@@ -19,6 +19,25 @@ Evidence providers are acquisition contracts. They collect immutable `Evidence` 
 
 The request fingerprint excludes `request_id`, so retry or transport correlation can change without changing request semantics. It includes every other request field, including `source_class` and `snapshot_class` even when either value is null. A provider result must reference the exact request fingerprint, which prevents replay against a semantically different request that happens to reuse the same `request_id`.
 
+`EvidenceRequest.slot_request_identity()` exposes the stable subset used only for durable replaceable-slot namespacing. It excludes `request_id`, `provider_version`, and `snapshot_context`: those identify correlation or one acquisition version, not the logical source/request slot.
+
+### `EvidenceSlotIdentity`
+
+`EvidenceSlotIdentity` is the smallest public acquisition-to-storage contract for explicit replacement semantics. A provider opts one emitted record into a replaceable slot with:
+
+```python
+slot_identity = request.evidence_slot_identity(
+    evidence.id,
+    source_identity=coverage.source_identity,
+)
+```
+
+The identity is frozen, versioned, canonically fingerprinted, and exports its derived `slot_id`. Its fingerprint contains provider ID, evidence ID, canonical source identity, and the stable slot request identity. It excludes correlation request ID, provider version, source snapshot, evidence content, execution/result/session fingerprints, and all wall-clock data.
+
+The raw evidence ID is therefore never a global durable slot. It is only one discriminator inside the canonical provider/source/request namespace. Same raw IDs from different providers, sources, subjects, specs, scopes, bounds, or request kinds produce different slots. A provider-version, snapshot, or content change advances the same slot.
+
+Including an identity in `EvidenceProviderResult.evidence_slot_identities` is the explicit declaration that the corresponding evidence is replaceable. Omission means the evidence remains immutable and must be linked directly by durable storage.
+
 ### `EvidenceCoverage`
 
 `EvidenceCoverage` reports `COMPLETE`, `PARTIAL`, or `UNKNOWN` completeness and carries explicit:
@@ -44,11 +63,14 @@ Coverage is deeply snapshotted, immutable, versioned, and independently fingerpr
 - acquisition status and full coverage;
 - deeply snapshotted immutable `Evidence` records;
 - provider-specific `EvidenceProviderIssue` diagnostics with no verdict field;
-- the exact provider capability fingerprint.
+- the exact provider capability fingerprint;
+- optional exact `evidence_slot_identities` for emitted evidence that is explicitly replaceable.
 
 `EvidenceProviderIssue` is a separate acquisition diagnostic contract with only a stable uppercase `code`, an optional allowlisted `category`, and `evidence_ids`. It has no free-text message and cannot carry a verifier verdict. Codes and categories reject direct or tokenized truth-like terms such as `PASS`, `FAIL`, `UNKNOWN`, `VERDICT`, `VERIFIED`, `SUFFICIENT`, and `TRUTH`. The exported failure categories are `TIMEOUT`, `ACCESS_DENIED`, `CONNECTION`, `IO`, `CANCELLED`, and `PROVIDER_EXCEPTION`. Evidence payloads are recursively detached and frozen. `Evidence.source` and the producer-supplied `Evidence.fingerprint` remain part of the result semantics. Evidence order does not affect the result fingerprint. Identical duplicate evidence IDs are deterministically deduplicated. Duplicate IDs with conflicting kind, payload, source, or producer fingerprint are rejected.
 
 `EvidenceAcquisitionStatus` is `COMPLETE`, `PARTIAL`, `UNAVAILABLE`, or `UNSUPPORTED`. Unavailable and unsupported results contain no evidence and use unknown coverage. Provider results never contain a claim verdict.
+
+Slot identity declarations are part of the provider result fingerprint. `request_id` remains outside that fingerprint. This makes correlation-only results semantically idempotent while ensuring that changing immutable versus replaceable acquisition semantics changes the result identity.
 
 ### Provider capability and runtime protocol
 
@@ -74,6 +96,7 @@ The runtime `EvidenceProvider` protocol declares:
 - exact capability fingerprint;
 - emitted evidence kinds are included in the provider's reported coverage;
 - exact declared scope, bounds, source identity, and snapshot identity;
+- every slot declaration references emitted evidence, uses the exact provider ID, and equals the canonical identity reconstructed from the request's stable slot semantics plus reported source identity;
 - complete coverage of every requested evidence kind for `COMPLETE` results;
 - equality of declared and observed scope for `COMPLETE` results;
 - rejection of contradictory `PARTIAL` results that claim every requested kind, the full declared scope, and no truncation.
@@ -88,7 +111,7 @@ These checks prevent cross-request replay, including replay where the attacker p
 
 `provider_capability_is_compatible_with_verifier(provider, verifier, request_kind=..., claim_kind=...)` takes both dimensions explicitly. Provider request support and verifier claim support are reported separately, alongside accepted evidence intersections and missing required evidence kinds.
 
-`provider_result_for_verifier(result, verifier)` validates every emitted evidence kind against the exact verifier capability and preserves the provider result's status, coverage, evidence, issues, and fingerprint. It exposes only structural compatibility facts: emitted evidence kinds, present required evidence kinds, and missing required evidence kinds. It has no generic `sufficient` or truth-upgrade field. Acquisition status and coverage never become verification truth.
+`provider_result_for_verifier(result, verifier)` validates every emitted evidence kind against the exact verifier capability and preserves the provider result's status, coverage, evidence, issues, and fingerprint. Its canonical `to_dict()` representation can be included in falsification provenance. It exposes only structural compatibility facts: emitted evidence kinds, present required evidence kinds, and missing required evidence kinds. It has no generic `sufficient` or truth-upgrade field. Acquisition status and coverage never become verification truth.
 
 ## Use by the verification planner
 

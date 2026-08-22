@@ -8,10 +8,10 @@ The reference implementation uses only Python's standard-library `sqlite3` modul
 
 The storage contract is split into five small, generic protocols:
 
-- `EvidenceStore` stores immutable evidence artifacts and replaceable evidence slots;
-- `BundleStore` stores immutable `VerificationBundle` objects and their exact evidence-version links;
+- `EvidenceStore` stores immutable evidence artifacts and explicitly replaceable evidence slots;
+- `BundleStore` stores immutable `VerificationBundle` objects plus versioned durable records for their exact mutable or immutable evidence basis;
 - `ClaimStore` stores claim definitions, versioned verification bases, and reconstructible history;
-- `SessionStore` stores sealed `VerificationSession` artifacts and exact graph, plan, execution, claim, bundle, and falsification references;
+- `SessionStore` stores sealed `VerificationSession` artifacts, exact semantic dependency records, and separate plan/execution audit observations;
 - `DependencyIndex` provides indexed reverse dependency lookup and durable invalidation events.
 
 `StorageUnitOfWork` combines those interfaces for callers that need one explicit transaction. `UnitOfWorkFactory` is the minimal factory contract used by adapters.
@@ -50,9 +50,9 @@ stored = storage.put_evidence(
 )
 ```
 
-Immutable artifacts never become stale because time passed. GVR does not use a TTL for verification truth.
+Immutable artifacts never become stale because time passed. GVR does not use a TTL for verification truth. When no replaceable semantics are declared, bundles and claims link directly to the immutable artifact. Storage does not manufacture a mutable slot from `Evidence.id`.
 
-A slot gives a stable logical name to a replaceable artifact:
+A low-level caller may explicitly own an opaque slot name:
 
 ```python
 stored = storage.put_evidence(
@@ -75,9 +75,44 @@ When a slot changes, SQLite atomically:
 
 Old slot versions and old artifacts remain available for audit and history reconstruction.
 
+### Semantic acquisition slots
+
+Provider-backed executor recording uses the smaller, canonical `EvidenceSlotIdentity` contract instead of a global string derived from raw `Evidence.id`:
+
+```python
+slot_identity = request.evidence_slot_identity(
+    evidence.id,
+    source_identity=coverage.source_identity,
+)
+
+result = EvidenceProviderResult(
+    # ... exact request, provider, status, coverage, and evidence ...
+    evidence_slot_identities=(slot_identity,),
+)
+```
+
+Declaring an identity is the explicit opt-in to replacement semantics. An omitted identity means immutable evidence.
+
+The slot fingerprint includes canonical:
+
+- provider ID;
+- source identity;
+- stable request kind, requested evidence kinds, subject, spec, semantic scope, source context, bounds, and source/snapshot classes;
+- the evidence ID scoped inside that provider/source/request namespace.
+
+It deliberately excludes:
+
+- correlation `request_id`;
+- provider version;
+- snapshot context or snapshot identity;
+- evidence payload, source snapshot, producer fingerprint, and other immutable artifact content;
+- execution, result, or session fingerprints.
+
+Provider version, snapshot, coverage, provenance, or evidence content changes therefore advance the same semantic slot. Correlation-only changes reuse the same artifact and slot version. A different provider, source, or semantic request gets a different slot even when it emits the same raw `Evidence.id`.
+
 ## Bundles
 
-`put_bundle()` stores a `VerificationBundle` under its existing bundle fingerprint. The durable record links every bundle evidence ID to one exact immutable artifact and one exact slot version.
+`put_bundle()` stores a `VerificationBundle` under its existing domain fingerprint. A separate durable bundle-record fingerprint links every evidence ID to either one exact immutable artifact or one exact semantic slot version.
 
 ```python
 slot = storage.get_slot("repository:main:snapshot")
@@ -87,10 +122,20 @@ stored_bundle = storage.put_bundle(
 )
 ```
 
+Direct immutable dependencies use `evidence_artifacts={evidence_id: fingerprint}`. If neither mapping is supplied for a new bundle, `put_bundle()` stores its evidence immutably. It never infers slots from evidence IDs.
+
+One domain bundle may have several historical durable records. This is necessary when a new snapshot or provider version changes storage provenance while the language-level `VerificationBundle` content remains identical:
+
+```python
+current = storage.get_bundle(bundle.fingerprint)
+history = storage.bundle_history(bundle.fingerprint)
+```
+
 A historical bundle is immutable. Its `current` state is derived structurally:
 
-- every linked slot version must still be the current slot version;
-- the bundle must not be downstream of a durable invalidation cause.
+- every replaceable dependency must still reference its slot's authoritative current version;
+- immutable dependencies remain current permanently unless their record is corrupt;
+- the exact bundle record must not be downstream of a durable invalidation cause.
 
 There is no age-based freshness rule.
 
@@ -124,10 +169,10 @@ Each immutable claim version preserves:
 - claim definition fingerprint;
 - verifier ID and exact version;
 - stored verdict and full report;
-- bundle fingerprint;
-- exact evidence slot versions;
+- bundle fingerprint and exact durable bundle-record fingerprint;
+- exact mutable slot versions and direct immutable evidence fingerprints;
 - exact upstream claim versions;
-- exact falsification result fingerprints;
+- exact falsification result and durable record fingerprints;
 - canonical basis fingerprint.
 
 A `PASS` cannot be recorded without at least one stored evidence, claim, or falsification basis. A stale bundle, stale claim dependency, stale falsification result, wrong verifier, wrong version, mismatched report, or cross-claim falsification result is rejected.
@@ -160,22 +205,27 @@ stored_session = storage.put_session(
 )
 ```
 
-The durable session record preserves:
+The durable session layer separates semantic truth basis from audit correlation. A session record preserves:
 
 - exact session document and semantic fingerprint;
 - exact claim graph fingerprint;
-- optional exact plan fingerprint;
-- optional exact execution fingerprint and execution document;
 - exact claim-version links;
-- exact bundle links;
-- exact falsification links;
+- exact bundle-record links;
+- exact falsification-record links;
 - claim statuses, root verdicts, termination, and counters from the session document.
+
+Plan fingerprints, execution fingerprints, exact execution documents, request IDs, and execution correlation IDs are stored as `SessionExecutionObservation` audit records. They do not create a new semantic session basis or affect currentness.
+
+```python
+records = storage.session_record_history(session.fingerprint)
+observations = storage.session_execution_observations(session.fingerprint)
+```
 
 A session remains in history after an input changes. `current_sessions()` returns structurally current sessions. `historical_sessions()` returns noncurrent session artifacts.
 
 ## Falsification results
 
-`FalsificationResult` artifacts are immutable and fingerprint-verified on read:
+`FalsificationResult` domain artifacts are immutable and fingerprint-verified on read. Their exact evidence basis is a separate durable record, so a result can retain historical mutable-slot or immutable-artifact links:
 
 ```python
 stored = storage.put_falsification_result(
@@ -188,7 +238,7 @@ A claim may use a falsification result only when the result belongs to that exac
 
 ```text
 slot version
-  -> falsification result
+  -> falsification record
   -> claim version
   -> downstream claim versions
   -> sessions
@@ -198,7 +248,7 @@ Falsification still does not decide truth. The stored falsification result is pa
 
 ## Explicit transactions
 
-Use a unit of work for several logical writes:
+Use a unit of work for several logical writes. Opaque `slot_id` is an explicit caller-owned low-level slot; provider acquisition should use `EvidenceSlotIdentity`:
 
 ```python
 with storage.unit_of_work() as uow:
@@ -229,7 +279,7 @@ with storage.unit_of_work() as uow:
 
 `storage` and `unit_of_work` are mutually exclusive. GVR never discovers storage globally.
 
-The executor first completes its normal fail-closed in-memory semantics. Before returning, durable recording atomically writes the exact provider evidence metadata, slot versions, falsification results, bundles, claim versions, graph and plan documents, execution document, and sealed session. If durable recording fails, `execute_verification_plan()` raises `VerificationExecutionError`; it does not return an unstored `PASS`.
+The executor first completes its normal fail-closed in-memory semantics. Before returning, durable recording atomically writes exact provider evidence metadata, explicit semantic slot versions or direct immutable dependencies, falsification records, bundle records, claim versions, graph and plan documents, execution audit observations, and sealed session records. `record_execution()` never uses raw `Evidence.id` as a global mutable slot. If durable recording fails, `execute_verification_plan()` raises `VerificationExecutionError`; it does not return an unstored `PASS`.
 
 Supplying no storage preserves the Task 19 and Task 20 behavior and fingerprints.
 
@@ -246,6 +296,10 @@ Bootstrap and every migration run in one SQLite transaction. The adapter never d
 
 Migration failure raises `StorageMigrationError` and rolls back schema creation or upgrade. `migration_hooks` exists for controlled adapter extensions and migration testing; a hook runs inside the same transaction.
 
+Schema version 2 adds canonical slot identity metadata, mutable-or-immutable evidence dependency links, versioned bundle/falsification/session records, and nonsemantic session execution observations.
+
+Version 1 did not record whether a slot string was caller-owned or inferred by the old executor from raw `Evidence.id`. Migration therefore marks every pre-v2 slot `LEGACY_AMBIGUOUS` and non-authoritative. Its artifacts and history remain readable, but any dependent bundle, claim, falsification result, or session is structurally stale. A new explicit semantic identity uses its canonical namespaced slot and can establish a new authoritative basis; an ambiguous raw slot is never silently adopted.
+
 ## Integrity and corruption behavior
 
 Reads do not trust an in-memory cache. `clear_cache()` is a compatibility no-op because SQLite remains authoritative.
@@ -256,7 +310,8 @@ Reads verify multiple independent layers:
 - canonical storage digest;
 - domain fingerprints for evidence-linked bundles, falsification results, claim graphs, and sessions;
 - relational columns against canonical documents;
-- exact foreign links and slot pointers;
+- exact foreign links, slot identity metadata, authority flags, and slot pointers;
+- exact bundle, falsification, claim, and session record fingerprints;
 - claim report, bundle, definition, dependency, and falsification consistency;
 - session claim and root state against exact durable claim bases.
 
@@ -269,10 +324,10 @@ Reverse edges are stored in `object_dependencies` with the `idx_object_dependenc
 The main dependency shapes are:
 
 ```text
-bundle -> slot version
-falsification result -> slot version
-claim version -> bundle / slot version / claim version / falsification result
-session -> claim version / bundle / falsification result
+bundle record -> slot version or immutable evidence artifact
+falsification record -> slot version or immutable evidence artifact
+claim version -> bundle record / evidence dependency / claim version / falsification record
+session record -> claim version / bundle record / falsification record
 ```
 
 `explain_reverse_dependency_lookup()` is a diagnostic helper for checking the SQLite query plan.
