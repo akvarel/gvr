@@ -122,7 +122,7 @@ Implementation:
 - Claims link exact bundle records, mutable or immutable evidence dependencies, upstream claim versions, and exact falsification records. Missing or substituted v2 links fail closed during reads and currentness checks.
 - Session semantic records are separate from `SessionExecutionObservation` audit records, so correlation-only replay does not create a new truth basis or invalidation.
 - Provider-backed falsification inputs now expose canonical acquisition serialization and use the public `Evidence` fields correctly.
-- Durable schema version 2 adds slot authority metadata, mutable-or-immutable dependency records, versioned bundle/falsification/session records, and audit observations. Transactional v1 migration marks every ambiguous old slot non-authoritative without deleting history.
+- Task 22 durable schema version 2 added slot authority metadata, mutable-or-immutable dependency records, versioned bundle/falsification/session records, and audit observations. Transactional v1 migration marks every ambiguous old slot non-authoritative without deleting history. Task 23 later advances the current adapter schema to version 3 only to permit multiple exact dependencies with one raw evidence ID; the Task 22 v1 ambiguity policy and authoritative v2 data remain preserved.
 
 Validation commands and observed results:
 
@@ -164,6 +164,8 @@ installed DURABLE_STORAGE_SCHEMA_VERSION: 2
 installed public slot contract: EvidenceSlotIdentity
 fresh installed Task 22 SQLite matrix: 12 passed
 ```
+
+These wheel values are the archived Task 22 checkpoint. The current Task 23 checkpoint reports durable schema version 3 and separately verifies transactional v2-to-v3 replay.
 
 The installed test ran outside the source tree with `PYTHONPATH` removed. It exercised correlation-only replay, raw-ID namespace isolation, request/provider/source/version/snapshot/content variation, direct immutable evidence, exact falsification invalidation, transaction rollback, migration rollback, successful migration/reopen, and restart replay against the built wheel.
 

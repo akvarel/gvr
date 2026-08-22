@@ -108,6 +108,10 @@ One exact acquisition step runs once. The same `(request_id, request_fingerprint
 
 Returned results are reconstructed and validated again against the exact request and capability, including request identity, provider identity, capability fingerprint, evidence kinds, coverage, scope, bounds, source identity, and snapshot identity.
 
+Operational correlation belongs in `EvidenceCoverage.audit` as an exact `AuditObservation`. Recursive correlation/request/run/span/trace ID aliases are rejected from semantic coverage maps. The full provider result remains available for transport and durable audit, but verifier and falsification acquisition inputs receive a semantic coverage projection with the audit observation removed.
+
+Independent acquisitions remain independent even when they emit an identical `Evidence` record with the same raw ID. The in-memory bundle contains one deduplicated evidence value, while durable completion recording retains every exact acquisition dependency and semantic slot identity.
+
 A provider execution exception becomes the existing deterministic `UNAVAILABLE` provider result. A provider that returns a malformed result causes the acquisition step to fail closed. Raw exception text and exception class representation are never included in semantic output.
 
 ### `RUN_FALSIFICATION`
@@ -213,17 +217,20 @@ The result fingerprint includes evidence and bundle identities through the provi
 The fingerprint excludes:
 
 - correlation IDs;
+- provider audit observations and their independent audit fingerprints;
 - human capability descriptions;
 - clocks and timestamps;
 - random values;
 - runtime object identity;
 - raw exception text and representation.
 
-Replaying the same exact semantic inputs and runtime outputs therefore produces the same request, bundle, session, and execution-result fingerprints.
+Replaying the same exact semantic inputs and runtime outputs therefore produces the same request, bundle, session, and execution-result fingerprints. An audit-only change preserves those fingerprints while producing a distinct retrievable session execution observation.
 
 ## Durable completion recording
 
-An explicitly supplied durable target is invoked only after the normal execution result and sealed session have been constructed. One logical write records exact provider evidence provenance, source snapshot, bounds, coverage, slot versions, falsification results, bundles, claim definitions and versions, graph and plan documents, execution document, and session links.
+An explicitly supplied durable target is invoked only after the normal execution result and sealed session have been constructed. One logical write records exact provider evidence provenance, source snapshot, bounds, semantic coverage, slot versions, falsification results, bundles, claim definitions and versions, graph and plan documents, the full audit-bearing execution observation, and session links.
+
+The write records dependency tuples rather than assuming one dependency per raw evidence ID. A verification step backed by acquisitions A and B therefore retains both exact slot versions even if A and B returned one identical raw `Evidence.id`. Reopen and replay are idempotent; advancing B changes only B's slot pointer, while A's slot remains current and the new bundle/claim/session basis links A's old current version plus B's new version.
 
 The write is atomic. If it fails, `execute_verification_plan()` raises `VerificationExecutionError` with a stable durable-storage failure category. It does not return a `PASS` whose basis was only partially stored.
 

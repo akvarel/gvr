@@ -38,6 +38,19 @@ The raw evidence ID is therefore never a global durable slot. It is only one dis
 
 Including an identity in `EvidenceProviderResult.evidence_slot_identities` is the explicit declaration that the corresponding evidence is replaceable. Omission means the evidence remains immutable and must be linked directly by durable storage.
 
+### `AuditObservation`
+
+`AuditObservation` is the generic channel for operational metadata that must remain inspectable without becoming verification truth. It is frozen, deeply snapshotted, versioned, and has its own canonical integrity fingerprint:
+
+```python
+audit = AuditObservation(metadata={
+    "trace_id": "trace-42",
+    "runner": {"runId": "run-7"},
+})
+```
+
+The audit fingerprint authenticates the observation itself. It is not included in coverage, provider-result, execution-result, durable evidence, slot, bundle, falsification, claim, or session semantic fingerprints.
+
 ### `EvidenceCoverage`
 
 `EvidenceCoverage` reports `COMPLETE`, `PARTIAL`, or `UNKNOWN` completeness and carries explicit:
@@ -49,9 +62,14 @@ Including an identity in `EvidenceProviderResult.evidence_slot_identities` is th
 - termination data and termination reason;
 - truncation state;
 - source and snapshot identities;
-- optional structured details.
+- optional structured details;
+- an optional exact `AuditObservation`.
 
 Coverage is deeply snapshotted, immutable, versioned, and independently fingerprinted. Complete coverage cannot be truncated. Partial coverage and truncation are separate facts. Unknown coverage cannot claim covered evidence kinds.
+
+Every semantic coverage map is recursively checked for operational identifier aliases. Combined keys such as `traceID`, `run-id`, `request_id`, and `correlationId`, plus nested forms such as `{"trace": {"id": ...}}`, are rejected from `details`, `declared_scope`, `observed_scope`, `declared_bounds`, `consumed`, `termination`, `source_identity`, and `snapshot_identity`. The error directs providers to `EvidenceCoverage.audit`.
+
+Genuine coverage facts remain semantic. Changing a bound, consumed count, termination fact, source/snapshot identity, scope, or detail changes the coverage fingerprint. Changing only `coverage.audit` changes only the audit observation fingerprint.
 
 ### `EvidenceProviderResult`
 
@@ -70,7 +88,9 @@ Coverage is deeply snapshotted, immutable, versioned, and independently fingerpr
 
 `EvidenceAcquisitionStatus` is `COMPLETE`, `PARTIAL`, `UNAVAILABLE`, or `UNSUPPORTED`. Unavailable and unsupported results contain no evidence and use unknown coverage. Provider results never contain a claim verdict.
 
-Slot identity declarations are part of the provider result fingerprint. `request_id` remains outside that fingerprint. This makes correlation-only results semantically idempotent while ensuring that changing immutable versus replaceable acquisition semantics changes the result identity.
+Slot identity declarations are part of the provider result fingerprint. `request_id` and `coverage.audit` remain outside that fingerprint. This makes correlation-only results semantically idempotent while ensuring that genuine coverage, evidence, provider, or immutable-versus-replaceable semantics still change the result identity.
+
+Provider-result transport retains the complete audit observation. The provider-to-verifier projection removes audit metadata before verifier and falsification semantic inputs are constructed, so operational identifiers cannot influence a verdict or falsification fingerprint through the generic coverage channel.
 
 ### Provider capability and runtime protocol
 

@@ -38,6 +38,8 @@ An immutable stored evidence artifact includes:
 - coverage;
 - a canonical storage fingerprint.
 
+Only semantic coverage is stored in that content-addressed artifact. Provider `AuditObservation` metadata is excluded from the artifact fingerprint and retained in the session execution observation that records the completed acquisition.
+
 Writing identical canonical content is idempotent:
 
 ```python
@@ -108,11 +110,11 @@ It deliberately excludes:
 - evidence payload, source snapshot, producer fingerprint, and other immutable artifact content;
 - execution, result, or session fingerprints.
 
-Provider version, snapshot, coverage, provenance, or evidence content changes therefore advance the same semantic slot. Correlation-only changes reuse the same artifact and slot version. A different provider, source, or semantic request gets a different slot even when it emits the same raw `Evidence.id`.
+Provider version, snapshot, genuine semantic coverage, provenance, or evidence content changes therefore advance the same semantic slot. Correlation-only or audit-observation-only changes reuse the same artifact and slot version. A different provider, source, or semantic request gets a different slot even when it emits the same raw `Evidence.id`.
 
 ## Bundles
 
-`put_bundle()` stores a `VerificationBundle` under its existing domain fingerprint. A separate durable bundle-record fingerprint links every evidence ID to either one exact immutable artifact or one exact semantic slot version.
+`put_bundle()` stores a `VerificationBundle` under its existing domain fingerprint. A separate durable bundle-record fingerprint links every exact acquisition dependency to either one immutable artifact or one semantic slot version.
 
 ```python
 slot = storage.get_slot("repository:main:snapshot")
@@ -123,6 +125,8 @@ stored_bundle = storage.put_bundle(
 ```
 
 Direct immutable dependencies use `evidence_artifacts={evidence_id: fingerprint}`. If neither mapping is supplied for a new bundle, `put_bundle()` stores its evidence immutably. It never infers slots from evidence IDs.
+
+The advanced `evidence_dependencies=` form accepts canonical `EvidenceDependency` records directly. It is used by executor recording when several independent acquisitions emit the same raw evidence ID. A bundle may contain one deduplicated immutable `Evidence` value while its durable record retains both exact provider/source/request slot dependencies. Dependency identity and ordering are canonical, not inferred from raw IDs.
 
 One domain bundle may have several historical durable records. This is necessary when a new snapshot or provider version changes storage provenance while the language-level `VerificationBundle` content remains identical:
 
@@ -214,7 +218,7 @@ The durable session layer separates semantic truth basis from audit correlation.
 - exact falsification-record links;
 - claim statuses, root verdicts, termination, and counters from the session document.
 
-Plan fingerprints, execution fingerprints, exact execution documents, request IDs, and execution correlation IDs are stored as `SessionExecutionObservation` audit records. They do not create a new semantic session basis or affect currentness.
+Plan fingerprints, execution fingerprints, exact execution documents, request IDs, execution correlation IDs, and nested provider `AuditObservation` documents are stored as `SessionExecutionObservation` audit records. They do not create a new semantic session basis or affect currentness. Two executions with one semantic fingerprint may therefore have distinct observation fingerprints and remain independently retrievable.
 
 ```python
 records = storage.session_record_history(session.fingerprint)
@@ -279,7 +283,7 @@ with storage.unit_of_work() as uow:
 
 `storage` and `unit_of_work` are mutually exclusive. GVR never discovers storage globally.
 
-The executor first completes its normal fail-closed in-memory semantics. Before returning, durable recording atomically writes exact provider evidence metadata, explicit semantic slot versions or direct immutable dependencies, falsification records, bundle records, claim versions, graph and plan documents, execution audit observations, and sealed session records. `record_execution()` never uses raw `Evidence.id` as a global mutable slot. If durable recording fails, `execute_verification_plan()` raises `VerificationExecutionError`; it does not return an unstored `PASS`.
+The executor first completes its normal fail-closed in-memory semantics. Before returning, durable recording atomically writes exact provider evidence metadata, explicit semantic slot versions or direct immutable dependencies, falsification records, bundle records, claim versions, graph and plan documents, execution audit observations, and sealed session records. Every acquisition dependency is retained, including multiple source/request slots that emitted one identical raw evidence ID. `record_execution()` never uses raw `Evidence.id` as a global mutable slot. If durable recording fails, `execute_verification_plan()` raises `VerificationExecutionError`; it does not return an unstored `PASS`.
 
 Supplying no storage preserves the Task 19 and Task 20 behavior and fingerprints.
 
@@ -296,9 +300,11 @@ Bootstrap and every migration run in one SQLite transaction. The adapter never d
 
 Migration failure raises `StorageMigrationError` and rolls back schema creation or upgrade. `migration_hooks` exists for controlled adapter extensions and migration testing; a hook runs inside the same transaction.
 
-Schema version 2 adds canonical slot identity metadata, mutable-or-immutable evidence dependency links, versioned bundle/falsification/session records, and nonsemantic session execution observations.
+Schema version 2 added canonical slot identity metadata, mutable-or-immutable evidence dependency links, versioned bundle/falsification/session records, and nonsemantic session execution observations.
 
-Version 1 did not record whether a slot string was caller-owned or inferred by the old executor from raw `Evidence.id`. Migration therefore marks every pre-v2 slot `LEGACY_AMBIGUOUS` and non-authoritative. Its artifacts and history remain readable, but any dependent bundle, claim, falsification result, or session is structurally stale. A new explicit semantic identity uses its canonical namespaced slot and can establish a new authoritative basis; an ambiguous raw slot is never silently adopted.
+Schema version 3 changes bundle-record, falsification-record, and claim dependency-link keys from raw evidence ID to canonical dependency ordinal. This is required because independent acquisitions may legitimately share one raw evidence ID. Migration from version 2 rebuilds only those link tables, copies every authoritative row transactionally, and preserves record fingerprints, slot authority, currentness, history, and replay behavior.
+
+Version 1 did not record whether a slot string was caller-owned or inferred by the old executor from raw `Evidence.id`. Migration still marks every pre-v2 slot `LEGACY_AMBIGUOUS` and non-authoritative before the version-3 link migration runs. Its artifacts and history remain readable, but any dependent bundle, claim, falsification result, or session is structurally stale. A new explicit semantic identity uses its canonical namespaced slot and can establish a new authoritative basis; an ambiguous raw slot is never silently adopted.
 
 ## Integrity and corruption behavior
 

@@ -76,7 +76,7 @@ A `VerificationBundle` keeps a report together with the exact evidence used by t
 
 The `ClaimLedger` remembers dependencies. If evidence changes, old dependent results become stale and must not be treated as current truth.
 
-The optional durable storage layer keeps immutable evidence, explicitly replaceable semantic slots, exact versioned bundle/claim/falsification/session bases, nonsemantic execution audit observations, and invalidation history across restarts. Raw evidence IDs are never global slots. Freshness remains structural and never expires by time.
+The optional durable storage layer keeps immutable evidence, explicitly replaceable semantic slots, exact versioned bundle/claim/falsification/session bases, nonsemantic execution and provider audit observations, and invalidation history across restarts. Raw evidence IDs are never global slots or dependency keys. Freshness remains structural and never expires by time.
 
 A `VerificationSession` can combine several current claims with exact `AND`, `OR`, and `NOT` rules.
 
@@ -114,7 +114,7 @@ GVR currently includes:
 - functional snapshot comparison and conservative functional-regression verification;
 - evidence records and deterministic evidence versioning;
 - `ClaimLedger` with transitive stale propagation;
-- generic `EvidenceStore`, `BundleStore`, `ClaimStore`, `SessionStore`, and `DependencyIndex` interfaces plus a transactional schema-v2 standard-library `SQLiteStorage` adapter with safe legacy migration;
+- generic `EvidenceStore`, `BundleStore`, `ClaimStore`, `SessionStore`, and `DependencyIndex` interfaces plus a transactional schema-v3 standard-library `SQLiteStorage` adapter with safe v1/v2 migration;
 - Graphify traversal evidence adapter;
 - deterministic `CAN_FLOW_TO` and `NO_SUPPORTED_PATH` data-flow claim verification;
 - `VerificationBundle` transport with exact evidence manifests;
@@ -122,11 +122,11 @@ GVR currently includes:
 - `ClaimGraph` with atomic and composite claims;
 - `VerificationSession` with exact tri-state composition, freshness, budgets, termination state, and deterministic session identity;
 - immutable `VerifierCapability` descriptors and a distinct deterministic `VerifierCapabilityRegistry`;
-- strict evidence provider request with explicit source/snapshot classes, canonical `EvidenceSlotIdentity` opt-in for replaceable evidence, coverage, stable categorical issue, result, capability, fail-closed class compatibility, public capability-registry validation, and exact runtime registry contracts;
+- strict evidence provider request with explicit source/snapshot classes, canonical `EvidenceSlotIdentity` opt-in for replaceable evidence, semantic coverage, separate integrity-protected `AuditObservation`, stable categorical issue, result, capability, recursive correlation-alias rejection, fail-closed class compatibility, public capability-registry validation, and exact runtime registry contracts;
 - deterministic verification planning with exact atomic bindings, capability snapshots, bounded canonical acquisition/check/composition steps, and no execution;
 - deterministic falsification with six exact generic strategy kinds, finite Unicode text/sequence scans, independent recomputation, metamorphic reversal, complete coverage, and fingerprinted provenance;
 - deterministic verification execution with exact provider, falsification, and verifier runtime registries, exact request identities, reachable-only verifier inputs, explicit step lifecycle, fail-closed `UNKNOWN` artifacts, deterministic limits, and replay-stable result identity;
-- optional atomic executor recording through an explicitly supplied durable store or unit of work, with direct immutable dependencies, no raw-ID slot inference, no global storage discovery, and no returned `PASS` after persistence failure;
+- optional atomic executor recording through an explicitly supplied durable store or unit of work, with exact multi-acquisition dependency tuples, direct immutable dependencies, no raw-ID slot inference, no global storage discovery, and no returned `PASS` after persistence failure;
 - an honest built-in verifier capability snapshot with exact verifier IDs, bounds, coverage, cost, and D0/D1/O1/M1 semantics;
 - an honest empty built-in evidence provider capability snapshot;
 - schema-v1 JSON protocol and CLI, including `compile_verification_plan`, `execute_verification_plan`, `compose_verification_session`, `describe_verifier_capabilities`, `describe_evidence_provider_capabilities`, `describe_falsification_strategy_capabilities`, and `validate_evidence_provider_result`.

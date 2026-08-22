@@ -787,7 +787,7 @@ def test_task22_12_v1_migration_marks_ambiguous_raw_slots_stale_and_restart_repl
         connection.close()
 
     migrated = SQLiteStorage(path)
-    assert migrated.schema_version == gvr.DURABLE_STORAGE_SCHEMA_VERSION == 2
+    assert migrated.schema_version == gvr.DURABLE_STORAGE_SCHEMA_VERSION == 3
     ambiguous = migrated.get_slot(RAW_EVIDENCE_ID)
     assert ambiguous is not None
     assert not ambiguous.current

@@ -46,6 +46,7 @@ from .evidence_providers import (
     EVIDENCE_PROVIDER_RUNTIME_REGISTRY_FINGERPRINT_FORMAT,
     EVIDENCE_PROVIDER_RUNTIME_REGISTRY_KIND,
     EVIDENCE_PROVIDER_RUNTIME_REGISTRY_SCHEMA_VERSION,
+    AuditObservation,
     EvidenceAcquisitionStatus,
     EvidenceCompleteness,
     EvidenceCoverage,
@@ -317,6 +318,47 @@ def _evidence_provider_capability(data: Mapping[str, Any]) -> EvidenceProviderCa
     return capability
 
 
+def _audit_observation(data: Mapping[str, Any]) -> AuditObservation:
+    _reject_unexpected_fields(
+        data,
+        {
+            "schema_version",
+            "kind",
+            "fingerprint_format",
+            "fingerprint",
+            "metadata",
+        },
+        code="INVALID_EVIDENCE_PROVIDER_RESULT",
+        noun="audit observation",
+    )
+    if data.get("fingerprint") is None:
+        raise ProtocolError(
+            "INVALID_EVIDENCE_PROVIDER_RESULT",
+            "audit observation fingerprint is required",
+        )
+    try:
+        observation = AuditObservation(
+            schema_version=data.get("schema_version"),
+            kind=data.get("kind"),
+            fingerprint_format=data.get("fingerprint_format"),
+            metadata=decode_markers(dict(_require_mapping(
+                data.get("metadata", {}),
+                "audit metadata",
+            ))),
+        )
+    except EvidenceProviderError as exc:
+        raise ProtocolError(
+            "INVALID_EVIDENCE_PROVIDER_RESULT",
+            str(exc),
+        ) from exc
+    if data.get("fingerprint") != observation.fingerprint:
+        raise ProtocolError(
+            "INVALID_EVIDENCE_PROVIDER_RESULT",
+            "audit observation fingerprint does not match canonical metadata",
+        )
+    return observation
+
+
 def _evidence_provider_result(data: Mapping[str, Any]) -> EvidenceProviderResult:
     try:
         _reject_unexpected_fields(
@@ -338,7 +380,7 @@ def _evidence_provider_result(data: Mapping[str, Any]) -> EvidenceProviderResult
                 "completeness", "covered_evidence_kinds", "declared_scope",
                 "observed_scope", "declared_bounds", "consumed", "termination",
                 "truncated", "termination_reason", "source_identity",
-                "snapshot_identity", "details",
+                "snapshot_identity", "details", "audit",
             },
             code="INVALID_EVIDENCE_PROVIDER_RESULT",
             noun="evidence coverage",
@@ -371,6 +413,14 @@ def _evidence_provider_result(data: Mapping[str, Any]) -> EvidenceProviderResult
             source_identity=decode_markers(dict(_require_mapping(coverage_data.get("source_identity", {}), "coverage source_identity"))),
             snapshot_identity=decode_markers(dict(_require_mapping(coverage_data.get("snapshot_identity", {}), "coverage snapshot_identity"))),
             details=decode_markers(dict(_require_mapping(coverage_data.get("details", {}), "coverage details"))),
+            audit=(
+                AuditObservation()
+                if "audit" not in coverage_data
+                else _audit_observation(_require_mapping(
+                    coverage_data["audit"],
+                    "coverage audit",
+                ))
+            ),
         )
         supplied_coverage_fingerprint = coverage_data.get("fingerprint")
         if supplied_coverage_fingerprint is not None and supplied_coverage_fingerprint != coverage.fingerprint:

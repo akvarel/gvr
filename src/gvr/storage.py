@@ -11,7 +11,7 @@ from .model import Evidence, VerificationReport, VerificationVerdict
 from .session import VerificationSession
 
 
-DURABLE_STORAGE_SCHEMA_VERSION = 2
+DURABLE_STORAGE_SCHEMA_VERSION = 3
 DURABLE_STORAGE_SCHEMA_TABLE = "gvr_storage_schema"
 
 
@@ -240,6 +240,7 @@ class BundleStore(Protocol):
         *,
         evidence_slots: Mapping[str, EvidenceSlotVersion] | None = None,
         evidence_artifacts: Mapping[str, str] | None = None,
+        evidence_dependencies: tuple[EvidenceDependency, ...] | None = None,
     ) -> StoredBundle: ...
 
     def get_bundle(

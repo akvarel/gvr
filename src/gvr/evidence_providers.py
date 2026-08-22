@@ -20,6 +20,11 @@ EVIDENCE_SLOT_IDENTITY_KIND = "gvr.evidence_slot_identity"
 EVIDENCE_SLOT_IDENTITY_FINGERPRINT_FORMAT = (
     "gvr.evidence_slot_identity.ieee754-json.v1"
 )
+AUDIT_OBSERVATION_SCHEMA_VERSION = 1
+AUDIT_OBSERVATION_KIND = "gvr.audit_observation"
+AUDIT_OBSERVATION_FINGERPRINT_FORMAT = (
+    "gvr.audit_observation.ieee754-json.v1"
+)
 EVIDENCE_COVERAGE_SCHEMA_VERSION = 1
 EVIDENCE_COVERAGE_KIND = "gvr.evidence_coverage"
 EVIDENCE_COVERAGE_FINGERPRINT_FORMAT = "gvr.evidence_coverage.ieee754-json.v1"
@@ -108,6 +113,25 @@ _TRUTH_LIKE_ISSUE_TOKENS = frozenset({
 
 _STABLE_ISSUE_CODE = re.compile(r"^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)*$")
 
+_AUDIT_IDENTIFIER_CONTEXT_TOKENS = frozenset({
+    "corr",
+    "correlation",
+    "execution",
+    "invocation",
+    "request",
+    "run",
+    "span",
+    "trace",
+    "traceparent",
+    "tracestate",
+})
+_AUDIT_IDENTIFIER_TOKENS = frozenset({
+    "id",
+    "identifier",
+    "token",
+    "uuid",
+})
+
 
 def _strict_identifier(value: Any, *, name: str) -> str:
     if not isinstance(value, str) or not value:
@@ -193,6 +217,55 @@ def _reject_truth_like_fields(value: Mapping[str, Any], *, name: str) -> None:
                 visit(nested, f"{path}[{index}]")
 
     visit(value, name)
+
+
+def _field_tokens(value: str) -> frozenset[str]:
+    separated = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", value)
+    separated = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", separated)
+    return frozenset(
+        token.casefold()
+        for token in re.findall(r"[A-Za-z0-9]+", separated)
+    )
+
+
+def _reject_audit_identifier_fields(
+    value: Mapping[str, Any],
+    *,
+    name: str,
+) -> None:
+    """Keep operational identifiers out of semantic coverage maps.
+
+    Both combined aliases such as ``traceID`` and nested aliases such as
+    ``{"trace": {"id": ...}}`` are rejected. Providers must place those
+    observations under ``EvidenceCoverage.audit`` instead.
+    """
+
+    def visit(item: Any, path: str, *, audit_context: bool) -> None:
+        if isinstance(item, Mapping):
+            for key, nested in item.items():
+                tokens = _field_tokens(key)
+                context = bool(tokens & _AUDIT_IDENTIFIER_CONTEXT_TOKENS)
+                identifier = bool(tokens & _AUDIT_IDENTIFIER_TOKENS)
+                scalar_context = context and not isinstance(
+                    nested,
+                    (Mapping, list, tuple),
+                )
+                if (identifier and (audit_context or context)) or scalar_context:
+                    raise EvidenceProviderError(
+                        f"{name} contains audit-only identifier field {key!r} "
+                        f"at {path}; place correlation, request, run, span, and "
+                        "trace identifiers under EvidenceCoverage.audit"
+                    )
+                visit(
+                    nested,
+                    f"{path}.{key}",
+                    audit_context=audit_context or context,
+                )
+        elif isinstance(item, (list, tuple)):
+            for index, nested in enumerate(item):
+                visit(nested, f"{path}[{index}]", audit_context=audit_context)
+
+    visit(value, name, audit_context=False)
 
 
 def _export_value(value: Any) -> Any:
@@ -442,6 +515,59 @@ class EvidenceRequest:
         return self.to_dict()
 
 
+@dataclass(frozen=True, kw_only=True)
+class AuditObservation:
+    """Integrity-protected operational metadata excluded from truth identity."""
+
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+    schema_version: int = AUDIT_OBSERVATION_SCHEMA_VERSION
+    kind: str = AUDIT_OBSERVATION_KIND
+    fingerprint_format: str = AUDIT_OBSERVATION_FINGERPRINT_FORMAT
+    fingerprint: str = field(init=False)
+
+    def __post_init__(self) -> None:
+        _validate_versioned_domain(
+            schema_version=self.schema_version,
+            expected_schema_version=AUDIT_OBSERVATION_SCHEMA_VERSION,
+            kind=self.kind,
+            expected_kind=AUDIT_OBSERVATION_KIND,
+            fingerprint_format=self.fingerprint_format,
+            expected_fingerprint_format=AUDIT_OBSERVATION_FINGERPRINT_FORMAT,
+            noun="audit observation",
+        )
+        object.__setattr__(
+            self,
+            "metadata",
+            _strict_mapping(self.metadata, name="audit metadata"),
+        )
+        object.__setattr__(
+            self,
+            "fingerprint",
+            _fingerprint(
+                self.definition(),
+                fingerprint_format=self.fingerprint_format,
+            ),
+        )
+
+    def definition(self) -> dict[str, Any]:
+        return {
+            "schema_version": self.schema_version,
+            "kind": self.kind,
+            "metadata": self.metadata,
+        }
+
+    def to_dict(self) -> dict[str, Any]:
+        value = _export_value(self.definition())
+        value.update({
+            "fingerprint_format": self.fingerprint_format,
+            "fingerprint": self.fingerprint,
+        })
+        return value
+
+    def export(self) -> dict[str, Any]:
+        return self.to_dict()
+
+
 @dataclass(frozen=True)
 class EvidenceCoverage:
     completeness: EvidenceCompleteness
@@ -456,6 +582,7 @@ class EvidenceCoverage:
     termination_reason: str = "UNKNOWN"
     source_identity: Mapping[str, Any] = field(default_factory=dict)
     snapshot_identity: Mapping[str, Any] = field(default_factory=dict)
+    audit: AuditObservation = field(default_factory=AuditObservation)
     schema_version: int = EVIDENCE_COVERAGE_SCHEMA_VERSION
     kind: str = EVIDENCE_COVERAGE_KIND
     fingerprint_format: str = EVIDENCE_COVERAGE_FINGERPRINT_FORMAT
@@ -476,8 +603,35 @@ class EvidenceCoverage:
         if not isinstance(self.truncated, bool):
             raise EvidenceProviderError("truncated must be a boolean")
         object.__setattr__(self, "termination_reason", _strict_identifier(self.termination_reason, name="termination_reason"))
-        for name in ("declared_scope", "observed_scope", "declared_bounds", "consumed", "termination", "source_identity", "snapshot_identity", "details"):
-            object.__setattr__(self, name, _strict_mapping(getattr(self, name), name=name))
+        semantic_mapping_names = (
+            "declared_scope",
+            "observed_scope",
+            "declared_bounds",
+            "consumed",
+            "termination",
+            "source_identity",
+            "snapshot_identity",
+            "details",
+        )
+        for name in semantic_mapping_names:
+            value = _strict_mapping(getattr(self, name), name=name)
+            _reject_audit_identifier_fields(value, name=name)
+            object.__setattr__(self, name, value)
+        if type(self.audit) is not AuditObservation:
+            raise EvidenceProviderError(
+                "audit must be an exact AuditObservation"
+            )
+        rebuilt_audit = AuditObservation(
+            metadata=self.audit.metadata,
+            schema_version=self.audit.schema_version,
+            kind=self.audit.kind,
+            fingerprint_format=self.audit.fingerprint_format,
+        )
+        if rebuilt_audit.to_dict() != self.audit.to_dict():
+            raise EvidenceProviderError(
+                "audit observation content or fingerprint is inconsistent"
+            )
+        object.__setattr__(self, "audit", rebuilt_audit)
         _reject_truth_like_fields(self.termination, name="termination")
         _reject_truth_like_fields(self.details, name="details")
         if self.completeness is EvidenceCompleteness.COMPLETE and self.truncated:
@@ -504,9 +658,34 @@ class EvidenceCoverage:
             "details": self.details,
         }
 
-    def to_dict(self) -> dict[str, Any]:
+    def semantic_transport(self) -> dict[str, Any]:
         value = _export_value(self.semantic_definition())
         value.update({"fingerprint_format": self.fingerprint_format, "fingerprint": self.fingerprint})
+        return value
+
+    def without_audit(self) -> EvidenceCoverage:
+        return EvidenceCoverage(
+            completeness=self.completeness,
+            covered_evidence_kinds=self.covered_evidence_kinds,
+            truncated=self.truncated,
+            details=self.details,
+            declared_scope=self.declared_scope,
+            observed_scope=self.observed_scope,
+            declared_bounds=self.declared_bounds,
+            consumed=self.consumed,
+            termination=self.termination,
+            termination_reason=self.termination_reason,
+            source_identity=self.source_identity,
+            snapshot_identity=self.snapshot_identity,
+            schema_version=self.schema_version,
+            kind=self.kind,
+            fingerprint_format=self.fingerprint_format,
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        value = self.semantic_transport()
+        if self.audit.metadata:
+            value["audit"] = self.audit.to_dict()
         return value
 
     def export(self) -> dict[str, Any]:
@@ -716,13 +895,18 @@ class EvidenceProviderResult:
             )
         return definition
 
-    def to_dict(self) -> dict[str, Any]:
+    def semantic_transport(self) -> dict[str, Any]:
         value = _export_value(self.semantic_definition())
         value.update({
             "request_id": self.request_id,
             "fingerprint_format": self.fingerprint_format,
             "fingerprint": self.fingerprint,
         })
+        value["coverage"] = self.coverage.semantic_transport()
+        return value
+
+    def to_dict(self) -> dict[str, Any]:
+        value = self.semantic_transport()
         value["coverage"] = self.coverage.to_dict()
         return value
 
@@ -907,7 +1091,11 @@ def provider_result_for_verifier(result: EvidenceProviderResult, verifier: Verif
     missing_required = required - emitted
     return EvidenceProviderVerifierInput(
         status=result.status,
-        coverage=result.coverage,
+        coverage=(
+            result.coverage
+            if not result.coverage.audit.metadata
+            else result.coverage.without_audit()
+        ),
         evidence=result.evidence,
         issues=result.issues,
         result_fingerprint=result.fingerprint,

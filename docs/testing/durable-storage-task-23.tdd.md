@@ -95,4 +95,32 @@ The passing scenario is the already-documented source/request/snapshot/content/p
 
 ## GREEN evidence
 
-Pending implementation and validation.
+Implemented behavior:
+
+- `AuditObservation` schema v1 provides a generic immutable audit channel with its own canonical integrity fingerprint. `EvidenceCoverage` semantic transport and fingerprints exclude that channel, while full transport and durable session execution observations retain it.
+- Recursive validation now rejects correlation, request, execution, invocation, run, span, trace, `traceparent`, and `tracestate` identifier aliases from all semantic coverage maps, including combined, nested, UUID, token, and scalar forms. Errors direct providers to `EvidenceCoverage.audit`.
+- Provider, verifier, execution, protocol, and SQLite projections preserve the semantic/audit boundary. The protocol accepts only the nested coverage audit form, requires its fingerprint, recomputes it, and rejects unknown, forged, ambiguous, and wrong-channel forms.
+- Durable database schema v3 keys bundle, falsification, and claim evidence dependency links by canonical ordinal. Exact dependency records therefore preserve multiple independent acquisitions with one raw evidence ID. Record document schema v2 and all existing semantic domain schemas remain unchanged.
+- The atomic execution write now passes exact acquisition dependencies through bundle, falsification, claim, session, observation, and invalidation handling. The existing schema-v1 ambiguous-slot fail-closed policy is preserved through schema v2 and the transactional v2 to v3 migration.
+
+Validation performed before the GREEN commit:
+
+```text
+Task 23 focused:                 6 passed in 2.99s
+Task 22 + Task 23:              18 passed in 6.51s
+Full source suite:             572 passed in 12.23s
+python -m compileall -q src tests: passed
+git diff --check: passed
+```
+
+An exact-base-created authoritative schema-v2 database was opened by the implementation and migrated transactionally to schema v3. Its slot, claim, and session remained current, and replay remained idempotent with one slot, claim, and session record.
+
+Wheel validation was performed outside the source tree with `PYTHONPATH` removed. The imported module resolved to the temporary environment's `site-packages`, durable schema v3 and audit schema v1 were asserted, and all six Task 23 scenarios passed:
+
+```text
+gvr-0.2.0-py3-none-any.whl
+SHA-256 c116ee3407ad767862609aab5d231c9b575ba9313e10e8f5802bda94c602789d
+6 passed in 3.14s
+```
+
+The wire protocol envelope remains schema v1. Evidence request, slot identity, coverage, provider result, execution request/result, bundle, falsification, claim graph, and session semantic schemas remain v1. Durable bundle, falsification, claim, session, and execution-observation record documents remain schema v2.

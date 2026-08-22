@@ -10,6 +10,7 @@ import pytest
 
 import gvr
 from gvr import (
+    COUNTEREXAMPLE_SEARCH_STRATEGY_ID,
     AtomicClaim,
     AtomicClaimBinding,
     ClaimGraph,
@@ -23,6 +24,9 @@ from gvr import (
     EvidenceProviderResult,
     EvidenceProviderRuntimeRegistry,
     EvidenceRequest,
+    FalsificationRequirement,
+    FalsificationStrategyBinding,
+    FalsificationStrategyCapabilityRegistry,
     ProtocolError,
     SQLiteStorage,
     StorageIntegrityError,
@@ -37,6 +41,8 @@ from gvr import (
     VerifierCost,
     VerifierDeterminism,
     VerifierRuntimeRegistry,
+    builtin_falsification_strategy_capability_registry,
+    builtin_falsification_strategy_runtime_registry,
     compile_verification_plan,
     execute_verification_plan,
 )
@@ -115,12 +121,62 @@ class _VerifierRuntime:
 
 def _execution_request(
     acquisitions: tuple[_Acquisition, ...],
+    *,
+    with_falsification: bool = False,
 ) -> VerificationExecutionRequest:
     assert len(acquisitions) >= 2
+    falsification_descriptor = None
+    falsification_capabilities = None
+    falsification_bindings: tuple[FalsificationStrategyBinding, ...] = ()
+    accepted_falsification_kinds: tuple[str, ...] = ()
+    falsification_requirement = FalsificationRequirement.NONE
+    claim_kind = "ASSERT_STATE"
+    claim_spec: dict[str, Any] = {"expected": True}
+    if with_falsification:
+        falsification_descriptor = (
+            builtin_falsification_strategy_capability_registry().lookup(
+                COUNTEREXAMPLE_SEARCH_STRATEGY_ID,
+                "1",
+            )
+        )
+        falsification_capabilities = FalsificationStrategyCapabilityRegistry(
+            (falsification_descriptor,)
+        )
+        accepted_falsification_kinds = (
+            falsification_descriptor.strategy_kind,
+        )
+        falsification_requirement = FalsificationRequirement.REQUIRED_BEFORE_PASS
+        claim_kind = "gvr.text.sequence_predicate"
+        claim_spec = {"candidate": "fixture"}
+        falsification_bindings = (
+            FalsificationStrategyBinding(
+                binding_id="claim-task23:falsification",
+                verifier_id=VERIFIER_ID,
+                strategy_id=falsification_descriptor.strategy_id,
+                strategy_version=falsification_descriptor.version,
+                strategy_capability_fingerprint=(
+                    falsification_descriptor.fingerprint
+                ),
+                parameters={
+                    "input_kind": "gvr.falsification.finite_text_sequence.v1",
+                    "corpus": ("a", "b"),
+                    "needle": "z",
+                    "predicate": {
+                        "kind": "EXACT_MEMBERSHIP",
+                        "expected_members": (),
+                    },
+                    "unicode_unit": "CODE_POINT",
+                    "normalization": "NFC",
+                    "casefold": False,
+                    "reverse": False,
+                    "duplicate_semantics": "PRESERVE",
+                },
+            ),
+        )
     verifier_capability = VerifierCapability(
         verifier_id=VERIFIER_ID,
         version="1",
-        claim_kinds=("ASSERT_STATE",),
+        claim_kinds=(claim_kind,),
         accepted_evidence_kinds=("fixture.state",),
         required_evidence_kinds=("fixture.state",),
         input_schema={"type": "object"},
@@ -131,6 +187,8 @@ def _execution_request(
         bounds={"max_items": 10},
         coverage={"mode": "DECLARED_SCOPE"},
         authoritative=True,
+        accepted_falsification_strategy_kinds=accepted_falsification_kinds,
+        falsification_requirement=falsification_requirement,
     )
     provider_capability = EvidenceProviderCapability(
         provider_id=PROVIDER_ID,
@@ -151,8 +209,8 @@ def _execution_request(
     provider_capabilities = EvidenceProviderCapabilityRegistry((provider_capability,))
     claim = AtomicClaim(
         claim_id="claim-task23",
-        claim_kind="ASSERT_STATE",
-        spec={"expected": True},
+        claim_kind=claim_kind,
+        spec=claim_spec,
         verifier=VERIFIER_ID,
     )
     graph = ClaimGraph(nodes=(claim,))
@@ -180,6 +238,7 @@ def _execution_request(
         verifier_version="1",
         verifier_capability_fingerprint=verifier_capability.fingerprint,
         evidence_requests=evidence_requests,
+        falsification_bindings=falsification_bindings,
     )
     planning_request = VerificationPlanningRequest(
         claim_graph=graph,
@@ -188,6 +247,12 @@ def _execution_request(
         verifier_capability_registry_fingerprint=verifier_capabilities.fingerprint,
         evidence_provider_capability_registry=provider_capabilities,
         evidence_provider_capability_registry_fingerprint=provider_capabilities.fingerprint,
+        falsification_strategy_capability_registry=falsification_capabilities,
+        falsification_strategy_capability_registry_fingerprint=(
+            None
+            if falsification_capabilities is None
+            else falsification_capabilities.fingerprint
+        ),
     )
     plan = compile_verification_plan(planning_request)
     return VerificationExecutionRequest(
@@ -214,6 +279,18 @@ def _execution_request(
             (item.request_id, item.fingerprint): item
             for item in evidence_requests
         },
+        falsification_strategy_runtime_registry=(
+            None
+            if falsification_capabilities is None
+            else builtin_falsification_strategy_runtime_registry(
+                falsification_capabilities
+            )
+        ),
+        falsification_strategy_capability_registry_fingerprint=(
+            None
+            if falsification_capabilities is None
+            else falsification_capabilities.fingerprint
+        ),
         limits=VerificationExecutionLimits(),
     )
 
@@ -503,8 +580,12 @@ def test_task23_01_coverage_rejects_recursive_audit_ids_and_fingerprints_semanti
     invalid_cases = (
         ("details", {"transport": {"trace": {"id": "trace-a"}}}),
         ("details", {"transport": {"traceID": "trace-a"}}),
+        ("details", {"transport": {"trace": "trace-a"}}),
+        ("details", {"transport": {"traceparent": "00-trace-span-01"}}),
         ("consumed", {"runner": {"run-id": "run-a"}}),
+        ("consumed", {"runner": {"runUUID": "run-a"}}),
         ("termination", {"metadata": {"correlationId": "corr-a"}}),
+        ("termination", {"metadata": {"corr-token": "corr-a"}}),
         ("declared_scope", {"request": {"identifier": "request-a"}}),
         ("observed_scope", {"span_id": "span-a"}),
         ("declared_bounds", {"executionRunId": "run-a"}),
@@ -549,6 +630,7 @@ def test_task23_02_audit_only_change_is_retrievable_without_truth_churn(
         "nested": {"correlation-id": "corr-b", "runId": "run-b"},
         "trace_id": "trace-b",
     })
+    assert first_request.fingerprint == second_request.fingerprint
     db = SQLiteStorage(path)
     first = execute_verification_plan(first_request, storage=db)
     second = execute_verification_plan(second_request, storage=db)
@@ -585,6 +667,7 @@ def test_task23_02_audit_only_change_is_retrievable_without_truth_churn(
     observations = db.session_execution_observations(first.session.fingerprint)
     assert len(observations) == 2
     assert len({item.observation_fingerprint for item in observations}) == 2
+    assert len({item.request_ids for item in observations}) == 1
     assert {
         item.session_record_fingerprint for item in observations
     } == {session.record_fingerprint}
@@ -671,6 +754,46 @@ def test_task23_03_one_execution_keeps_same_raw_id_acquisitions_independent(
     assert reopened.claim_status("claim-task23").current
     assert reopened.get_session(second.session.fingerprint).current
     assert reopened.schema_version == 3
+
+    falsification_path = tmp_path / "task23-multi-falsification.sqlite3"
+    falsification_request = _execution_request(
+        (
+            _Acquisition("request-a", "repo-a", "field-a", "rev-a1"),
+            _Acquisition("request-b", "repo-b", "field-b", "rev-b1"),
+        ),
+        with_falsification=True,
+    )
+    falsification_db = SQLiteStorage(falsification_path)
+    falsification_execution = execute_verification_plan(
+        falsification_request,
+        storage=falsification_db,
+    )
+    falsification_slots = _slot_by_repository(falsification_execution)
+    expected_falsification = {
+        (falsification_slots["repo-a"].slot_id, 1),
+        (falsification_slots["repo-b"].slot_id, 1),
+    }
+    falsification_result = next(iter(
+        falsification_execution.falsification_results.values()
+    ))
+    stored_falsification = falsification_db.get_falsification_result(
+        falsification_result.fingerprint
+    )
+    assert _dependency_set(
+        stored_falsification.evidence_dependencies
+    ) == expected_falsification
+    assert _dependency_set(
+        falsification_db.claim_history("claim-task23")[-1].evidence_dependencies
+    ) == expected_falsification
+    reopened_falsification = SQLiteStorage(falsification_path)
+    falsification_replay = execute_verification_plan(
+        falsification_request,
+        storage=reopened_falsification,
+    )
+    assert falsification_replay.fingerprint == falsification_execution.fingerprint
+    assert len(reopened_falsification.falsification_history(
+        falsification_result.fingerprint
+    )) == 1
 
     from test_durable_storage_slot_identity import _record, _slot_identity
 
@@ -799,7 +922,7 @@ def test_task23_05_protocol_preserves_audit_boundary_and_rejects_forgery() -> No
 
     wrong_channel = provider_result.to_dict()
     wrong_channel["audit"] = deepcopy(wrong_channel["coverage"]["audit"])
-    with pytest.raises(ProtocolError, match="unexpected"):
+    with pytest.raises(ProtocolError, match="unsupported.*audit"):
         gvr.handle_request({
             "schema_version": 1,
             "op": "validate_evidence_provider_result",

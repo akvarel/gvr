@@ -1919,7 +1919,7 @@ class VerificationExecutionResult:
             {
                 "request_id": key[0],
                 "request_fingerprint": key[1],
-                "result": self.provider_results[key].to_dict(),
+                "result": self.provider_results[key].semantic_transport(),
             }
             for key in sorted(
                 self.provider_results,
@@ -1981,6 +1981,25 @@ class VerificationExecutionResult:
 
     def to_dict(self) -> dict[str, Any]:
         value = _export(self.semantic_definition())
+        value["provider_results"] = _export(
+            tuple(
+                {
+                    "request_id": key[0],
+                    "request_fingerprint": key[1],
+                    "result": self.provider_results[key].to_dict(),
+                }
+                for key in sorted(
+                    self.provider_results,
+                    key=lambda item: (
+                        canonical_utf8_key(
+                            item[1],
+                            path="request fingerprint",
+                        ),
+                        canonical_utf8_key(item[0], path="request_id"),
+                    ),
+                )
+            )
+        )
         value.update({
             "fingerprint_format": self.fingerprint_format,
             "fingerprint": self.fingerprint,
@@ -2066,6 +2085,7 @@ def _revalidate_provider_result(
         termination_reason=coverage.termination_reason,
         source_identity=coverage.source_identity,
         snapshot_identity=coverage.snapshot_identity,
+        audit=coverage.audit,
         schema_version=coverage.schema_version,
         kind=coverage.kind,
         fingerprint_format=coverage.fingerprint_format,

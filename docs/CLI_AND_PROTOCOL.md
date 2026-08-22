@@ -151,7 +151,25 @@ Optional filters are exact `strategy_kind` and `claim_kind`. The response kind i
 
 ### `validate_evidence_provider_result`
 
-Parses strict serialized `request`, `capability`, and `result` objects, including request `source_class` and `snapshot_class`, capability `source_classes` and `snapshot_classes`, complete coverage, source/snapshot identities, optional canonical `evidence_slot_identities`, stable provider issue codes and optional allowlisted categories, schema/kind fields, fingerprint formats, and fingerprints. Each slot declaration must reference emitted evidence and exactly match the provider/source/stable-request identity reconstructed from the request and coverage. It validates the result against the exact request fingerprint and provider capability, enforces fail-closed class compatibility, and rejects cross-request replay, uncovered emitted evidence, slot aliasing, contradictory partial coverage, truth-like control metadata, obsolete issue `message` or `verdict` fields, and claimed fingerprint mismatches before returning a normalized `evidence_provider_result`.
+Parses strict serialized `request`, `capability`, and `result` objects, including request `source_class` and `snapshot_class`, capability `source_classes` and `snapshot_classes`, complete semantic coverage, source/snapshot identities, optional canonical `evidence_slot_identities`, optional exact `AuditObservation`, stable provider issue codes and optional allowlisted categories, schema/kind fields, fingerprint formats, and fingerprints. Each slot declaration must reference emitted evidence and exactly match the provider/source/stable-request identity reconstructed from the request and coverage. It validates the result against the exact request fingerprint and provider capability, enforces fail-closed class compatibility, and rejects cross-request replay, uncovered emitted evidence, slot aliasing, contradictory partial coverage, truth-like control metadata, obsolete issue `message` or `verdict` fields, and claimed fingerprint mismatches before returning a normalized `evidence_provider_result`.
+
+Audit metadata has a separate nested wire contract:
+
+```json
+{
+  "coverage": {
+    "audit": {
+      "schema_version": 1,
+      "kind": "gvr.audit_observation",
+      "metadata": {"trace_id": "trace-42"},
+      "fingerprint_format": "gvr.audit_observation.ieee754-json.v1",
+      "fingerprint": "..."
+    }
+  }
+}
+```
+
+The audit fingerprint is required when the channel is present and authenticates only audit metadata. Coverage and provider-result fingerprints exclude the audit object. Recursive correlation/request/run/span/trace identifier aliases in semantic coverage maps are rejected with direction to use `coverage.audit`. A top-level result `audit`, unknown nested fields, missing audit fingerprint, or metadata paired with a forged audit fingerprint returns `INVALID_EVIDENCE_PROVIDER_RESULT`.
 
 Unknown or obsolete nested fields and invalid values return machine-readable `protocol_error` responses through the safe handler, including `INVALID_EVIDENCE_PROVIDER_REQUEST`, `INVALID_EVIDENCE_PROVIDER_CAPABILITY`, and `INVALID_EVIDENCE_PROVIDER_RESULT`.
 
@@ -277,7 +295,7 @@ The payload is the exact `VerificationExecutionRequest.to_dict()` shape. The fol
 
 The parser validates every nested schema, kind, format, fingerprint, exact provider/strategy/verifier runtime key, exact request key, plan step, DAG dependency, and deterministic limit. The executor recompiles the plan from those exact inputs before invocation.
 
-The response kind is `verification_execution_result`. It contains provider results, validated falsification results keyed by exact plan step, atomic bundles, the final session, step lifecycle, stable issues, deterministic counters, termination, and a result fingerprint. Runtime failures are valid fail-closed execution results with affected claims `UNKNOWN`; malformed execution requests return `INVALID_VERIFICATION_EXECUTION_REQUEST`.
+The response kind is `verification_execution_result`. It contains provider results, including their full audit observations, validated falsification results keyed by exact plan step, atomic bundles, the final session, step lifecycle, stable issues, deterministic counters, termination, and a result fingerprint. Provider audit observations are transported but excluded from the execution-result fingerprint. Runtime failures are valid fail-closed execution results with affected claims `UNKNOWN`; malformed execution requests return `INVALID_VERIFICATION_EXECUTION_REQUEST`.
 
 Python integrations may pass exact custom provider, falsification, and verifier runtime registries through keyword arguments to `handle_request()` or `safe_handle_request()`. JSON cannot carry executable Python objects. The standalone CLI therefore binds only runtime keys shipped by GVR. Schema v1 ships the six generic falsification runtimes, a built-in data-flow verifier adapter, and no built-in evidence providers.
 
