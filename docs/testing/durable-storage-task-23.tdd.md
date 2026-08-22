@@ -124,3 +124,17 @@ SHA-256 c116ee3407ad767862609aab5d231c9b575ba9313e10e8f5802bda94c602789d
 ```
 
 The wire protocol envelope remains schema v1. Evidence request, slot identity, coverage, provider result, execution request/result, bundle, falsification, claim graph, and session semantic schemas remain v1. Durable bundle, falsification, claim, session, and execution-observation record documents remain schema v2.
+
+## Post-GREEN adversarial review
+
+The adversarial pass exercised nested and combined correlation aliases, scalar context aliases, `traceparent`/`tracestate`, UUID/token suffixes, audit map ordering, same raw evidence IDs, restart replay, and falsification dependency replay. Earlier review findings for abbreviated `corr`, scalar trace values, trace context fields, UUID/token aliases, and the combined duplicate-ID falsification path were incorporated in the GREEN implementation and tests.
+
+The repeated post-GREEN generated matrix rejected all 108 semantic-map alias cases. Six permutations of one audit observation produced one audit fingerprint, while audit-only changes kept the semantic boundary stable. The three real SQLite scenarios covering audit retrieval, duplicate-ID restart/falsification, and protocol forgery rejection also passed:
+
+```text
+{'recursive_aliases_rejected': 108, 'audit_order_permutations': 6,
+ 'audit_order_fingerprints': 1, 'semantic_boundary': 'stable'}
+3 passed in 1.91s
+```
+
+No residual finding required a production change after the GREEN commit.
