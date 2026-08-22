@@ -66,7 +66,75 @@ Scenario 6 passed on the base because existing canonical record/link verificatio
 
 ## GREEN evidence
 
-Pending implementation.
+The RED specification was committed as `abd7a18e9f5ca0bd30285126faee636cf264b997`
+before production changes.
+
+The implementation now:
+
+- retains each `StoredBundle` and `StoredFalsificationResult` returned while
+  recording the current execution, verifies its canonical content and exact
+  acquisition dependencies, and rejects substituted records before claim or
+  session publication;
+- passes exact bundle and falsification records into `record_claim`, which
+  rereads the selected durable records by record fingerprint before recording
+  the claim basis;
+- passes exact claim, bundle, and falsification records into `put_session`,
+  which rereads and verifies each selected record before creating or reusing
+  the exact session record;
+- preserves the outer execution transaction so mismatch or corruption leaves
+  no partial durable writes or pointer movement; and
+- removes the lexical semantic-field blacklist. Identifier-like names in
+  semantic coverage maps are valid and fingerprinted, while only the explicit
+  `AuditObservation` channel remains outside semantic identity.
+
+Focused Task 24 validation:
+
+```text
+python -m pytest -q -p no:cacheprovider --tb=short \
+  tests/test_durable_storage_task_24.py
+6 passed
+```
+
+Task 22, 23, and 24 compatibility validation:
+
+```text
+python -m pytest -q -p no:cacheprovider --tb=short \
+  tests/test_durable_storage_slot_identity.py \
+  tests/test_durable_storage_task_23.py \
+  tests/test_durable_storage_task_24.py
+24 passed
+```
+
+Full source validation:
+
+```text
+python -m pytest -q -p no:cacheprovider --tb=short
+578 passed
+
+python -m compileall -q src tests
+PASS
+
+git diff --check
+PASS
+```
+
+Wheel validation used `python -m pip wheel --no-deps` because the environment
+does not expose an executable `python -m build` frontend. The resulting pure
+Python wheel was installed into an isolated virtual environment, the source
+tree was outside the test working directory, and `PYTHONPATH` was removed from
+both the import check and test process:
+
+```text
+gvr-0.2.0-py3-none-any.whl
+sha256 5e81e94d116f0b8d4bbb834263d2fcd7aa061d1c1aaf8f062d6f481b2f59af6b
+INSTALLED_GVR=<isolated-venv>/site-packages/gvr/__init__.py
+6 passed in 6.30s
+```
+
+Durable storage remains schema v3. Existing exact-record tables and links
+express the repair, so no migration or schema-version bump was required.
+Existing schema-v2 canonical claim, bundle, falsification, and session record
+documents and existing wire/domain schemas are unchanged.
 
 ## Post-GREEN adversarial review
 

@@ -67,7 +67,7 @@ The audit fingerprint authenticates the observation itself. It is not included i
 
 Coverage is deeply snapshotted, immutable, versioned, and independently fingerprinted. Complete coverage cannot be truncated. Partial coverage and truncation are separate facts. Unknown coverage cannot claim covered evidence kinds.
 
-Every semantic coverage map is recursively checked for operational identifier aliases. Combined keys such as `traceID`, `run-id`, `request_id`, and `correlationId`, plus nested forms such as `{"trace": {"id": ...}}`, are rejected from `details`, `declared_scope`, `observed_scope`, `declared_bounds`, `consumed`, `termination`, `source_identity`, and `snapshot_identity`. The error directs providers to `EvidenceCoverage.audit`.
+Semantic versus audit meaning is explicit, not inferred from field spelling. Values placed in `details`, `declared_scope`, `observed_scope`, `declared_bounds`, `consumed`, `termination`, `source_identity`, or `snapshot_identity` are semantic and fingerprinted even when domain schemas use names such as `run_id`, `traceID`, `execution_id`, or `request_count`. Operational observations that must not affect truth belong in `EvidenceCoverage.audit.metadata`.
 
 Genuine coverage facts remain semantic. Changing a bound, consumed count, termination fact, source/snapshot identity, scope, or detail changes the coverage fingerprint. Changing only `coverage.audit` changes only the audit observation fingerprint.
 
@@ -90,7 +90,7 @@ Genuine coverage facts remain semantic. Changing a bound, consumed count, termin
 
 Slot identity declarations are part of the provider result fingerprint. `request_id` and `coverage.audit` remain outside that fingerprint. This makes correlation-only results semantically idempotent while ensuring that genuine coverage, evidence, provider, or immutable-versus-replaceable semantics still change the result identity.
 
-Provider-result transport retains the complete audit observation. The provider-to-verifier projection removes audit metadata before verifier and falsification semantic inputs are constructed, so operational identifiers cannot influence a verdict or falsification fingerprint through the generic coverage channel.
+Provider-result transport retains the complete audit observation. The provider-to-verifier projection removes only the explicit audit object before verifier and falsification semantic inputs are constructed. Genuine semantic identifier fields remain in the coverage projection and therefore affect evidence, falsification, and verification identity as declared by the provider contract.
 
 ### Provider capability and runtime protocol
 

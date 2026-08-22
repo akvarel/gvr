@@ -8,7 +8,7 @@ The work is limited to the generic provider, executor, protocol, and SQLite dura
 
 ## Required outcomes
 
-1. Correlation, run, request, span, and trace identifiers are audit observations, including nested and aliased forms. They are forbidden recursively in semantic `EvidenceCoverage` maps and the validation error directs providers to the audit channel.
+1. Operational correlation, run, request, span, and trace observations have an explicit `AuditObservation` channel. Task 23 originally used lexical rejection to keep identifier aliases out of semantic maps; Task 24 supersedes that heuristic so valid domain fields with the same names remain semantic by explicit placement.
 2. A generic immutable audit observation has its own integrity fingerprint. It is excluded from coverage, provider-result, execution-result, evidence-artifact, slot, bundle, falsification, claim, and session truth fingerprints.
 3. Audit metadata remains available through protocol round trips and durable session execution observations.
 4. Genuine coverage semantics remain fingerprinted.
@@ -20,7 +20,7 @@ The work is limited to the generic provider, executor, protocol, and SQLite dura
 
 | # | Scenario | Test |
 |---:|---|---|
-| 1 | Recursive aliases are rejected from every semantic coverage map; audit order is canonical; audit-only changes preserve semantic fingerprints; genuine coverage changes do not. | `test_task23_01_coverage_rejects_recursive_audit_ids_and_fingerprints_semantics` |
+| 1 | Explicit audit placement is canonical and nonsemantic; identifier-like fields in semantic maps remain fingerprinted; audit-only changes preserve semantic fingerprints; genuine coverage changes do not. | `test_task23_01_explicit_audit_is_nonsemantic_and_identifier_names_remain_semantic` |
 | 2 | Real provider, executor, falsification, and SQLite runs prove audit-only changes preserve every truth basis and invalidation count while two retrievable audit observations remain distinct. | `test_task23_02_audit_only_change_is_retrievable_without_truth_churn` |
 | 3 | One execution with two same-raw-ID acquisitions records two exact slots/dependencies atomically, survives reopen/replay, advances only B, and transactionally migrates authoritative v2 dependency links. | `test_task23_03_one_execution_keeps_same_raw_id_acquisitions_independent` |
 | 4 | Source/request semantics create distinct slots; snapshot/content/provider-version changes advance the documented same slot. | `test_task23_04_semantic_dimension_properties_match_documented_slot_rules` |
@@ -84,7 +84,7 @@ The passing scenario is the already-documented source/request/snapshot/content/p
 | 2 | `test_task22_02_execution_correlation_only_is_audit_not_slot_or_session_basis` | Task 23 test 2 proves two full execution observations can differ only by provider audit metadata while execution/session truth remains one basis. |
 | 3 | `test_task22_03_same_raw_id_in_different_sources_never_collides` | Task 23 test 3 adds the behaviorally missing same-execution case and exact dependency-set proof. Test 4 retains the cross-execution property. |
 | 4 | `test_task22_04_same_raw_id_in_different_request_parameters_never_collides` | Task 23 tests 3 and 4 cover distinct request semantics in one execution and as an independent dimension. |
-| 5 | `test_task22_05_same_request_id_cannot_alias_different_semantic_sources` | Existing guarantee remains authoritative; Task 23 recursive validation prevents hidden request/correlation aliases from bypassing it through coverage metadata. |
+| 5 | `test_task22_05_same_request_id_cannot_alias_different_semantic_sources` | Existing guarantee remains authoritative; Task 23 established the explicit audit channel, and Task 24 removes lexical classification so only channel placement determines whether identifier-like data is semantic. |
 | 6 | `test_task22_06_provider_identity_scopes_slots_but_provider_version_advances_same_slot` | Task 23 test 4 reasserts provider-version replacement beside every other dimension. |
 | 7 | `test_task22_07_snapshot_change_with_identical_content_versions_bundle_claim_and_session_once` | Task 23 tests 3 and 4 add snapshot replacement in a multi-acquisition request and prove only B advances. |
 | 8 | `test_task22_08_content_change_stales_exact_only_and_leaves_unrelated_current` | Task 23 test 4 reasserts content replacement; test 2 proves audit content is not evidence content. |
@@ -97,8 +97,8 @@ The passing scenario is the already-documented source/request/snapshot/content/p
 
 Implemented behavior:
 
-- `AuditObservation` schema v1 provides a generic immutable audit channel with its own canonical integrity fingerprint. `EvidenceCoverage` semantic transport and fingerprints exclude that channel, while full transport and durable session execution observations retain it.
-- Recursive validation now rejects correlation, request, execution, invocation, run, span, trace, `traceparent`, and `tracestate` identifier aliases from all semantic coverage maps, including combined, nested, UUID, token, and scalar forms. Errors direct providers to `EvidenceCoverage.audit`.
+- `AuditObservation` schema v1 provides a generic immutable audit channel with its own canonical integrity fingerprint. `EvidenceCoverage` semantic transport and fingerprints exclude that channel, while full transport and durable session execution observations retain it. Task 24 later removes Task 23's lexical alias blacklist so genuine semantic fields are classified by explicit map placement rather than spelling.
+- The original Task 23 checkpoint recursively rejected correlation, request, execution, invocation, run, span, trace, `traceparent`, and `tracestate` identifier aliases from semantic coverage maps. This historical behavior produced the archived RED/GREEN evidence below. Task 24 supersedes the heuristic because those names can carry valid domain semantics; explicit `AuditObservation` placement remains the authoritative nonsemantic boundary.
 - Provider, verifier, execution, protocol, and SQLite projections preserve the semantic/audit boundary. The protocol accepts only the nested coverage audit form, requires its fingerprint, recomputes it, and rejects unknown, forged, ambiguous, and wrong-channel forms.
 - Durable database schema v3 keys bundle, falsification, and claim evidence dependency links by canonical ordinal. Exact dependency records therefore preserve multiple independent acquisitions with one raw evidence ID. Record document schema v2 and all existing semantic domain schemas remain unchanged.
 - The atomic execution write now passes exact acquisition dependencies through bundle, falsification, claim, session, observation, and invalidation handling. The existing schema-v1 ambiguous-slot fail-closed policy is preserved through schema v2 and the transactional v2 to v3 migration.
@@ -127,7 +127,7 @@ The wire protocol envelope remains schema v1. Evidence request, slot identity, c
 
 ## Post-GREEN adversarial review
 
-The adversarial pass exercised nested and combined correlation aliases, scalar context aliases, `traceparent`/`tracestate`, UUID/token suffixes, audit map ordering, same raw evidence IDs, restart replay, and falsification dependency replay. Earlier review findings for abbreviated `corr`, scalar trace values, trace context fields, UUID/token aliases, and the combined duplicate-ID falsification path were incorporated in the GREEN implementation and tests.
+The Task 23 adversarial pass exercised the then-current lexical alias rejection, audit ordering, same raw evidence IDs, restart replay, and falsification dependency replay. Task 24 retains the durable and explicit-audit guarantees but intentionally replaces lexical alias rejection with explicit semantic/audit channel separation.
 
 The repeated post-GREEN generated matrix rejected all 108 semantic-map alias cases. Six permutations of one audit observation produced one audit fingerprint, while audit-only changes kept the semantic boundary stable. The three real SQLite scenarios covering audit retrieval, duplicate-ID restart/falsification, and protocol forgery rejection also passed:
 

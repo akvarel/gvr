@@ -169,7 +169,7 @@ Audit metadata has a separate nested wire contract:
 }
 ```
 
-The audit fingerprint is required when the channel is present and authenticates only audit metadata. Coverage and provider-result fingerprints exclude the audit object. Recursive correlation/request/run/span/trace identifier aliases in semantic coverage maps are rejected with direction to use `coverage.audit`. A top-level result `audit`, unknown nested fields, missing audit fingerprint, or metadata paired with a forged audit fingerprint returns `INVALID_EVIDENCE_PROVIDER_RESULT`.
+The audit fingerprint is required when the channel is present and authenticates only audit metadata. Coverage and provider-result fingerprints exclude the audit object. Semantic meaning is determined by channel placement rather than lexical field names: `run_id`, `trace_id`, `execution_id`, `request_count`, and similar names remain fingerprinted when they are genuine coverage facts, while the same values under `coverage.audit.metadata` remain nonsemantic. A top-level result `audit`, unknown nested fields, missing audit fingerprint, or metadata paired with a forged audit fingerprint returns `INVALID_EVIDENCE_PROVIDER_RESULT`.
 
 Unknown or obsolete nested fields and invalid values return machine-readable `protocol_error` responses through the safe handler, including `INVALID_EVIDENCE_PROVIDER_REQUEST`, `INVALID_EVIDENCE_PROVIDER_CAPABILITY`, and `INVALID_EVIDENCE_PROVIDER_RESULT`.
 

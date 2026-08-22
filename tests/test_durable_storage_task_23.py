@@ -20,7 +20,6 @@ from gvr import (
     EvidenceCoverage,
     EvidenceProviderCapability,
     EvidenceProviderCapabilityRegistry,
-    EvidenceProviderError,
     EvidenceProviderResult,
     EvidenceProviderRuntimeRegistry,
     EvidenceRequest,
@@ -576,8 +575,8 @@ def _coverage(
     )
 
 
-def test_task23_01_coverage_rejects_recursive_audit_ids_and_fingerprints_semantics() -> None:
-    invalid_cases = (
+def test_task23_01_explicit_audit_is_nonsemantic_and_identifier_names_remain_semantic() -> None:
+    semantic_cases = (
         ("details", {"transport": {"trace": {"id": "trace-a"}}}),
         ("details", {"transport": {"traceID": "trace-a"}}),
         ("details", {"transport": {"trace": "trace-a"}}),
@@ -592,9 +591,11 @@ def test_task23_01_coverage_rejects_recursive_audit_ids_and_fingerprints_semanti
         ("source_identity", {"trace_identifier": "trace-a"}),
         ("snapshot_identity", {"correlation": {"id": "corr-a"}}),
     )
-    for field, value in invalid_cases:
-        with pytest.raises(EvidenceProviderError, match="audit"):
-            _coverage(**{field: value})
+    baseline = _coverage()
+    for field, value in semantic_cases:
+        semantic = _coverage(**{field: value})
+        assert semantic.fingerprint != baseline.fingerprint
+        assert semantic.semantic_transport()[field]
 
     first = _coverage(audit_metadata={
         "trace_id": "trace-a",
@@ -903,22 +904,25 @@ def test_task23_05_protocol_preserves_audit_boundary_and_rejects_forgery() -> No
             },
         })
 
-    ambiguous = provider_result.to_dict()
-    ambiguous["coverage"].pop("fingerprint", None)
-    ambiguous.pop("fingerprint", None)
-    ambiguous["coverage"]["details"] = {
+    semantic_identifier = provider_result.to_dict()
+    semantic_identifier["coverage"].pop("fingerprint", None)
+    semantic_identifier.pop("fingerprint", None)
+    semantic_identifier["coverage"]["details"] = {
         "transport": {"traceID": "trace-forged"},
     }
-    with pytest.raises(ProtocolError, match="audit"):
-        gvr.handle_request({
-            "schema_version": 1,
-            "op": "validate_evidence_provider_result",
-            "payload": {
-                "request": evidence_request.to_dict(),
-                "capability": capability.to_dict(),
-                "result": ambiguous,
-            },
-        })
+    semantic_response = gvr.handle_request({
+        "schema_version": 1,
+        "op": "validate_evidence_provider_result",
+        "payload": {
+            "request": evidence_request.to_dict(),
+            "capability": capability.to_dict(),
+            "result": semantic_identifier,
+        },
+    })
+    assert semantic_response["payload"]["coverage"]["details"] == {
+        "transport": {"traceID": "trace-forged"},
+    }
+    assert semantic_response["payload"]["fingerprint"] != provider_result.fingerprint
 
     wrong_channel = provider_result.to_dict()
     wrong_channel["audit"] = deepcopy(wrong_channel["coverage"]["audit"])

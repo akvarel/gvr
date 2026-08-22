@@ -55,14 +55,21 @@ def _request(
 def _execute(db: SQLiteStorage, request: Any) -> _DurableRun:
     result = execute_verification_plan(request, storage=db)
     domain_bundle = next(iter(result.bundles.values()))
-    bundle = db.get_bundle(domain_bundle.fingerprint)
     claim = db.claim_history(CLAIM_ID)[-1]
+    assert claim.bundle_record_fingerprint is not None
+    bundle = db.get_bundle(
+        domain_bundle.fingerprint,
+        record_fingerprint=claim.bundle_record_fingerprint,
+    )
     session = db.get_session(result.session.fingerprint)
     falsification_result = next(iter(result.falsification_results.values()), None)
     falsification_record = (
         None
         if falsification_result is None
-        else db.get_falsification_result(falsification_result.fingerprint)
+        else db.get_falsification_result(
+            falsification_result.fingerprint,
+            record_fingerprint=claim.falsification_record_fingerprints[0],
+        )
     )
     return _DurableRun(
         result=result,

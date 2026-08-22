@@ -271,6 +271,8 @@ class ClaimStore(Protocol):
         report: VerificationReport | None = None,
         claim_dependency_ids: tuple[str, ...] | None = None,
         falsification_fingerprints: tuple[str, ...] = (),
+        bundle_record: StoredBundle | None = None,
+        falsification_records: tuple[StoredFalsificationResult, ...] | None = None,
     ) -> StoredClaimVersion: ...
 
     def claim_status(self, claim_id: str) -> StoredClaimStatus: ...
@@ -288,6 +290,9 @@ class SessionStore(Protocol):
         execution_fingerprint: str | None = None,
         execution_document: Mapping[str, Any] | None = None,
         falsification_fingerprints: tuple[str, ...] = (),
+        claim_records: tuple[StoredClaimVersion, ...] | None = None,
+        bundle_records: tuple[StoredBundle, ...] | None = None,
+        falsification_records: tuple[StoredFalsificationResult, ...] | None = None,
     ) -> StoredSession: ...
 
     def get_session(self, fingerprint: str) -> StoredSession: ...

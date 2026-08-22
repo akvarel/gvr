@@ -113,26 +113,6 @@ _TRUTH_LIKE_ISSUE_TOKENS = frozenset({
 
 _STABLE_ISSUE_CODE = re.compile(r"^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)*$")
 
-_AUDIT_IDENTIFIER_CONTEXT_TOKENS = frozenset({
-    "corr",
-    "correlation",
-    "execution",
-    "invocation",
-    "request",
-    "run",
-    "span",
-    "trace",
-    "traceparent",
-    "tracestate",
-})
-_AUDIT_IDENTIFIER_TOKENS = frozenset({
-    "id",
-    "identifier",
-    "token",
-    "uuid",
-})
-
-
 def _strict_identifier(value: Any, *, name: str) -> str:
     if not isinstance(value, str) or not value:
         raise EvidenceProviderError(f"{name} must be a non-empty string")
@@ -217,55 +197,6 @@ def _reject_truth_like_fields(value: Mapping[str, Any], *, name: str) -> None:
                 visit(nested, f"{path}[{index}]")
 
     visit(value, name)
-
-
-def _field_tokens(value: str) -> frozenset[str]:
-    separated = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", value)
-    separated = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", separated)
-    return frozenset(
-        token.casefold()
-        for token in re.findall(r"[A-Za-z0-9]+", separated)
-    )
-
-
-def _reject_audit_identifier_fields(
-    value: Mapping[str, Any],
-    *,
-    name: str,
-) -> None:
-    """Keep operational identifiers out of semantic coverage maps.
-
-    Both combined aliases such as ``traceID`` and nested aliases such as
-    ``{"trace": {"id": ...}}`` are rejected. Providers must place those
-    observations under ``EvidenceCoverage.audit`` instead.
-    """
-
-    def visit(item: Any, path: str, *, audit_context: bool) -> None:
-        if isinstance(item, Mapping):
-            for key, nested in item.items():
-                tokens = _field_tokens(key)
-                context = bool(tokens & _AUDIT_IDENTIFIER_CONTEXT_TOKENS)
-                identifier = bool(tokens & _AUDIT_IDENTIFIER_TOKENS)
-                scalar_context = context and not isinstance(
-                    nested,
-                    (Mapping, list, tuple),
-                )
-                if (identifier and (audit_context or context)) or scalar_context:
-                    raise EvidenceProviderError(
-                        f"{name} contains audit-only identifier field {key!r} "
-                        f"at {path}; place correlation, request, run, span, and "
-                        "trace identifiers under EvidenceCoverage.audit"
-                    )
-                visit(
-                    nested,
-                    f"{path}.{key}",
-                    audit_context=audit_context or context,
-                )
-        elif isinstance(item, (list, tuple)):
-            for index, nested in enumerate(item):
-                visit(nested, f"{path}[{index}]", audit_context=audit_context)
-
-    visit(value, name, audit_context=False)
 
 
 def _export_value(value: Any) -> Any:
@@ -615,7 +546,6 @@ class EvidenceCoverage:
         )
         for name in semantic_mapping_names:
             value = _strict_mapping(getattr(self, name), name=name)
-            _reject_audit_identifier_fields(value, name=name)
             object.__setattr__(self, name, value)
         if type(self.audit) is not AuditObservation:
             raise EvidenceProviderError(

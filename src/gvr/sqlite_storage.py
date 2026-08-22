@@ -2851,6 +2851,8 @@ class SQLiteUnitOfWork:
         report: VerificationReport | None = None,
         claim_dependency_ids: tuple[str, ...] | None = None,
         falsification_fingerprints: tuple[str, ...] = (),
+        bundle_record: StoredBundle | None = None,
+        falsification_records: tuple[StoredFalsificationResult, ...] | None = None,
     ) -> StoredClaimVersion:
         with self._logical_write():
             claim_id = _identifier(claim_id, name="claim id")
@@ -2867,15 +2869,40 @@ class SQLiteUnitOfWork:
 
             stored_bundle: StoredBundle | None = None
             if bundle is not None:
-                existing_bundle = self._conn().execute(
-                    "SELECT 1 FROM bundles WHERE fingerprint = ?",
-                    (bundle.fingerprint,),
-                ).fetchone()
-                stored_bundle = (
-                    self.put_bundle(bundle)
-                    if existing_bundle is None
-                    else self.get_bundle(bundle.fingerprint)
-                )
+                if bundle_record is None:
+                    existing_bundle = self._conn().execute(
+                        "SELECT 1 FROM bundles WHERE fingerprint = ?",
+                        (bundle.fingerprint,),
+                    ).fetchone()
+                    stored_bundle = (
+                        self.put_bundle(bundle)
+                        if existing_bundle is None
+                        else self.get_bundle(bundle.fingerprint)
+                    )
+                else:
+                    if (
+                        type(bundle_record) is not StoredBundle
+                        or bundle_record.record_fingerprint is None
+                    ):
+                        raise StorageIntegrityError(
+                            "bundle_record must be an exact stored bundle record"
+                        )
+                    exact_bundle = self.get_bundle(
+                        bundle.fingerprint,
+                        record_fingerprint=bundle_record.record_fingerprint,
+                    )
+                    if (
+                        exact_bundle.bundle != bundle
+                        or exact_bundle.fingerprint != bundle_record.fingerprint
+                        or exact_bundle.record_fingerprint
+                        != bundle_record.record_fingerprint
+                        or exact_bundle.evidence_dependencies
+                        != bundle_record.evidence_dependencies
+                    ):
+                        raise StorageIntegrityError(
+                            "bundle_record conflicts with the exact durable bundle"
+                        )
+                    stored_bundle = exact_bundle
                 if stored_bundle.bundle != bundle:
                     raise StorageConflictError(
                         "bundle fingerprint has conflicting canonical content"
@@ -2891,6 +2918,8 @@ class SQLiteUnitOfWork:
                 report_value = bundle.report
                 expected_dependencies = bundle.claim_dependency_ids
             else:
+                if bundle_record is not None:
+                    raise StorageIntegrityError("bundle_record requires a bundle")
                 if report is None:
                     raise StorageIntegrityError(
                         "a claim record requires a bundle or report"
@@ -2950,14 +2979,66 @@ class SQLiteUnitOfWork:
                     (dependency_id, dependency_version)
                 )
 
-            falsification_ids = tuple(sorted(set(falsification_fingerprints)))
-            if tuple(falsification_fingerprints) != falsification_ids:
+            if falsification_records is not None and falsification_fingerprints:
                 raise StorageIntegrityError(
-                    "falsification fingerprints must be unique and sorted"
+                    "exact falsification records are mutually exclusive with "
+                    "falsification fingerprints"
                 )
-            falsification_records: list[StoredFalsificationResult] = []
-            for fingerprint in falsification_ids:
-                stored_falsification = self.get_falsification_result(fingerprint)
+            selected_falsification_records: list[StoredFalsificationResult] = []
+            if falsification_records is None:
+                falsification_ids = tuple(sorted(set(falsification_fingerprints)))
+                if tuple(falsification_fingerprints) != falsification_ids:
+                    raise StorageIntegrityError(
+                        "falsification fingerprints must be unique and sorted"
+                    )
+                candidates = tuple(
+                    self.get_falsification_result(fingerprint)
+                    for fingerprint in falsification_ids
+                )
+            else:
+                supplied_records = tuple(falsification_records)
+                if any(
+                    type(item) is not StoredFalsificationResult
+                    or item.record_fingerprint is None
+                    for item in supplied_records
+                ):
+                    raise StorageIntegrityError(
+                        "falsification_records must contain exact stored records"
+                    )
+                ordered_records = tuple(
+                    sorted(
+                        supplied_records,
+                        key=lambda item: (
+                            item.fingerprint,
+                            item.record_fingerprint or "",
+                        ),
+                    )
+                )
+                if supplied_records != ordered_records or len({
+                    item.fingerprint for item in supplied_records
+                }) != len(supplied_records):
+                    raise StorageIntegrityError(
+                        "falsification_records must be unique by domain and sorted"
+                    )
+                candidates = tuple(
+                    self.get_falsification_result(
+                        item.fingerprint,
+                        record_fingerprint=item.record_fingerprint,
+                    )
+                    for item in supplied_records
+                )
+                for supplied, exact in zip(supplied_records, candidates):
+                    if (
+                        exact.result != supplied.result
+                        or exact.record_fingerprint != supplied.record_fingerprint
+                        or exact.evidence_dependencies
+                        != supplied.evidence_dependencies
+                    ):
+                        raise StorageIntegrityError(
+                            "falsification record conflicts with exact durable content"
+                        )
+                falsification_ids = tuple(item.fingerprint for item in candidates)
+            for stored_falsification in candidates:
                 if not stored_falsification.current:
                     raise StoredTruthError(
                         f"claim {claim_id} references stale falsification result"
@@ -2971,7 +3052,7 @@ class SQLiteUnitOfWork:
                         f"claim {claim_id} references falsification for a "
                         "different claim or verifier"
                     )
-                falsification_records.append(stored_falsification)
+                selected_falsification_records.append(stored_falsification)
 
             evidence_dependencies = (
                 ()
@@ -3029,7 +3110,7 @@ class SQLiteUnitOfWork:
                 "falsification_fingerprints": list(falsification_ids),
                 "falsification_record_fingerprints": [
                     item.record_fingerprint
-                    for item in falsification_records
+                    for item in selected_falsification_records
                 ],
             }
             content, canonical, basis_fingerprint = _parts(
@@ -3203,7 +3284,7 @@ class SQLiteUnitOfWork:
                 )
 
             for ordinal, stored_falsification in enumerate(
-                falsification_records
+                selected_falsification_records
             ):
                 fingerprint = stored_falsification.fingerprint
                 self._conn().execute(
@@ -4382,6 +4463,9 @@ class SQLiteUnitOfWork:
         execution_fingerprint: str | None = None,
         execution_document: Mapping[str, Any] | None = None,
         falsification_fingerprints: tuple[str, ...] = (),
+        claim_records: tuple[StoredClaimVersion, ...] | None = None,
+        bundle_records: tuple[StoredBundle, ...] | None = None,
+        falsification_records: tuple[StoredFalsificationResult, ...] | None = None,
     ) -> StoredSession:
         with self._logical_write():
             if type(session) is not VerificationSession or not session.sealed:
@@ -4438,15 +4522,70 @@ class SQLiteUnitOfWork:
                     execution_document,
                 )
 
-            falsification_ids = tuple(sorted(set(falsification_fingerprints)))
-            if tuple(falsification_fingerprints) != falsification_ids:
+            if falsification_records is not None and falsification_fingerprints:
                 raise StorageIntegrityError(
-                    "session falsification fingerprints must be unique and sorted"
+                    "exact session falsification records are mutually exclusive "
+                    "with falsification fingerprints"
                 )
-            falsifications = tuple(
-                self.get_falsification_result(item)
-                for item in falsification_ids
-            )
+            if falsification_records is None:
+                falsification_ids = tuple(sorted(set(falsification_fingerprints)))
+                if tuple(falsification_fingerprints) != falsification_ids:
+                    raise StorageIntegrityError(
+                        "session falsification fingerprints must be unique and sorted"
+                    )
+                falsifications = tuple(
+                    self.get_falsification_result(item)
+                    for item in falsification_ids
+                )
+            else:
+                supplied_falsifications = tuple(falsification_records)
+                if any(
+                    type(item) is not StoredFalsificationResult
+                    or item.record_fingerprint is None
+                    for item in supplied_falsifications
+                ):
+                    raise StorageIntegrityError(
+                        "session falsification records must be exact stored records"
+                    )
+                ordered_falsifications = tuple(
+                    sorted(
+                        supplied_falsifications,
+                        key=lambda item: (
+                            item.fingerprint,
+                            item.record_fingerprint or "",
+                        ),
+                    )
+                )
+                if supplied_falsifications != ordered_falsifications or len({
+                    item.fingerprint for item in supplied_falsifications
+                }) != len(supplied_falsifications):
+                    raise StorageIntegrityError(
+                        "session falsification records must be unique by domain and sorted"
+                    )
+                falsifications = tuple(
+                    self.get_falsification_result(
+                        item.fingerprint,
+                        record_fingerprint=item.record_fingerprint,
+                    )
+                    for item in supplied_falsifications
+                )
+                for supplied, exact in zip(
+                    supplied_falsifications,
+                    falsifications,
+                ):
+                    if (
+                        exact.result != supplied.result
+                        or exact.record_fingerprint != supplied.record_fingerprint
+                        or exact.evidence_dependencies
+                        != supplied.evidence_dependencies
+                        or not exact.current
+                    ):
+                        raise StorageIntegrityError(
+                            "session falsification record conflicts with exact durable content"
+                        )
+                falsification_ids = tuple(
+                    item.fingerprint for item in falsifications
+                )
 
             claim_ids = tuple(
                 item["claim_id"]
@@ -4456,20 +4595,52 @@ class SQLiteUnitOfWork:
                 raise StorageIntegrityError(
                     "session contains duplicate claim states"
                 )
-            claim_versions: list[tuple[str, int]] = []
-            for claim_id in claim_ids:
-                pointer = self._conn().execute(
-                    "SELECT current_version FROM claims WHERE claim_id = ?",
-                    (claim_id,),
-                ).fetchone()
-                if pointer is None:
-                    raise StorageIntegrityError(
-                        f"session references claim without durable history: {claim_id}"
+            if claim_records is None:
+                current_claim_records: list[StoredClaimVersion] = []
+                for claim_id in claim_ids:
+                    pointer = self._conn().execute(
+                        "SELECT current_version FROM claims WHERE claim_id = ?",
+                        (claim_id,),
+                    ).fetchone()
+                    if pointer is None:
+                        raise StorageIntegrityError(
+                            "session references claim without durable history: "
+                            f"{claim_id}"
+                        )
+                    current_claim_records.append(
+                        self._read_claim_version(
+                            claim_id,
+                            pointer["current_version"],
+                        )
                     )
-                stored_claim = self._read_claim_version(
-                    claim_id,
-                    pointer["current_version"],
+                selected_claim_records = tuple(current_claim_records)
+            else:
+                supplied_claim_records = tuple(claim_records)
+                if (
+                    any(
+                        type(item) is not StoredClaimVersion
+                        for item in supplied_claim_records
+                    )
+                    or tuple(item.claim_id for item in supplied_claim_records)
+                    != claim_ids
+                ):
+                    raise StorageIntegrityError(
+                        "session claim records must be exact and match claim order"
+                    )
+                selected_claim_records = tuple(
+                    self._read_claim_version(item.claim_id, item.version)
+                    for item in supplied_claim_records
                 )
+                for supplied, exact in zip(
+                    supplied_claim_records,
+                    selected_claim_records,
+                ):
+                    if exact != supplied or not exact.current:
+                        raise StorageIntegrityError(
+                            "session claim record conflicts with exact durable content"
+                        )
+            claim_versions: list[tuple[str, int]] = []
+            for claim_id, stored_claim in zip(claim_ids, selected_claim_records):
                 state = next(
                     item
                     for item in session_document["claims"]
@@ -4490,7 +4661,40 @@ class SQLiteUnitOfWork:
                 for item in session_document.get("atomic_verifications", ())
                 if item.get("bundle_fingerprint") is not None
             }))
-            bundles = tuple(self.get_bundle(item) for item in bundle_ids)
+            if bundle_records is None:
+                bundles = tuple(self.get_bundle(item) for item in bundle_ids)
+            else:
+                supplied_bundles = tuple(bundle_records)
+                if (
+                    any(
+                        type(item) is not StoredBundle
+                        or item.record_fingerprint is None
+                        for item in supplied_bundles
+                    )
+                    or tuple(item.fingerprint for item in supplied_bundles)
+                    != bundle_ids
+                ):
+                    raise StorageIntegrityError(
+                        "session bundle records must be exact and sorted by domain"
+                    )
+                bundles = tuple(
+                    self.get_bundle(
+                        item.fingerprint,
+                        record_fingerprint=item.record_fingerprint,
+                    )
+                    for item in supplied_bundles
+                )
+                for supplied, exact in zip(supplied_bundles, bundles):
+                    if (
+                        exact.bundle != supplied.bundle
+                        or exact.record_fingerprint != supplied.record_fingerprint
+                        or exact.evidence_dependencies
+                        != supplied.evidence_dependencies
+                        or not exact.current
+                    ):
+                        raise StorageIntegrityError(
+                            "session bundle record conflicts with exact durable content"
+                        )
             session_content, session_canonical, session_digest = _parts(
                 session_document
             )
@@ -5297,24 +5501,36 @@ class SQLiteUnitOfWork:
                     )
                 acquisition_dependencies[step_id] = tuple(dependencies)
 
-            falsification_ids_by_step: dict[str, str] = {}
+            falsification_records_by_step: dict[
+                str,
+                StoredFalsificationResult,
+            ] = {}
             for step_id, falsification_result in result.falsification_results.items():
                 step = plan_steps[step_id]
-                dependencies = tuple(
-                    dependency
-                    for dependency_step_id in step.dependency_step_ids
-                    for dependency in acquisition_dependencies.get(
-                        dependency_step_id,
-                        (),
-                    )
+                dependencies = self._canonical_evidence_dependencies(
+                    tuple(
+                        dependency
+                        for dependency_step_id in step.dependency_step_ids
+                        for dependency in acquisition_dependencies.get(
+                            dependency_step_id,
+                            (),
+                        )
+                    ),
+                    noun="execution falsification dependencies",
                 )
-                self.put_falsification_result(
+                stored_falsification = self.put_falsification_result(
                     falsification_result,
                     evidence_dependencies=dependencies,
                 )
-                falsification_ids_by_step[
-                    step_id
-                ] = falsification_result.fingerprint
+                if (
+                    stored_falsification.result != falsification_result
+                    or stored_falsification.record_fingerprint is None
+                    or stored_falsification.evidence_dependencies != dependencies
+                ):
+                    raise StorageIntegrityError(
+                        "stored falsification record does not match exact execution dependencies"
+                    )
+                falsification_records_by_step[step_id] = stored_falsification
 
             stored_bundles: dict[str, StoredBundle] = {}
             for claim_id, bundle in result.bundles.items():
@@ -5354,22 +5570,45 @@ class SQLiteUnitOfWork:
                             evidence.id,
                             written.fingerprint,
                         ))
-                stored_bundles[claim_id] = self.put_bundle(
-                    bundle,
-                    evidence_dependencies=tuple(exact_dependencies),
+                canonical_dependencies = self._canonical_evidence_dependencies(
+                    exact_dependencies,
+                    noun="execution bundle dependencies",
                 )
+                stored_bundle = self.put_bundle(
+                    bundle,
+                    evidence_dependencies=canonical_dependencies,
+                )
+                if (
+                    stored_bundle.bundle != bundle
+                    or stored_bundle.record_fingerprint is None
+                    or stored_bundle.evidence_dependencies
+                    != canonical_dependencies
+                ):
+                    raise StorageIntegrityError(
+                        "stored bundle record does not match exact execution dependencies"
+                    )
+                stored_bundles[claim_id] = stored_bundle
 
             verifier_versions: dict[str, str] = {}
-            falsification_by_claim: dict[str, tuple[str, ...]] = {}
+            falsification_by_claim: dict[
+                str,
+                tuple[StoredFalsificationResult, ...],
+            ] = {}
             for step in request.plan.steps:
                 if step.kind is not VerificationPlanStepKind.VERIFY_ATOMIC_CLAIM:
                     continue
                 assert step.claim_id is not None and step.verifier_version is not None
                 verifier_versions[step.claim_id] = step.verifier_version
                 falsification_by_claim[step.claim_id] = tuple(sorted(
-                    falsification_ids_by_step[dependency]
-                    for dependency in step.dependency_step_ids
-                    if dependency in falsification_ids_by_step
+                    [
+                        falsification_records_by_step[dependency]
+                        for dependency in step.dependency_step_ids
+                        if dependency in falsification_records_by_step
+                    ],
+                    key=lambda item: (
+                        item.fingerprint,
+                        item.record_fingerprint or "",
+                    ),
                 ))
 
             for node in request.claim_graph.nodes:
@@ -5389,6 +5628,7 @@ class SQLiteUnitOfWork:
                 state.claim_id: state
                 for state in result.session.claim_states
             }
+            stored_claims: dict[str, StoredClaimVersion] = {}
             for claim_id in request.claim_graph.evaluation_order:
                 node = request.claim_graph.claim(claim_id)
                 if isinstance(node, AtomicClaim):
@@ -5397,11 +5637,15 @@ class SQLiteUnitOfWork:
                         raise StorageIntegrityError(
                             f"completed execution is missing bundle for atomic claim {claim_id}"
                         )
-                    self.record_claim(
+                    stored_claims[claim_id] = self.record_claim(
                         claim_id,
                         bundle,
                         verifier_version=verifier_versions[claim_id],
-                        falsification_fingerprints=falsification_by_claim.get(claim_id, ()),
+                        bundle_record=stored_bundles[claim_id],
+                        falsification_records=falsification_by_claim.get(
+                            claim_id,
+                            (),
+                        ),
                     )
                 else:
                     state = session_states[claim_id]
@@ -5409,7 +5653,7 @@ class SQLiteUnitOfWork:
                         verdict=state.stored_verdict,
                         verifier=COMPOSITE_CLAIM_VERIFIER,
                     )
-                    self.record_claim(
+                    stored_claims[claim_id] = self.record_claim(
                         claim_id,
                         None,
                         verifier_version="1",
@@ -5419,14 +5663,49 @@ class SQLiteUnitOfWork:
 
             execution_document = result.to_dict()
             self._put_document("verification_execution", result.fingerprint, execution_document)
+            session_bundle_records: dict[str, StoredBundle] = {}
+            for stored_bundle in stored_bundles.values():
+                previous = session_bundle_records.setdefault(
+                    stored_bundle.fingerprint,
+                    stored_bundle,
+                )
+                if previous.record_fingerprint != stored_bundle.record_fingerprint:
+                    raise StorageIntegrityError(
+                        "one session cannot substitute conflicting exact bundle records"
+                    )
+            session_falsification_records: dict[
+                str,
+                StoredFalsificationResult,
+            ] = {}
+            for stored_falsification in falsification_records_by_step.values():
+                previous = session_falsification_records.setdefault(
+                    stored_falsification.fingerprint,
+                    stored_falsification,
+                )
+                if (
+                    previous.record_fingerprint
+                    != stored_falsification.record_fingerprint
+                ):
+                    raise StorageIntegrityError(
+                        "one session cannot substitute conflicting exact falsification records"
+                    )
             return self.put_session(
                 result.session,
                 plan_fingerprint=result.plan_fingerprint,
                 execution_fingerprint=result.fingerprint,
                 execution_document=execution_document,
-                falsification_fingerprints=tuple(sorted(
-                    item.fingerprint for item in result.falsification_results.values()
-                )),
+                claim_records=tuple(
+                    stored_claims[state.claim_id]
+                    for state in result.session.claim_states
+                ),
+                bundle_records=tuple(
+                    session_bundle_records[key]
+                    for key in sorted(session_bundle_records)
+                ),
+                falsification_records=tuple(
+                    session_falsification_records[key]
+                    for key in sorted(session_falsification_records)
+                ),
             )
 
 

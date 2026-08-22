@@ -108,7 +108,7 @@ One exact acquisition step runs once. The same `(request_id, request_fingerprint
 
 Returned results are reconstructed and validated again against the exact request and capability, including request identity, provider identity, capability fingerprint, evidence kinds, coverage, scope, bounds, source identity, and snapshot identity.
 
-Operational correlation belongs in `EvidenceCoverage.audit` as an exact `AuditObservation`. Recursive correlation/request/run/span/trace ID aliases are rejected from semantic coverage maps. The full provider result remains available for transport and durable audit, but verifier and falsification acquisition inputs receive a semantic coverage projection with the audit observation removed.
+Operational correlation belongs in `EvidenceCoverage.audit` as an exact `AuditObservation`. Semantic coverage is explicit by placement rather than inferred from lexical names, so legitimate domain fields such as `run_id`, `trace_id`, `execution_id`, or `request_count` remain valid and fingerprinted in coverage maps. The full provider result remains available for transport and durable audit, but verifier and falsification acquisition inputs receive a semantic coverage projection with only the explicit audit observation removed.
 
 Independent acquisitions remain independent even when they emit an identical `Evidence` record with the same raw ID. The in-memory bundle contains one deduplicated evidence value, while durable completion recording retains every exact acquisition dependency and semantic slot identity.
 

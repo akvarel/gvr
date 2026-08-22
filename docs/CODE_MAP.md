@@ -88,7 +88,7 @@ The interfaces contain no product-specific fields and do not require SQL.
 
 ## `src/gvr/sqlite_storage.py`
 
-This is the standard-library SQLite reference adapter. It implements schema-v3 transactional migration, fail-closed legacy slot authority, immutable evidence plus canonical semantic slot identities, versioned bundle/falsification/session dependency records, duplicate-raw-ID-safe exact dependency tuples, direct immutable evidence links, exact claim bases, separate audit-bearing execution observations, indexed reverse dependencies, idempotent invalidation events, corruption checks, rollback, and completed-execution recording without raw-ID slot inference.
+This is the standard-library SQLite reference adapter. It implements schema-v3 transactional migration, fail-closed legacy slot authority, immutable evidence plus canonical semantic slot identities, versioned bundle/falsification/session dependency records, duplicate-raw-ID-safe exact dependency tuples, direct immutable evidence links, exact claim bases, exact returned-record validation and threading through claims and sessions, separate audit-bearing execution observations, indexed reverse dependencies, idempotent invalidation events, corruption checks, rollback, and completed-execution recording without raw-ID slot inference.
 
 Read [Durable storage](DURABLE_STORAGE.md) before changing schema or current/stale semantics.
 
@@ -242,7 +242,7 @@ This contains the evidence acquisition contract layer:
 - `EvidenceRequest` and its stable slot-request identity;
 - canonical `EvidenceSlotIdentity` for explicit replaceable acquisition semantics;
 - generic integrity-protected `AuditObservation` metadata;
-- `EvidenceCoverage` with recursive audit-identifier exclusion from semantic maps;
+- `EvidenceCoverage` with explicit semantic maps and a separate nonsemantic audit channel;
 - `EvidenceProviderResult`, optional exact slot declarations, and stable code/category `EvidenceProviderIssue` without free text or verdicts;
 - `EvidenceProviderCapability` with possibly empty source/snapshot class metadata;
 - pure `EvidenceProviderCapabilityRegistry` with public exact request validation;
@@ -273,7 +273,7 @@ Current operations include:
 - `compile_verification_plan`;
 - `execute_verification_plan`.
 
-The session wire path also validates the explicit bundle fingerprint format before accepting a materialized bundle. The provider-result path separately parses and authenticates `AuditObservation`, rejects recursive audit aliases from semantic coverage, and rejects wrong-channel or forged forms. The planning wire path strictly validates every nested schema, kind, unknown field, and claimed fingerprint before compilation. The execution wire path additionally validates exact plan steps, runtime registry descriptors, exact request keys, deterministic limits, and the outer execution fingerprint before dispatch.
+The session wire path also validates the explicit bundle fingerprint format before accepting a materialized bundle. The provider-result path separately parses and authenticates `AuditObservation`, preserves identifier-like semantic fields by explicit coverage placement, and rejects wrong-channel or forged audit forms. The planning wire path strictly validates every nested schema, kind, unknown field, and claimed fingerprint before compilation. The execution wire path additionally validates exact plan steps, runtime registry descriptors, exact request keys, deterministic limits, and the outer execution fingerprint before dispatch.
 
 ## `src/gvr/wire.py`
 
