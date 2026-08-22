@@ -138,4 +138,31 @@ documents and existing wire/domain schemas are unchanged.
 
 ## Post-GREEN adversarial review
 
-Pending independent post-GREEN review.
+After the GREEN commit, an independent generated matrix exercised 64 fresh
+databases across both A/B recording directions, both acquisition orders for
+each initial execution, both replay orders, replay of either recorded basis,
+and runs with and without exact falsification records. Every reopened replay
+recovered the expected execution, bundle record, acquisition dependencies,
+claim links, session links, and, when present, falsification record links.
+
+A separate 14-case semantic-name matrix covered nested and scalar run, trace,
+execution, request, correlation, span, and transport aliases across all generic
+semantic coverage maps. Each semantic value affected semantic identity, while
+changes confined to explicit `AuditObservation` changed only the audit
+fingerprint. The exact adversarial output was:
+
+```text
+REPLAY_MATRIX_CASES=64
+SEMANTIC_IDENTIFIER_CASES=14
+REPLAY_ORDER_INVARIANCE=PASS
+SEMANTIC_AUDIT_CHANNEL_SEPARATION=PASS
+```
+
+The exact falsification-threading, injected-record mismatch rollback, and all
+three persisted-corruption rollback scenarios were then rerun together:
+
+```text
+3 passed
+```
+
+No adversarial finding required a post-GREEN production change.
