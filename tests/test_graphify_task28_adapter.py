@@ -2,13 +2,13 @@ import pytest
 
 from gvr import EvidenceConfidence, GraphEvidenceKind, GraphEvidenceModelError
 from gvr.adapters.graphify import ingest_traversal_graph
+from gvr.graphify_contract import expected_graphify_df_key
 
 COMPLETE = "COMPLETE_FOR_SUPPORTED_CONSTRUCT"
 
 
-def _ev(key, source="A", target="B", *, relation="FLOWS_TO", receiver="PROVEN", completeness=COMPLETE):
-    return {
-        "key": key,
+def _ev(key=None, source="A", target="B", *, relation="FLOWS_TO", receiver="PROVEN", completeness=COMPLETE):
+    item = {
         "relation": relation,
         "source": source,
         "target": target,
@@ -20,6 +20,8 @@ def _ev(key, source="A", target="B", *, relation="FLOWS_TO", receiver="PROVEN", 
         "receiver_confidence": receiver,
         "analysis_completeness": completeness,
     }
+    item["key"] = key or expected_graphify_df_key(item)
+    return item
 
 
 def _path(*items, exactness="EXACT_FOR_RETURNED_PATH", receiver="PROVEN", coverage=COMPLETE):
@@ -61,48 +63,48 @@ def _result(paths, **overrides):
 
 
 def test_task28_maps_exact_proven_complete_public_traversal_to_canonical_graph_model():
-    ab = _ev("df:ab", "A", "B")
-    bc = _ev("df:bc", "B", "C")
+    ab = _ev(source="A", target="B")
+    bc = _ev(source="B", target="C")
 
     model = ingest_traversal_graph(_result([_path(ab, bc)]))
 
     assert model.provider == "graphify"
     assert [node.id for node in model.nodes] == ["graphify:node:A", "graphify:node:B", "graphify:node:C"]
-    assert [edge.id for edge in model.edges] == ["df:ab", "df:bc"]
+    assert [edge.id for edge in model.edges] == [ab["key"], bc["key"]]
     assert all(edge.kind is GraphEvidenceKind.REFERENCE for edge in model.edges)
     assert all(edge.confidence is EvidenceConfidence.EXACT for edge in model.edges)
     assert model.edges[0].semantic_identity == {"relation": "FLOWS_TO", "source": "A", "target": "B"}
-    assert model.edges[0].exact_identity["key"] == "df:ab"
+    assert model.edges[0].exact_identity["key"] == ab["key"]
     assert model.edges[0].native["path_exactness"] == "EXACT_FOR_RETURNED_PATH"
     assert model.absence_verdict("A->C") is not None
 
 
 def test_task28_deduplicates_and_is_stable_under_path_reordering():
-    ab = _ev("df:ab", "A", "B")
-    bc = _ev("df:bc", "B", "C")
-    direct = _ev("df:ac", "A", "C")
+    ab = _ev(source="A", target="B")
+    bc = _ev(source="B", target="C")
+    direct = _ev(source="A", target="C")
 
     one = ingest_traversal_graph(_result([_path(ab, bc), _path(direct)]))
     two = ingest_traversal_graph(_result([_path(direct), _path(ab, bc), _path(ab, bc)]))
 
-    assert [edge.id for edge in one.edges] == ["df:ab", "df:ac", "df:bc"]
+    assert [edge.id for edge in one.edges] == sorted([ab["key"], bc["key"], direct["key"]])
     assert one.fingerprint == two.fingerprint
 
 
 def test_task28_rejects_malformed_or_conflicting_df_keys_instead_of_rekeying():
-    good = _ev("df:stable", "A", "B")
+    good = _ev(source="A", target="B")
     with pytest.raises(GraphEvidenceModelError, match="df key"):
         ingest_traversal_graph(_result([_path(dict(good, key="edge-1"))]))
 
     conflicting = dict(good, target="C")
-    with pytest.raises(GraphEvidenceModelError, match="conflicting"):
+    with pytest.raises(GraphEvidenceModelError, match="content-addressed"):
         ingest_traversal_graph(_result([_path(good), _path(conflicting)]))
 
 
 def test_task28_may_partial_and_unsupported_never_become_proven_exact_edges():
-    may = _ev("df:may", "A", "B", receiver="MAY")
-    partial = _ev("df:partial", "B", "C", completeness="PARTIAL")
-    unsupported = _ev("df:unsupported", "C", "D", relation="CALLS")
+    may = _ev(source="A", target="B", receiver="MAY")
+    partial = _ev(source="B", target="C", completeness="PARTIAL")
+    unsupported = _ev(source="C", target="D", relation="CALLS")
 
     model = ingest_traversal_graph(_result([
         _path(may, receiver="MAY"),
@@ -111,10 +113,10 @@ def test_task28_may_partial_and_unsupported_never_become_proven_exact_edges():
     ]))
 
     by_id = {edge.id: edge for edge in model.edges}
-    assert by_id["df:may"].confidence is not EvidenceConfidence.EXACT
-    assert by_id["df:partial"].confidence is not EvidenceConfidence.EXACT
-    assert by_id["df:unsupported"].confidence is not EvidenceConfidence.EXACT
-    assert {blocker.id for blocker in model.blockers} >= {"df:may:MAY", "df:partial:PARTIAL", "df:unsupported:UNSUPPORTED_RELATION"}
+    assert by_id[may["key"]].confidence is not EvidenceConfidence.EXACT
+    assert by_id[partial["key"]].confidence is not EvidenceConfidence.EXACT
+    assert by_id[unsupported["key"]].confidence is not EvidenceConfidence.EXACT
+    assert {blocker.id for blocker in model.blockers} >= {f"{may['key']}:MAY", f"{partial['key']}:PARTIAL", f"{unsupported['key']}:UNSUPPORTED_RELATION"}
 
 
 def test_task28_negative_absence_is_complete_only_for_exact_resolved_complete_search():

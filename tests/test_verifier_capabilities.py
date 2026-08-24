@@ -502,12 +502,12 @@ def test_builtin_snapshot_audits_all_runtime_verifier_contracts():
 
 
 @pytest.mark.parametrize(
-    ("bundle_factory", "expected_kind"),
+    ("bundle_factory", "expected_kinds"),
     (
-        (_direct_path_bundle, "graphify.data_flow_edge"),
-        (_complete_absence_bundle, "graphify.data_flow_query_result"),
-        (_zero_step_identity_bundle, "graphify.data_flow_query_result"),
-        (_blocking_boundary_bundle, "graphify.data_flow_boundary"),
+        (_direct_path_bundle, {"graphify.data_flow_edge", "graphify.data_flow_query_result"}),
+        (_complete_absence_bundle, {"graphify.data_flow_query_result"}),
+        (_zero_step_identity_bundle, {"graphify.data_flow_query_result"}),
+        (_blocking_boundary_bundle, {"graphify.data_flow_boundary", "graphify.data_flow_query_result"}),
     ),
     ids=(
         "direct-path-edge",
@@ -518,11 +518,11 @@ def test_builtin_snapshot_audits_all_runtime_verifier_contracts():
 )
 def test_data_flow_runtime_cases_emit_their_conditional_evidence_kind(
     bundle_factory,
-    expected_kind,
+    expected_kinds,
 ):
     bundle = bundle_factory()
 
-    assert _runtime_evidence_kinds(bundle) == frozenset({expected_kind})
+    assert _runtime_evidence_kinds(bundle) == frozenset(expected_kinds)
 
 
 def test_data_flow_capability_accepts_exactly_the_runtime_evidence_union():

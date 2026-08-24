@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import re
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Mapping, Sequence
@@ -13,7 +12,9 @@ from ..bundle import (
     VerificationBundle,
     build_verification_bundle,
 )
+from ..code_graph import GraphEvidenceModelError
 from ..model import Evidence, VerificationIssue, VerificationReport, VerificationVerdict
+from ..graphify_contract import expected_graphify_df_key, validate_graphify_df_evidence
 
 
 DATA_FLOW_VERIFIER = "gvr.graphify.data_flow.v1"
@@ -28,9 +29,6 @@ SUPPORTED_DATA_FLOW_RELATIONS = frozenset({
 })
 BLOCKING_RESOLUTIONS = frozenset({"AMBIGUOUS", "UNRESOLVED", "UNSUPPORTED"})
 _TRUNCATION_REASONS = frozenset({"MAX_DEPTH", "MAX_PATHS", "MAX_EXPANSIONS"})
-_EVIDENCE_KEY = re.compile(r"^df:[0-9a-f]{64}$")
-
-
 class DataFlowClaimKind(str, Enum):
     CAN_FLOW_TO = "CAN_FLOW_TO"
     NO_SUPPORTED_PATH = "NO_SUPPORTED_PATH"
@@ -62,6 +60,47 @@ class DataFlowQueryScope:
 
 
 @dataclass(frozen=True)
+class SourceRevision:
+    """Typed source revision authority, deliberately separate from query scope."""
+
+    repository: str
+    revision: str
+
+    def __post_init__(self) -> None:
+        repository = str(self.repository)
+        revision = str(self.revision)
+        if not repository or not revision:
+            raise ValueError("source revision requires repository and revision")
+        object.__setattr__(self, "repository", repository)
+        object.__setattr__(self, "revision", revision)
+
+    def to_dict(self) -> dict[str, str]:
+        return {"repository": self.repository, "revision": self.revision}
+
+
+@dataclass(frozen=True)
+class CompletenessCertificate:
+    """Typed search-completeness authority separated from query scope."""
+
+    search_coverage: str
+    complete_supported_search: bool
+    termination_reason: str
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "search_coverage", str(self.search_coverage))
+        object.__setattr__(self, "complete_supported_search", bool(self.complete_supported_search))
+        object.__setattr__(self, "termination_reason", str(self.termination_reason))
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": 1,
+            "search_coverage": self.search_coverage,
+            "complete_supported_search": self.complete_supported_search,
+            "termination_reason": self.termination_reason,
+        }
+
+
+@dataclass(frozen=True)
 class DataFlowClaim:
     kind: DataFlowClaimKind
     start: str
@@ -69,6 +108,7 @@ class DataFlowClaim:
     scope: DataFlowQueryScope = field(default_factory=DataFlowQueryScope)
     evidence_namespace: str = "default"
     source_context: str | None = None
+    source_revision: SourceRevision | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.kind, DataFlowClaimKind):
@@ -83,8 +123,18 @@ class DataFlowClaim:
         if not namespace:
             raise ValueError("data-flow claim requires a non-empty evidence namespace")
         object.__setattr__(self, "evidence_namespace", namespace)
+        if self.source_revision is not None and not isinstance(self.source_revision, SourceRevision):
+            if not isinstance(self.source_revision, Mapping):
+                raise ValueError("source_revision must be a SourceRevision")
+            object.__setattr__(self, "source_revision", SourceRevision(**dict(self.source_revision)))
         if self.source_context is not None:
             object.__setattr__(self, "source_context", str(self.source_context))
+
+    @property
+    def source_revision_identity(self) -> Mapping[str, str] | None:
+        if self.source_revision is not None:
+            return self.source_revision.to_dict()
+        return None
 
 
 @dataclass(frozen=True)
@@ -114,6 +164,7 @@ _ISSUE_MESSAGES = {
     "MALFORMED_PATH": "A returned path is structurally inconsistent with its supporting evidence.",
     "CLAIM_QUERY_MISMATCH": "The claim endpoints do not match the traversal query direction.",
     "CLAIM_SCOPE_MISMATCH": "The traversal query scope does not match the immutable claim scope.",
+    "SOURCE_REVISION_MISMATCH": "The traversal source revision does not match the typed claim source revision.",
     "INVALID_QUERY": "Graphify reports an invalid traversal query.",
 }
 
@@ -142,6 +193,27 @@ def _scope_metadata(scope: DataFlowQueryScope) -> dict[str, Any]:
         "effective_allowed_relations": sorted(scope.effective_allowed_relations),
         "stop_nodes": sorted(scope.stop_nodes),
     }
+
+
+def _source_revision_metadata(claim: DataFlowClaim) -> Mapping[str, str] | None:
+    identity = claim.source_revision_identity
+    return None if identity is None else dict(identity)
+
+
+def _completeness_certificate(result: Mapping[str, Any]) -> dict[str, Any]:
+    raw = result.get("completeness_certificate")
+    if isinstance(raw, Mapping):
+        certificate = dict(_stable(raw))
+        certificate.setdefault("schema_version", 1)
+        certificate.setdefault("search_coverage", str(result.get("search_coverage") or ""))
+        certificate.setdefault("complete_supported_search", result.get("complete_supported_search"))
+        certificate.setdefault("termination_reason", str(result.get("termination_reason") or ""))
+        return certificate
+    return CompletenessCertificate(
+        search_coverage=str(result.get("search_coverage") or ""),
+        complete_supported_search=result.get("complete_supported_search") is True,
+        termination_reason=str(result.get("termination_reason") or ""),
+    ).to_dict()
 
 
 def _canonical_query_result(result: Mapping[str, Any]) -> dict[str, Any]:
@@ -194,6 +266,7 @@ def _canonical_query_result(result: Mapping[str, Any]) -> dict[str, Any]:
         "truncated": result.get("truncated"),
         "termination_reason": str(result.get("termination_reason") or ""),
         "query_bounds": normalized_bounds,
+        "completeness_certificate": _completeness_certificate(result),
         "boundary_events": boundaries,
         "search_coverage": str(result.get("search_coverage") or ""),
         "complete_supported_search": result.get("complete_supported_search"),
@@ -236,6 +309,9 @@ def build_query_result_evidence(
         "kind": "graphify.data_flow_query_result",
         "evidence_namespace": claim.evidence_namespace,
         "source_context": claim.source_context,
+        "source_revision": _source_revision_metadata(claim),
+        "query_semantic_scope": identity["scope"],
+        "completeness_certificate": _completeness_certificate(traversal_result),
         "query_identity": identity,
         "result": _canonical_query_result(traversal_result),
     }
@@ -250,19 +326,7 @@ def build_query_result_evidence(
 
 
 def _expected_evidence_key(item: Mapping[str, Any]) -> str:
-    fields: list[tuple[str, str]] = [
-        ("r", str(item.get("relation") or "")),
-        ("s", str(item.get("source") or "")),
-        ("t", str(item.get("target") or "")),
-        ("f", str(item.get("source_file") or "")),
-        ("l", str(item.get("source_location") or "")),
-        ("p", str(item.get("provenance") or "")),
-    ]
-    argument_index = item.get("argument_index")
-    if argument_index is not None:
-        fields.append(("ai", str(argument_index)))
-    canonical = json.dumps(sorted(fields), sort_keys=True, separators=(",", ":"))
-    return "df:" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    return expected_graphify_df_key(item)
 
 
 def _same_evidence(left: Mapping[str, Any], right: Mapping[str, Any]) -> bool:
@@ -293,11 +357,16 @@ def _path_analysis(
     for index, ref in enumerate(refs):
         key = str(ref.get("key") or "")
         keys.append(key)
-        if not _EVIDENCE_KEY.fullmatch(key) or key != _expected_evidence_key(ref):
+        key_valid = True
+        try:
+            validate_graphify_df_evidence(ref)
+        except GraphEvidenceModelError:
             issues.add("INVALID_EVIDENCE_KEY")
-        elif key in keys[:-1]:
+            key_valid = False
+        if key_valid and key in keys[:-1]:
             issues.add("INVALID_EVIDENCE_KEY")
-        else:
+            key_valid = False
+        if key_valid:
             canonical = _stable(ref)
             previous = seen_evidence.get(key)
             if previous is not None and previous != canonical:
@@ -470,6 +539,12 @@ def _global_issues(
         or claim.scope.stop_nodes != actual_stop_nodes
     ):
         issues.add("CLAIM_SCOPE_MISMATCH")
+
+    claimed_revision = _source_revision_metadata(claim)
+    result_revision = result.get("source_revision")
+    if claimed_revision is not None:
+        if not isinstance(result_revision, Mapping) or dict(_stable(result_revision)) != dict(_stable(claimed_revision)):
+            issues.add("SOURCE_REVISION_MISMATCH")
 
     rejected_relations = result.get("rejected_relations")
     if not isinstance(rejected_relations, (list, tuple)) or not all(
@@ -704,12 +779,13 @@ def verify_data_flow_claim(
         "CONTRADICTORY_TRAVERSAL",
         "CLAIM_QUERY_MISMATCH",
         "CLAIM_SCOPE_MISMATCH",
+        "SOURCE_REVISION_MISMATCH",
         "INVALID_QUERY",
     }) or bool(hard_path_codes)
 
     if fail_closed:
         verdict = VerificationVerdict.UNKNOWN
-        evidence_ids = tuple(sorted(set(valid_evidence_ids) | set(boundary_ids)))
+        evidence_ids = tuple(sorted(set(valid_evidence_ids) | set(boundary_ids) | {query_evidence.id}))
     elif qualifying:
         selected = qualifying[0]
         verdict = (
@@ -718,14 +794,10 @@ def verify_data_flow_claim(
             else VerificationVerdict.FAIL
         )
         decision_code = "PROVEN_SUPPORTED_PATH"
-        evidence_ids = (
-            selected.evidence_ids
-            if selected.identity
-            else (query_evidence.id,)
-        )
+        evidence_ids = tuple(sorted(set(selected.evidence_ids) | {query_evidence.id}))
     elif analyses:
         verdict = VerificationVerdict.UNKNOWN
-        evidence_ids = tuple(sorted(set(valid_evidence_ids) | set(boundary_ids)))
+        evidence_ids = tuple(sorted(set(valid_evidence_ids) | set(boundary_ids) | {query_evidence.id}))
     elif (
         traversal_result.get("complete_supported_search") is True
         and "MAY_SEARCH_EVIDENCE" not in global_codes
@@ -739,7 +811,7 @@ def verify_data_flow_claim(
         evidence_ids = (query_evidence.id,)
     else:
         verdict = VerificationVerdict.UNKNOWN
-        evidence_ids = boundary_ids
+        evidence_ids = tuple(sorted(set(boundary_ids) | {query_evidence.id}))
 
     if verdict is VerificationVerdict.UNKNOWN:
         issue_codes = set(global_codes) | path_codes
@@ -774,6 +846,9 @@ def verify_data_flow_claim(
         "start": claim.start,
         "target": claim.target,
         "claim_scope": _scope_metadata(claim.scope),
+        "query_semantic_scope": _scope_metadata(claim.scope),
+        "source_revision": _source_revision_metadata(claim),
+        "completeness_certificate": _completeness_certificate(traversal_result),
         "evidence_namespace": claim.evidence_namespace,
         "source_context": claim.source_context,
         "query_evidence_id": query_evidence.id,

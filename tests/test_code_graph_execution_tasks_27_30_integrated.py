@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
@@ -37,9 +38,11 @@ from gvr import (
     encode_code_graph_observation_evidence,
     encode_codeflow_code_graph_observation_evidence,
     encode_graphify_code_graph_observation_evidence,
+    ingest_codeflow_graph,
     safe_handle_request,
 )
 from gvr.code_graph import EvidenceConfidence, GraphEvidence, GraphEvidenceKind, GraphEvidenceModel
+from gvr.graphify_contract import expected_graphify_df_key
 from gvr.verifiers.code_graph import CodeGraphClaimKind
 
 
@@ -56,6 +59,7 @@ SNAPSHOT_PATH = {
     "query_bounds": {"relations": ["FLOWS_TO"]},
 }
 SNAPSHOT_ADVANCED = {**SNAPSHOT_PATH, "revision": "rev-2"}
+CODEFLOW_262206CB_FIXTURE = Path(__file__).parent / "fixtures" / "codeflow_262206cb_golden_world.json"
 
 
 @dataclass
@@ -152,7 +156,32 @@ def no_path_claim(claim_id: str = "cg-no-path", *, snapshot: Mapping[str, Any] =
     )
 
 
+def real_codeflow_claim(snapshot: Mapping[str, Any]) -> AtomicClaim:
+    return AtomicClaim(
+        claim_id="cg-codeflow-real-262206cb",
+        claim_kind=CodeGraphClaimKind.PATH_EXISTS.value,
+        verifier=CODE_GRAPH_VERIFIER,
+        spec={
+            "source": "codeflow:function:src/math.js|1|add",
+            "target": "codeflow:file:src/app.js",
+            "scope": {"snapshot": snapshot},
+            "evidence_namespace": "task31-real-codeflow",
+        },
+    )
+
+
 def graphify_path_snapshot(snapshot: Mapping[str, Any] = SNAPSHOT_PATH) -> Mapping[str, Any]:
+    evidence = {
+        "relation": "FLOWS_TO",
+        "source": "A",
+        "target": "B",
+        "source_file": "src/a.py",
+        "source_location": "1:1",
+        "provenance": "graphify-canonical-snapshot",
+        "receiver_confidence": "PROVEN",
+        "analysis_completeness": "COMPLETE_FOR_SUPPORTED_CONSTRUCT",
+    }
+    evidence["key"] = expected_graphify_df_key(evidence)
     return {
         "start": "A",
         "target": "B",
@@ -166,22 +195,12 @@ def graphify_path_snapshot(snapshot: Mapping[str, Any] = SNAPSHOT_PATH) -> Mappi
         "truncated": False,
         "paths": [
             {
-                "path_identity": ["df:graphify:path:A:B"],
+                "path_identity": [evidence["key"]],
                 "path_exactness": "EXACT_FOR_RETURNED_PATH",
                 "path_receiver_confidence": "PROVEN",
                 "path_coverage": "COMPLETE_FOR_SUPPORTED_CONSTRUCT",
                 "supporting_evidence": [
-                    {
-                        "key": "df:graphify:path:A:B",
-                        "relation": "FLOWS_TO",
-                        "source": "A",
-                        "target": "B",
-                        "source_file": "src/a.py",
-                        "source_location": "1:1",
-                        "provenance": "graphify-canonical-snapshot",
-                        "receiver_confidence": "PROVEN",
-                        "analysis_completeness": "COMPLETE_FOR_SUPPORTED_CONSTRUCT",
-                    }
+                    evidence
                 ],
             }
         ],
@@ -551,3 +570,57 @@ def test_vii_protocol_execution_keeps_codeflow_silence_unknown_for_path_exists()
     assert session["root_verdicts"] == {claim.claim_id: "UNKNOWN"}
     assert bundle["report"]["verdict"] == "UNKNOWN"
     assert {issue["code"] for issue in bundle["report"]["issues"]} >= {"ABSENCE_NOT_PROVEN", "PROVIDER_ONLY_HEURISTIC"}
+
+
+def test_viii_real_codeflow_262206cb_fixture_executes_through_sqlite_without_synthetic_graph(tmp_path: Path) -> None:
+    payload = json.loads(CODEFLOW_262206CB_FIXTURE.read_text())
+    snapshot = ingest_codeflow_graph(payload).source_snapshot
+    claim = real_codeflow_claim(snapshot)
+    observation = encode_codeflow_code_graph_observation_evidence(
+        payload,
+        evidence_id="obs.codeflow.real.262206cb",
+        claim=claim,
+    )
+
+    result = execute_verification_plan(
+        execution_request(claim, {"codeflow.snapshot": (observation, snapshot)}),
+        storage=SQLiteStorage(tmp_path / "gvr.sqlite3"),
+    )
+    report = root_report(result, claim.claim_id)
+
+    assert result.termination is VerificationExecutionTermination.COMPLETE
+    assert result.consumption.acquisitions == 1
+    assert report.verdict is VerificationVerdict.UNKNOWN
+    assert report.evidence_ids == ("obs.codeflow.real.262206cb",)
+    assert {"HEURISTIC_ONLY_SUPPORT", "PROVIDER_ONLY_HEURISTIC"} <= issue_codes(report)
+
+
+def test_ix_same_provider_family_pass_fail_contradiction_is_not_independent_sqlite(tmp_path: Path) -> None:
+    claim = path_claim("cg-same-family-contradiction")
+    passing = encode_code_graph_observation_evidence(
+        exact_model("wrapper-pass", "same-family:pass"),
+        evidence_id="obs.same-family.pass",
+        claim=claim,
+        implementation_id="graphify-cli",
+        family_id="graphify",
+    )
+    failing = encode_code_graph_observation_evidence(
+        GraphEvidenceModel(provider="wrapper-fail", nodes=(), edges=(), absence_subjects=("graphify:node:A->graphify:node:B",), source_snapshot=SNAPSHOT_PATH),
+        evidence_id="obs.same-family.fail",
+        claim=claim,
+        implementation_id="graphify-wrapper",
+        family_id="graphify",
+    )
+
+    result = execute_verification_plan(
+        execution_request(
+            claim,
+            {"wrapper.pass": (passing, SNAPSHOT_PATH), "wrapper.fail": (failing, SNAPSHOT_PATH)},
+        ),
+        storage=SQLiteStorage(tmp_path / "gvr.sqlite3"),
+    )
+    report = root_report(result, claim.claim_id)
+
+    assert report.verdict is VerificationVerdict.UNKNOWN
+    assert "PROVIDER_FAMILY_CONTRADICTION" in issue_codes(report)
+    assert "PROVIDER_CONFLICT" not in issue_codes(report)
