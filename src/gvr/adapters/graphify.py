@@ -469,7 +469,13 @@ def _graphify_query_scope(result: Mapping[str, Any]) -> GraphQueryScope:
     target = result.get("target")
     if not start:
         raise GraphEvidenceModelError("Graphify authoritative query requires start")
-    requested = _native_set(bounds.get("requested_relations", bounds.get("relations", ())), "requested_relations")
+    requested = _native_set(
+        bounds.get(
+            "requested_allowed_relations",
+            bounds.get("requested_relations", bounds.get("relations", ())),
+        ),
+        "requested_relations",
+    )
     effective = _native_set(bounds.get("effective_allowed_relations", bounds.get("effective_relations", bounds.get("relations", ()))), "effective_relations")
     return GraphQueryScope(
         start=_node_id(start),

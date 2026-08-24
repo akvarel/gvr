@@ -126,7 +126,7 @@ def test_task33b_real_envelope_vocabularies_and_boolean_types_are_shared(field, 
         ("visited_count", 1),
         ("expanded_count", True),
         ("expanded_count", -1),
-        ("expanded_count", 3),
+        ("expanded_count", 2001),
     ],
 )
 def test_task33b_counts_must_be_real_bounded_integers_covering_returned_paths(field, value) -> None:

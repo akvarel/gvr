@@ -46,6 +46,10 @@ def _result(paths, **overrides):
         "truncated": False,
         "termination_reason": "COMPLETE",
         "query_bounds": {
+            "direction": "FORWARD",
+            "max_depth": 4,
+            "max_paths": 50,
+            "max_expansions": 2000,
             "requested_allowed_relations": ["FLOWS_TO"],
             "effective_allowed_relations": ["FLOWS_TO"],
             "rejected_relations": [],

@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-from copy import deepcopy
+import hashlib
+import json
 
 import pytest
 
 from gvr import VerificationVerdict
-from gvr.adapters.graphify import ingest_traversal_graph
-from gvr.code_graph import EvidenceConfidence, GraphEvidenceModelError
-from gvr.graphify_contract import validate_graphify_positive_traversal
+from gvr.code_graph import EvidenceConfidence
 
 from test_task31_authority_remediation import df_edge, path_for, traversal
 from test_task33b_graphify_envelope_authority_parity import (
@@ -121,7 +120,12 @@ def test_task33c_non_target_returned_stop_node_is_non_authoritative() -> None:
     result["visited_count"] = 3
     result["expanded_count"] = 2
     result["query_bounds"]["stop_nodes"] = ["X"]
-    assert_non_authoritative_parity(result)
+    contract, adapter, typed, verdict, negative = _surface_authority(result)
+    assert contract in (frozenset(), "REJECTED")
+    assert adapter == (EvidenceConfidence.HEURISTIC, EvidenceConfidence.HEURISTIC)
+    assert typed == (EvidenceConfidence.HEURISTIC, EvidenceConfidence.HEURISTIC)
+    assert verdict is VerificationVerdict.UNKNOWN
+    assert negative is False
 
 
 def test_task33c_legacy_relation_aliases_are_non_authoritative() -> None:
@@ -168,7 +172,7 @@ def test_task33c_boundary_identity_and_blocking_resolution_are_strict(mutation) 
         "diagnostic_kind": "cross_file_resolution",
         "capability": "call_resolution",
         "framework": "",
-        "boundary_evidence_key": "bnd:" + "0" * 64,
+        "boundary_evidence_key": "",
         "diagnostic_node_id": "diag-node-1",
         "diagnostic_evidence_key": "diag:diag-node-1",
         "canonical_caller_file": "src/Flow.java",
@@ -186,6 +190,22 @@ def test_task33c_boundary_identity_and_blocking_resolution_are_strict(mutation) 
         "entity_fqn": "",
         "mapping_target": "",
     }
+    fields = [
+        ("sf", event["canonical_caller_file"]),
+        ("loc", event["caller_location"]),
+        ("kind", event["diagnostic_kind"]),
+        ("cap", event["capability"]),
+        ("framework", event["framework"]),
+        ("res", event["resolution"]),
+        ("method", event["method"]),
+        ("arity", str(event["arity"])),
+        ("rfqn", event["receiver_fqn"]),
+        ("repo", event["repository_fqn"]),
+        ("entity", event["entity_fqn"]),
+        ("reason", event["reason"]),
+    ]
+    canonical = json.dumps(sorted(fields), sort_keys=True, separators=(",", ":"))
+    event["boundary_evidence_key"] = "bnd:" + hashlib.sha256(canonical.encode()).hexdigest()
     mutation(event)
     result["boundary_events"] = [event]
     result.update(search_coverage="PARTIAL", complete_supported_search=False)

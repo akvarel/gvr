@@ -532,7 +532,10 @@ def _global_issues(
         else:
             requested_relations = frozenset(requested)
             effective_allowed_relations = frozenset(effective)
-            actual_stop_nodes = frozenset(stop_nodes)
+            # Graphify treats the point-to-point target as terminal before it
+            # consults stop_nodes. Listing that same target is therefore a
+            # canonical no-op, not a different claim scope.
+            actual_stop_nodes = frozenset(stop_nodes) - {query_target}
             expected_effective = requested_relations & SUPPORTED_DATA_FLOW_RELATIONS
             expected_rejected = requested_relations - SUPPORTED_DATA_FLOW_RELATIONS
             if effective_allowed_relations != expected_effective:

@@ -9,6 +9,7 @@ from typing import Any, Mapping
 from .code_graph import GraphEvidenceModelError
 
 GRAPHIFY_DF_KEY_RE = re.compile(r"^df:[0-9a-f]{64}$")
+GRAPHIFY_BOUNDARY_KEY_RE = re.compile(r"^bnd:[0-9a-f]{64}$")
 _GRAPHIFY_DF_KEY_FORMAT = "graphify.data_flow.evidence_key.v1"
 _GRAPHIFY_DF_KEY_FIELDS = (
     "relation",
@@ -35,6 +36,31 @@ _INPUT_RESOLUTIONS = frozenset({
 })
 _TERMINATION_REASONS = frozenset({
     "COMPLETE", *_TRUNCATION_REASONS, "START_NODE_NOT_FOUND", "TARGET_NODE_NOT_FOUND",
+})
+_NATIVE_ENVELOPE_FIELDS = frozenset({
+    "paths", "start", "target", "direction", "visited_count", "expanded_count",
+    "truncated", "termination_reason", "query_bounds", "boundary_events",
+    "search_coverage", "complete_supported_search", "start_node_found",
+    "target_node_found", "query_validity", "input_resolution", "rejected_relations",
+    "encountered_partial_evidence", "encountered_unknown_evidence",
+    "encountered_may_evidence",
+})
+_NATIVE_BOUND_FIELDS = frozenset({
+    "direction", "max_depth", "max_paths", "max_expansions",
+    "requested_allowed_relations", "effective_allowed_relations",
+    "rejected_relations", "stop_nodes",
+})
+_NATIVE_PATH_FIELDS = frozenset({
+    "steps", "supporting_evidence", "path_identity", "path_exactness",
+    "path_receiver_confidence", "path_coverage",
+})
+_NATIVE_BOUNDARY_FIELDS = frozenset({
+    "type", "diagnostic_kind", "capability", "framework",
+    "boundary_evidence_key", "diagnostic_node_id", "diagnostic_evidence_key",
+    "canonical_caller_file", "caller_location", "resolution", "reason",
+    "receiver", "receiver_fqn", "receiver_confidence", "method", "arity",
+    "import_context", "candidate_count", "repository_fqn", "entity_fqn",
+    "mapping_target",
 })
 
 
@@ -114,12 +140,61 @@ def _stable(value: Any) -> Any:
     return str(value)
 
 
-def _string_set(value: Any, name: str) -> frozenset[str]:
-    if isinstance(value, (str, bytes)) or not isinstance(value, (list, tuple, set, frozenset)):
+def _canonical_string_sequence(value: Any, name: str) -> tuple[str, ...]:
+    if not isinstance(value, (list, tuple)):
         raise GraphEvidenceModelError(f"Graphify {name} must be a sequence")
     if not all(isinstance(item, str) and item for item in value):
         raise GraphEvidenceModelError(f"Graphify {name} must contain non-empty strings")
-    return frozenset(value)
+    normalized = tuple(value)
+    if normalized != tuple(sorted(set(normalized))):
+        raise GraphEvidenceModelError(f"Graphify {name} must be sorted and unique")
+    return normalized
+
+
+def _expected_boundary_key(event: Mapping[str, Any]) -> str:
+    fields = [
+        ("sf", event["canonical_caller_file"]),
+        ("loc", event["caller_location"]),
+        ("kind", event["diagnostic_kind"]),
+        ("cap", event["capability"]),
+        ("framework", event["framework"]),
+        ("res", event["resolution"]),
+        ("method", event["method"]),
+        ("arity", str(event["arity"])),
+        ("rfqn", event["receiver_fqn"]),
+        ("repo", event["repository_fqn"]),
+        ("entity", event["entity_fqn"]),
+        ("reason", event["reason"]),
+    ]
+    canonical = json.dumps(sorted(fields), sort_keys=True, separators=(",", ":"))
+    return "bnd:" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _validate_boundary_event(event: Mapping[str, Any]) -> None:
+    missing = sorted(_NATIVE_BOUNDARY_FIELDS - event.keys())
+    if missing:
+        raise GraphEvidenceModelError(
+            "Graphify boundary event is missing native fields: " + ", ".join(missing)
+        )
+    string_fields = _NATIVE_BOUNDARY_FIELDS - {"arity", "candidate_count"}
+    if any(not isinstance(event[name], str) for name in string_fields):
+        raise GraphEvidenceModelError("Graphify boundary event string fields must be strings")
+    if event["type"] != "boundary_event":
+        raise GraphEvidenceModelError("Graphify boundary event type must be boundary_event")
+    if event["diagnostic_kind"] not in {"cross_file_resolution", "persistence_resolution"}:
+        raise GraphEvidenceModelError("Graphify boundary diagnostic kind is not native")
+    if event["resolution"] not in _BLOCKING_BOUNDARY_RESOLUTIONS:
+        raise GraphEvidenceModelError("Graphify boundary resolution must be blocking")
+    if event["receiver_confidence"] not in {"PROVEN", "MAY"}:
+        raise GraphEvidenceModelError("Graphify boundary receiver confidence is not native")
+    if any(type(event[name]) is not int or event[name] < 0 for name in ("arity", "candidate_count")):
+        raise GraphEvidenceModelError("Graphify boundary counts must be non-negative integers")
+    node_id = event["diagnostic_node_id"]
+    if not node_id or event["diagnostic_evidence_key"] != f"diag:{node_id}":
+        raise GraphEvidenceModelError("Graphify boundary diagnostic identity is inconsistent")
+    key = event["boundary_evidence_key"]
+    if not GRAPHIFY_BOUNDARY_KEY_RE.fullmatch(key) or key != _expected_boundary_key(event):
+        raise GraphEvidenceModelError("Graphify boundary evidence key is not content-addressed")
 
 
 def _real_count(result: Mapping[str, Any], name: str) -> int:
@@ -139,56 +214,58 @@ def validate_graphify_envelope_authority(result: Mapping[str, Any]) -> GraphifyE
 
     if not isinstance(result, Mapping):
         raise GraphEvidenceModelError("Graphify traversal result must be a mapping")
+    missing_native = sorted(_NATIVE_ENVELOPE_FIELDS - result.keys())
+    if missing_native:
+        return GraphifyEnvelopeAuthority(False, False)
     paths = _mapping_sequence(result.get("paths"), "paths")
-    direction = str(result.get("direction") or "")
+    direction = result.get("direction")
+    if not isinstance(direction, str):
+        raise GraphEvidenceModelError("Graphify direction must be a string")
     if direction not in {"FORWARD", "BACKWARD"}:
         raise GraphEvidenceModelError("Graphify direction must be FORWARD or BACKWARD")
-    start = str(result.get("start") or "")
-    target = "" if result.get("target") is None else str(result.get("target"))
+    start = result.get("start")
+    target = result.get("target")
+    if not isinstance(start, str) or not isinstance(target, str):
+        raise GraphEvidenceModelError("Graphify authoritative query endpoints must be strings")
     if not start or not target:
         raise GraphEvidenceModelError("Graphify traversal requires non-empty query endpoints")
 
     bounds = result.get("query_bounds")
     if not isinstance(bounds, Mapping):
         raise GraphEvidenceModelError("Graphify traversal requires query_bounds")
-    direction_valid = bounds.get("direction") is None or str(bounds.get("direction") or "") == direction
-    canonical_relation_partition = bounds.get("requested_allowed_relations") is not None
-    requested_raw = bounds.get("requested_allowed_relations", bounds.get("requested_relations", bounds.get("relations", ())))
-    effective_raw = bounds.get("effective_allowed_relations", bounds.get("effective_relations", bounds.get("relations", ())))
-    requested = _string_set(requested_raw, "requested relations")
-    effective = _string_set(effective_raw, "effective relations")
-    rejected = _string_set(bounds.get("rejected_relations"), "rejected relations") if bounds.get("rejected_relations") else frozenset()
-    stop_nodes = _string_set(bounds.get("stop_nodes"), "stop_nodes") if bounds.get("stop_nodes") else frozenset()
+    missing_bounds = sorted(_NATIVE_BOUND_FIELDS - bounds.keys())
+    if missing_bounds:
+        return GraphifyEnvelopeAuthority(False, False)
+    direction_valid = type(bounds.get("direction")) is str and bounds["direction"] == direction
+    requested = frozenset(_canonical_string_sequence(bounds["requested_allowed_relations"], "requested relations"))
+    effective = frozenset(_canonical_string_sequence(bounds["effective_allowed_relations"], "effective relations"))
+    rejected = frozenset(_canonical_string_sequence(bounds["rejected_relations"], "rejected relations"))
+    stop_nodes = frozenset(_canonical_string_sequence(bounds["stop_nodes"], "stop_nodes"))
     partition_valid = effective == requested & _SUPPORTED_RELATIONS and not effective - _SUPPORTED_RELATIONS
-    if canonical_relation_partition:
-        partition_valid = partition_valid and rejected == requested - _SUPPORTED_RELATIONS
-    top_rejected_raw = result.get("rejected_relations")
-    top_rejected = _string_set(top_rejected_raw, "top-level rejected relations") if top_rejected_raw else rejected
+    partition_valid = partition_valid and rejected == requested - _SUPPORTED_RELATIONS
+    top_rejected = frozenset(_canonical_string_sequence(result["rejected_relations"], "top-level rejected relations"))
     partition_valid = partition_valid and top_rejected == rejected
 
     limits: dict[str, int] = {}
     for name, minimum in (("max_depth", 0), ("max_paths", 1), ("max_expansions", 1)):
         value = bounds.get(name)
-        if value is None:
-            limits[name] = 2**63 - 1
-            continue
         if type(value) is not int or value < minimum:
             raise GraphEvidenceModelError(f"Graphify {name} must be an integer >= {minimum}")
         limits[name] = value
-    visited = _real_count(result, "visited_count") if "visited_count" in result else None
-    expanded = _real_count(result, "expanded_count") if "expanded_count" in result else None
+    visited = _real_count(result, "visited_count")
+    expanded = _real_count(result, "expanded_count")
 
     required_boolean_fields = (
         "truncated", "query_validity", "start_node_found", "target_node_found", "complete_supported_search",
     )
-    optional_boolean_fields = (
+    epistemic_boolean_fields = (
         "encountered_may_evidence", "encountered_partial_evidence", "encountered_unknown_evidence",
     )
     if any(type(result.get(name)) is not bool for name in required_boolean_fields) or any(
-        name in result and type(result.get(name)) is not bool for name in optional_boolean_fields
+        type(result.get(name)) is not bool for name in epistemic_boolean_fields
     ):
         raise GraphEvidenceModelError("Graphify authority flags must be booleans")
-    epistemic = {name: result.get(name, False) for name in optional_boolean_fields}
+    epistemic = {name: result[name] for name in epistemic_boolean_fields}
     truncated = result["truncated"]
     coverage = str(result.get("search_coverage") or "")
     resolution = str(result.get("input_resolution") or "")
@@ -205,11 +282,24 @@ def validate_graphify_envelope_authority(result: Mapping[str, Any]) -> GraphifyE
         and certificate.get("termination_reason") == termination
     )
     boundaries = _mapping_sequence(result.get("boundary_events", ()), "boundary_events")
+    for event in boundaries:
+        if _NATIVE_BOUNDARY_FIELDS - event.keys():
+            return GraphifyEnvelopeAuthority(False, False)
+        _validate_boundary_event(event)
     blocking = any(str(event.get("resolution") or "") in _BLOCKING_BOUNDARY_RESOLUTIONS for event in boundaries)
     returned_nodes: set[str] = set()
     required_expansions = 0
     path_bounds_valid = True
     for path in paths:
+        missing_path = sorted(_NATIVE_PATH_FIELDS - path.keys())
+        if missing_path:
+            return GraphifyEnvelopeAuthority(False, False)
+        if path["path_exactness"] != "EXACT_FOR_RETURNED_PATH":
+            raise GraphEvidenceModelError("Graphify path exactness is not native")
+        if path["path_receiver_confidence"] not in {"PROVEN", "MAY"}:
+            raise GraphEvidenceModelError("Graphify path receiver confidence is not native")
+        if path["path_coverage"] not in {"COMPLETE_FOR_SUPPORTED_CONSTRUCT", "PARTIAL", "UNKNOWN"}:
+            raise GraphEvidenceModelError("Graphify path coverage is not native")
         steps = _mapping_sequence(path.get("steps"), "path steps")
         required_expansions = max(required_expansions, len(steps))
         if len(steps) > limits["max_depth"]:
@@ -220,13 +310,8 @@ def validate_graphify_envelope_authority(result: Mapping[str, Any]) -> GraphifyE
             for field in ("source", "target")
             if str(step.get(field) or "")
         )
-    if expanded is None:
-        expanded = required_expansions
-    if visited is None:
-        visited = max(1, len(returned_nodes))
     counts_valid = (
         path_bounds_valid
-        and expanded <= visited
         and expanded <= limits["max_expansions"]
         and len(paths) <= limits["max_paths"]
     )
@@ -253,7 +338,7 @@ def validate_graphify_envelope_authority(result: Mapping[str, Any]) -> GraphifyE
         common and bool(paths) and resolved and result["query_validity"] is True
         and not blocking and not epistemic["encountered_may_evidence"]
         and not epistemic["encountered_partial_evidence"] and not epistemic["encountered_unknown_evidence"]
-        and not (stop_nodes & returned_nodes)
+        and not ((stop_nodes - {target}) & returned_nodes)
     )
     negative = common and not paths and expected_complete and not epistemic["encountered_may_evidence"]
     return GraphifyEnvelopeAuthority(positive_authorized=positive, negative_authorized=negative)

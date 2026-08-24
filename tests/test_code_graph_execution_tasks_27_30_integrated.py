@@ -59,7 +59,16 @@ SNAPSHOT_PATH = {
     "termination_reason": "COMPLETE",
     "search_coverage": "COMPLETE_FOR_SUPPORTED_CONSTRUCT",
     "complete_supported_search": True,
-    "query_bounds": {"relations": ["FLOWS_TO"]},
+    "query_bounds": {
+        "direction": "FORWARD",
+        "max_depth": 4,
+        "max_paths": 50,
+        "max_expansions": 2000,
+        "requested_allowed_relations": ["FLOWS_TO"],
+        "effective_allowed_relations": ["FLOWS_TO"],
+        "rejected_relations": [],
+        "stop_nodes": [],
+    },
 }
 SNAPSHOT_ADVANCED = {**SNAPSHOT_PATH, "revision": "rev-2"}
 CODEFLOW_262206CB_FIXTURE = Path(__file__).parent / "fixtures" / "codeflow_262206cb_golden_world.json"
@@ -138,7 +147,12 @@ def path_claim(claim_id: str = "cg-path", *, snapshot: Mapping[str, Any] = SNAPS
             "source": "graphify:node:A",
             "target": "graphify:node:B",
             "relations": ["FLOWS_TO"],
-            "scope": {"snapshot": snapshot},
+            "scope": {
+                "snapshot": snapshot,
+                "max_depth": 4,
+                "max_paths": 50,
+                "max_expansions": 2000,
+            },
             "evidence_namespace": "integrated-27-30",
         },
     )
@@ -177,7 +191,12 @@ def no_path_claim(claim_id: str = "cg-no-path", *, snapshot: Mapping[str, Any] =
             "source": "graphify:node:A",
             "target": "graphify:node:B",
             "relations": ["FLOWS_TO"],
-            "scope": {"snapshot": snapshot},
+            "scope": {
+                "snapshot": snapshot,
+                "max_depth": 4,
+                "max_paths": 50,
+                "max_expansions": 2000,
+            },
             "evidence_namespace": "integrated-27-30",
         },
     )
@@ -223,6 +242,13 @@ def graphify_path_snapshot(snapshot: Mapping[str, Any] = SNAPSHOT_PATH) -> Mappi
         "start_node_found": True,
         "target_node_found": True,
         "truncated": False,
+        "visited_count": 2,
+        "expanded_count": 1,
+        "boundary_events": [],
+        "rejected_relations": [],
+        "encountered_partial_evidence": False,
+        "encountered_unknown_evidence": False,
+        "encountered_may_evidence": False,
         "paths": [
             {
                 "path_identity": [evidence["key"]],
@@ -260,10 +286,14 @@ def graphify_no_path_snapshot(snapshot: Mapping[str, Any] = SNAPSHOT_PATH) -> Ma
         "start_node_found": True,
         "target_node_found": True,
         "truncated": False,
+        "visited_count": 1,
+        "expanded_count": 0,
         "paths": [],
         "boundary_events": [],
+        "rejected_relations": [],
         "encountered_partial_evidence": False,
         "encountered_unknown_evidence": False,
+        "encountered_may_evidence": False,
     }
 
 
