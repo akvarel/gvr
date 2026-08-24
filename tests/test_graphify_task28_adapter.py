@@ -119,7 +119,7 @@ def test_task28_may_partial_and_unsupported_never_become_proven_exact_edges():
 
 def test_task28_negative_absence_is_complete_only_for_exact_resolved_complete_search():
     complete = ingest_traversal_graph(_result([]))
-    assert complete.absence_subjects == ("A->C",)
+    assert complete.absence_subjects == ("graphify:node:A->graphify:node:C",)
 
     incomplete_cases = [
         {"complete_supported_search": False},

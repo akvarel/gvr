@@ -67,6 +67,12 @@ def test_unknown_for_heuristic_codeflow_only_complete_absence_and_partial_or_tru
 
     empty = _model([], [], provider="codeflow")
     assert verify_code_graph_claim(_claim(CodeGraphClaimKind.NO_PATH, source="A", target="B"), empty).verdict is VerificationVerdict.UNKNOWN
+    assert verify_code_graph_claim(_claim(CodeGraphClaimKind.PATH_EXISTS, source="A", target="B"), empty).verdict is VerificationVerdict.UNKNOWN
+
+    complete_absence = _model([], [], absence=("A->B",))
+    absent_path = verify_code_graph_claim(_claim(CodeGraphClaimKind.PATH_EXISTS, source="A", target="B"), complete_absence)
+    assert absent_path.verdict is VerificationVerdict.FAIL
+    assert "PATH_ABSENT" in _codes(absent_path)
 
     partial = _model([_node("A"), _node("B")], [_edge("A", "B")], blockers=(GraphBlocker("b:truncated", "truncated", "graph"),))
     report = verify_code_graph_claim(_claim(CodeGraphClaimKind.NO_PATH, source="B", target="A"), partial)
@@ -88,6 +94,22 @@ def test_counterexample_fail_for_no_path_all_paths_and_blast_radius_contains():
     blast = verify_code_graph_claim(_claim(CodeGraphClaimKind.BLAST_RADIUS_CONTAINS, source="A", target="C", max_depth=1), model)
     assert blast.verdict is VerificationVerdict.FAIL
     assert "TARGET_OUTSIDE_BLAST_RADIUS" in _codes(blast)
+
+
+def test_non_exact_paths_are_not_decisive_negative_counterexamples():
+    heuristic = _model(
+        [_node("A"), _node("B")],
+        [_edge("A", "B", confidence=EvidenceConfidence.INFERRED_HINT)],
+        provider="architecture-hints",
+    )
+
+    no_path = verify_code_graph_claim(_claim(CodeGraphClaimKind.NO_PATH, source="A", target="B"), heuristic)
+    assert no_path.verdict is VerificationVerdict.UNKNOWN
+    assert "EDGE_NOT_EXACT" in _codes(no_path)
+
+    all_paths = verify_code_graph_claim(_claim(CodeGraphClaimKind.ALL_PATHS_PASS_THROUGH, source="A", target="B", through="X"), heuristic)
+    assert all_paths.verdict is VerificationVerdict.UNKNOWN
+    assert "EDGE_NOT_EXACT" in _codes(all_paths)
 
 
 def test_cycles_duplicates_deterministic_order_invariant_relation_filtering_and_canonical_bfs_path_ids():

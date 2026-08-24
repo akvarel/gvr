@@ -58,6 +58,17 @@ def test_codeflow_adapter_is_deterministic_and_side_effect_free():
     assert first.fingerprint == second.fingerprint
 
 
+def test_codeflow_adapter_fingerprint_is_stable_under_native_ordering():
+    raw = load_fixture()
+    reordered = load_fixture(
+        nodes=list(reversed(raw["nodes"])),
+        edges=list(reversed(raw["edges"])),
+        blockers=list(reversed(raw["blockers"])),
+    )
+
+    assert ingest_codeflow_graph(raw).fingerprint == ingest_codeflow_graph(reordered).fingerprint
+
+
 def test_conflicting_native_duplicate_ids_fail_closed():
     duplicate = {
         "id": "edge:call:handler-save",

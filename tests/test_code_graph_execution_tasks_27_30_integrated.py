@@ -37,6 +37,7 @@ from gvr import (
     encode_code_graph_observation_evidence,
     encode_codeflow_code_graph_observation_evidence,
     encode_graphify_code_graph_observation_evidence,
+    safe_handle_request,
 )
 from gvr.code_graph import EvidenceConfidence, GraphEvidence, GraphEvidenceKind, GraphEvidenceModel
 from gvr.verifiers.code_graph import CodeGraphClaimKind
@@ -142,8 +143,8 @@ def no_path_claim(claim_id: str = "cg-no-path", *, snapshot: Mapping[str, Any] =
         claim_kind=CodeGraphClaimKind.NO_PATH.value,
         verifier=CODE_GRAPH_VERIFIER,
         spec={
-            "source": "A",
-            "target": "B",
+            "source": "graphify:node:A",
+            "target": "graphify:node:B",
             "relations": ["FLOWS_TO"],
             "scope": {"snapshot": snapshot},
             "evidence_namespace": "integrated-27-30",
@@ -424,7 +425,7 @@ def test_iv_independent_decisive_pass_fail_conflict_is_unknown(tmp_path: Path) -
         family_id="exact-pass-family",
     )
     failing = encode_code_graph_observation_evidence(
-        GraphEvidenceModel(provider="exact-fail", nodes=(), edges=(), source_snapshot=SNAPSHOT_PATH),
+        GraphEvidenceModel(provider="exact-fail", nodes=(), edges=(), absence_subjects=("graphify:node:A->graphify:node:B",), source_snapshot=SNAPSHOT_PATH),
         evidence_id="obs.exact.fail",
         claim=claim,
         implementation_id="exact-fail-v1",
@@ -527,3 +528,26 @@ def test_vi_contamination_mix_claim_mismatch_never_upgrades_truth(tmp_path: Path
     assert report.verdict is VerificationVerdict.UNKNOWN
     assert "PROVIDER_CLAIM_MISMATCH" in issue_codes(report)
     assert "PROVIDER_CORROBORATED_PASS" not in issue_codes(report)
+
+
+def test_vii_protocol_execution_keeps_codeflow_silence_unknown_for_path_exists() -> None:
+    claim = path_claim("cg-codeflow-silence-protocol")
+    codeflow = encode_codeflow_code_graph_observation_evidence(
+        codeflow_silence_snapshot(),
+        evidence_id="obs.codeflow.silence.protocol",
+        claim=claim,
+    )
+    request = execution_request(claim, {"codeflow.snapshot": (codeflow, SNAPSHOT_PATH)})
+
+    response = safe_handle_request(
+        {"schema_version": 1, "op": "execute_verification_plan", "payload": request.to_dict()},
+        verifier_runtime_registry=request.verifier_runtime_registry,
+        evidence_provider_runtime_registry=request.evidence_provider_runtime_registry,
+    )
+
+    assert response["kind"] == "verification_execution_result"
+    session = response["payload"]["session"]
+    bundle = response["payload"]["bundles"][0]["bundle"]
+    assert session["root_verdicts"] == {claim.claim_id: "UNKNOWN"}
+    assert bundle["report"]["verdict"] == "UNKNOWN"
+    assert {issue["code"] for issue in bundle["report"]["issues"]} >= {"ABSENCE_NOT_PROVEN", "PROVIDER_ONLY_HEURISTIC"}
