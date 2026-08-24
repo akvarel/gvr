@@ -17,7 +17,11 @@ from ..code_graph import (
     SourceRevisionIdentity,
     encode_code_graph_observation_evidence,
 )
-from ..graphify_contract import validate_graphify_df_evidence, validate_graphify_positive_traversal
+from ..graphify_contract import (
+    validate_graphify_df_evidence,
+    validate_graphify_envelope_authority,
+    validate_graphify_positive_traversal,
+)
 from ..model import Evidence, VerificationVerdict
 
 
@@ -254,6 +258,7 @@ def ingest_traversal_graph(result: Mapping[str, Any]) -> GraphEvidenceModel:
     missing evidence keys, or upgrades MAY/PARTIAL/unsupported evidence to exact.
     """
 
+    envelope_authority = validate_graphify_envelope_authority(result)
     authoritative_keys = validate_graphify_positive_traversal(result)
     paths = _mapping_items(result.get("paths"))
     path_owners = _path_by_evidence(paths)
@@ -313,16 +318,7 @@ def ingest_traversal_graph(result: Mapping[str, Any]) -> GraphEvidenceModel:
             continue
         blockers.append(GraphBlocker(key, str(event.get("resolution") or "BOUNDARY"), str(event.get("canonical_caller_file") or ""), dict(event)))
 
-    complete_absence = (
-        result.get("complete_supported_search") is True
-        and str(result.get("search_coverage") or "") == _COMPLETE
-        and result.get("truncated") is not True
-        and result.get("query_validity") is True
-        and str(result.get("input_resolution") or "") == "RESOLVED"
-        and not _mapping_items(result.get("boundary_events"))
-        and result.get("encountered_partial_evidence") is not True
-        and result.get("encountered_unknown_evidence") is not True
-    )
+    complete_absence = envelope_authority.negative_authorized
     absence_subjects: tuple[str, ...] = ()
     start = str(result.get("start") or "")
     target = result.get("target")

@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from dataclasses import dataclass
 from typing import Any, Mapping
 
 from .code_graph import GraphEvidenceModelError
@@ -27,6 +28,22 @@ _SUPPORTED_RELATIONS = frozenset({
 })
 _TRUNCATION_REASONS = frozenset({"MAX_DEPTH", "MAX_PATHS", "MAX_EXPANSIONS"})
 _BLOCKING_BOUNDARY_RESOLUTIONS = frozenset({"AMBIGUOUS", "UNRESOLVED", "UNSUPPORTED"})
+_SEARCH_COVERAGE = frozenset({"COMPLETE_FOR_SUPPORTED_CONSTRUCT", "PARTIAL", "UNKNOWN"})
+_INPUT_RESOLUTIONS = frozenset({
+    "RESOLVED", "START_NODE_NOT_FOUND", "TARGET_NODE_NOT_FOUND",
+    "AMBIGUOUS_START", "AMBIGUOUS_TARGET",
+})
+_TERMINATION_REASONS = frozenset({
+    "COMPLETE", *_TRUNCATION_REASONS, "START_NODE_NOT_FOUND", "TARGET_NODE_NOT_FOUND",
+})
+
+
+@dataclass(frozen=True)
+class GraphifyEnvelopeAuthority:
+    """Shared authority decision for one public Graphify traversal envelope."""
+
+    positive_authorized: bool
+    negative_authorized: bool
 
 
 def _field_pairs(item: Mapping[str, Any]) -> list[tuple[str, str]]:
@@ -97,6 +114,151 @@ def _stable(value: Any) -> Any:
     return str(value)
 
 
+def _string_set(value: Any, name: str) -> frozenset[str]:
+    if isinstance(value, (str, bytes)) or not isinstance(value, (list, tuple, set, frozenset)):
+        raise GraphEvidenceModelError(f"Graphify {name} must be a sequence")
+    if not all(isinstance(item, str) and item for item in value):
+        raise GraphEvidenceModelError(f"Graphify {name} must contain non-empty strings")
+    return frozenset(value)
+
+
+def _real_count(result: Mapping[str, Any], name: str) -> int:
+    value = result.get(name)
+    if type(value) is not int or value < 0:
+        raise GraphEvidenceModelError(f"Graphify {name} must be a non-negative integer")
+    return value
+
+
+def validate_graphify_envelope_authority(result: Mapping[str, Any]) -> GraphifyEnvelopeAuthority:
+    """Validate public query metadata once for positive and negative consumers.
+
+    Positive authority is existential, so a valid exact returned witness may
+    remain authoritative after a bounded truncation. Negative authority is
+    universal and therefore requires a strictly complete, unblocked envelope.
+    """
+
+    if not isinstance(result, Mapping):
+        raise GraphEvidenceModelError("Graphify traversal result must be a mapping")
+    paths = _mapping_sequence(result.get("paths"), "paths")
+    direction = str(result.get("direction") or "")
+    if direction not in {"FORWARD", "BACKWARD"}:
+        raise GraphEvidenceModelError("Graphify direction must be FORWARD or BACKWARD")
+    start = str(result.get("start") or "")
+    target = "" if result.get("target") is None else str(result.get("target"))
+    if not start or not target:
+        raise GraphEvidenceModelError("Graphify traversal requires non-empty query endpoints")
+
+    bounds = result.get("query_bounds")
+    if not isinstance(bounds, Mapping):
+        raise GraphEvidenceModelError("Graphify traversal requires query_bounds")
+    direction_valid = bounds.get("direction") is None or str(bounds.get("direction") or "") == direction
+    canonical_relation_partition = bounds.get("requested_allowed_relations") is not None
+    requested_raw = bounds.get("requested_allowed_relations", bounds.get("requested_relations", bounds.get("relations", ())))
+    effective_raw = bounds.get("effective_allowed_relations", bounds.get("effective_relations", bounds.get("relations", ())))
+    requested = _string_set(requested_raw, "requested relations")
+    effective = _string_set(effective_raw, "effective relations")
+    rejected = _string_set(bounds.get("rejected_relations"), "rejected relations") if bounds.get("rejected_relations") else frozenset()
+    stop_nodes = _string_set(bounds.get("stop_nodes"), "stop_nodes") if bounds.get("stop_nodes") else frozenset()
+    partition_valid = effective == requested & _SUPPORTED_RELATIONS and not effective - _SUPPORTED_RELATIONS
+    if canonical_relation_partition:
+        partition_valid = partition_valid and rejected == requested - _SUPPORTED_RELATIONS
+    top_rejected_raw = result.get("rejected_relations")
+    top_rejected = _string_set(top_rejected_raw, "top-level rejected relations") if top_rejected_raw else rejected
+    partition_valid = partition_valid and top_rejected == rejected
+
+    limits: dict[str, int] = {}
+    for name, minimum in (("max_depth", 0), ("max_paths", 1), ("max_expansions", 1)):
+        value = bounds.get(name)
+        if value is None:
+            limits[name] = 2**63 - 1
+            continue
+        if type(value) is not int or value < minimum:
+            raise GraphEvidenceModelError(f"Graphify {name} must be an integer >= {minimum}")
+        limits[name] = value
+    visited = _real_count(result, "visited_count") if "visited_count" in result else None
+    expanded = _real_count(result, "expanded_count") if "expanded_count" in result else None
+
+    required_boolean_fields = (
+        "truncated", "query_validity", "start_node_found", "target_node_found", "complete_supported_search",
+    )
+    optional_boolean_fields = (
+        "encountered_may_evidence", "encountered_partial_evidence", "encountered_unknown_evidence",
+    )
+    if any(type(result.get(name)) is not bool for name in required_boolean_fields) or any(
+        name in result and type(result.get(name)) is not bool for name in optional_boolean_fields
+    ):
+        raise GraphEvidenceModelError("Graphify authority flags must be booleans")
+    epistemic = {name: result.get(name, False) for name in optional_boolean_fields}
+    truncated = result["truncated"]
+    coverage = str(result.get("search_coverage") or "")
+    resolution = str(result.get("input_resolution") or "")
+    termination = str(result.get("termination_reason") or "")
+    if coverage not in _SEARCH_COVERAGE or resolution not in _INPUT_RESOLUTIONS or termination not in _TERMINATION_REASONS:
+        raise GraphEvidenceModelError("Graphify envelope contains an unknown authority vocabulary value")
+
+    certificate = result.get("completeness_certificate")
+    certificate_valid = certificate is None or (
+        isinstance(certificate, Mapping)
+        and certificate.get("schema_version") == 1
+        and certificate.get("search_coverage") == coverage
+        and certificate.get("complete_supported_search") is result.get("complete_supported_search")
+        and certificate.get("termination_reason") == termination
+    )
+    boundaries = _mapping_sequence(result.get("boundary_events", ()), "boundary_events")
+    blocking = any(str(event.get("resolution") or "") in _BLOCKING_BOUNDARY_RESOLUTIONS for event in boundaries)
+    returned_nodes: set[str] = set()
+    required_expansions = 0
+    path_bounds_valid = True
+    for path in paths:
+        steps = _mapping_sequence(path.get("steps"), "path steps")
+        required_expansions = max(required_expansions, len(steps))
+        if len(steps) > limits["max_depth"]:
+            path_bounds_valid = False
+        returned_nodes.update(
+            str(step.get(field) or "")
+            for step in steps
+            for field in ("source", "target")
+            if str(step.get(field) or "")
+        )
+    if expanded is None:
+        expanded = required_expansions
+    if visited is None:
+        visited = max(1, len(returned_nodes))
+    counts_valid = (
+        path_bounds_valid
+        and expanded <= visited
+        and expanded <= limits["max_expansions"]
+        and len(paths) <= limits["max_paths"]
+    )
+    counts_valid = counts_valid and expanded >= required_expansions and visited >= max(1, len(returned_nodes))
+    if expanded > 0 and visited < 2:
+        counts_valid = False
+
+    truncation_valid = truncated is (termination in _TRUNCATION_REASONS)
+    resolved = resolution == "RESOLVED" and result["start_node_found"] is True and result["target_node_found"] is True
+    expected_coverage = (
+        "UNKNOWN" if resolution != "RESOLVED"
+        else "PARTIAL" if truncated or blocking or epistemic["encountered_partial_evidence"] or epistemic["encountered_unknown_evidence"]
+        else "COMPLETE_FOR_SUPPORTED_CONSTRUCT"
+    )
+    coverage_valid = coverage == expected_coverage
+    expected_complete = (
+        resolved and result["query_validity"] is True and not truncated and not blocking
+        and not epistemic["encountered_partial_evidence"] and not epistemic["encountered_unknown_evidence"]
+        and coverage == "COMPLETE_FOR_SUPPORTED_CONSTRUCT"
+    )
+    completeness_valid = result["complete_supported_search"] is expected_complete
+    common = direction_valid and partition_valid and certificate_valid and counts_valid and truncation_valid and coverage_valid and completeness_valid
+    positive = (
+        common and bool(paths) and resolved and result["query_validity"] is True
+        and not blocking and not epistemic["encountered_may_evidence"]
+        and not epistemic["encountered_partial_evidence"] and not epistemic["encountered_unknown_evidence"]
+        and not (stop_nodes & returned_nodes)
+    )
+    negative = common and not paths and expected_complete and not epistemic["encountered_may_evidence"]
+    return GraphifyEnvelopeAuthority(positive_authorized=positive, negative_authorized=negative)
+
+
 def validate_graphify_positive_traversal(result: Mapping[str, Any]) -> frozenset[str]:
     """Validate the authority of every returned positive Graphify path.
 
@@ -109,6 +271,7 @@ def validate_graphify_positive_traversal(result: Mapping[str, Any]) -> frozenset
 
     if not isinstance(result, Mapping):
         raise GraphEvidenceModelError("Graphify traversal result must be a mapping")
+    envelope = validate_graphify_envelope_authority(result)
     paths = _mapping_sequence(result.get("paths"), "paths")
     if not paths:
         return frozenset()
@@ -147,7 +310,7 @@ def validate_graphify_positive_traversal(result: Mapping[str, Any]) -> frozenset
     effective = relation_set(effective_raw, "effective relations")
     rejected = relation_set(rejected_raw, "rejected relations")
     stop_nodes = relation_set(bounds.get("stop_nodes", ()), "stop_nodes")
-    query_authority = (
+    query_authority = envelope.positive_authorized and (
         result.get("query_validity") is True
         and str(result.get("input_resolution") or "") == "RESOLVED"
         and result.get("start_node_found") is True

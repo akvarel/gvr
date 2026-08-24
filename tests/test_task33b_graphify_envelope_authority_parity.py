@@ -84,9 +84,14 @@ def assert_non_authoritative_parity(result: dict[str, object]) -> None:
 
 def assert_negative_parity(result: dict[str, object], *, authoritative: bool) -> None:
     contract, adapter, typed, verdict, negative = _surface_authority(result)
-    assert contract == frozenset()
-    assert adapter == ()
-    assert typed == ()
+    if authoritative:
+        assert contract == frozenset()
+        assert adapter == ()
+        assert typed == ()
+    else:
+        assert contract in (frozenset(), "REJECTED")
+        assert adapter in ((), "REJECTED")
+        assert typed in ((), "REJECTED")
     assert negative is authoritative
     assert verdict is (VerificationVerdict.FAIL if authoritative else VerificationVerdict.UNKNOWN)
 

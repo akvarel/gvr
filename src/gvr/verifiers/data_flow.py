@@ -17,6 +17,7 @@ from ..model import Evidence, VerificationIssue, VerificationReport, Verificatio
 from ..graphify_contract import (
     expected_graphify_df_key,
     validate_graphify_df_evidence,
+    validate_graphify_envelope_authority,
     validate_graphify_positive_traversal,
 )
 
@@ -480,6 +481,16 @@ def _global_issues(
     boundaries: Sequence[Mapping[str, Any]],
 ) -> tuple[set[str], str, str, frozenset[str]]:
     issues: set[str] = set()
+    try:
+        envelope_authority = validate_graphify_envelope_authority(result)
+    except GraphEvidenceModelError:
+        envelope_authority = None
+        issues.add("MALFORMED_TRAVERSAL")
+    else:
+        if paths and not envelope_authority.positive_authorized:
+            issues.add("CONTRADICTORY_TRAVERSAL")
+        if not paths and result.get("complete_supported_search") is True and not envelope_authority.negative_authorized:
+            issues.add("CONTRADICTORY_TRAVERSAL")
     direction = str(result.get("direction") or "")
     query_start = str(result.get("start") or "")
     raw_target = result.get("target")
