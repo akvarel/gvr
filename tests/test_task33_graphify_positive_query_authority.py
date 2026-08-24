@@ -126,7 +126,7 @@ def test_task33_positive_authority_rejects_confidence_completeness_and_bound_upg
     [
         {"query_validity": False},
         {"input_resolution": "START_NODE_NOT_FOUND", "start_node_found": False},
-        {"input_resolution": "AMBIGUOUS_TARGET", "target_node_found": False},
+        {"input_resolution": "TARGET_NODE_NOT_FOUND", "target_node_found": False},
         {"direction": "BACKWARD"},
         {"truncated": True, "termination_reason": "COMPLETE"},
         {

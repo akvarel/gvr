@@ -101,10 +101,16 @@ def test_task33c_native_field_types_are_not_string_coerced(field: str, value: ob
 
 
 def test_task33c_expanded_count_may_exceed_unique_visited_count() -> None:
-    result = traversal([path_for(df_edge())])
+    edges = tuple(df_edge(location=f"A->B:{index}") for index in range(3))
+    result = traversal([path_for(edge) for edge in edges])
     result["visited_count"] = 2
     result["expanded_count"] = 3
-    assert_exact_positive_parity(result)
+    contract, adapter, typed, verdict, negative = _surface_authority(result)
+    assert contract == frozenset(edge["key"] for edge in edges)
+    assert adapter == (EvidenceConfidence.EXACT,) * 3
+    assert typed == (EvidenceConfidence.EXACT,) * 3
+    assert verdict is VerificationVerdict.PASS
+    assert negative is False
 
 
 def test_task33c_target_is_a_valid_terminal_stop_node() -> None:
@@ -136,6 +142,13 @@ def test_task33c_legacy_relation_aliases_are_non_authoritative() -> None:
     assert_non_authoritative_parity(result)
 
 
+@pytest.mark.parametrize("resolution", ["AMBIGUOUS_START", "AMBIGUOUS_TARGET"])
+def test_task33c_invented_input_resolution_is_not_native_authority(resolution: str) -> None:
+    result = traversal([path_for(df_edge())])
+    result["input_resolution"] = resolution
+    assert_non_authoritative_parity(result)
+
+
 def test_task33c_truncated_exact_positive_and_complete_negative_semantics_remain_distinct() -> None:
     positive = traversal([path_for(df_edge())])
     positive.update(
@@ -159,9 +172,9 @@ def test_task33c_truncated_exact_positive_and_complete_negative_semantics_remain
 @pytest.mark.parametrize(
     "mutation",
     [
-        lambda event: event.update(boundary_evidence_key="bnd:not-a-sha256"),
+        lambda event: event.pop("boundary_evidence_key"),
         lambda event: event.update(diagnostic_evidence_key="diag:other"),
-        lambda event: event.update(resolution="RESOLVED"),
+        lambda event: event.update(resolution="BOGUS"),
         lambda event: event.pop("diagnostic_node_id"),
     ],
 )
