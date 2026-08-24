@@ -255,12 +255,14 @@ def encode_code_graph_observation_evidence(
     provider_id = str(graph_model.provider or "")
     if not provider_id:
         raise CodeGraphObservationError("graph model provider is required")
+    if family_id is not None and str(family_id) != provider_id:
+        raise CodeGraphObservationError("provider family is sealed to the graph model provider")
     payload = {
         "schema_version": CODE_GRAPH_OBSERVATION_SCHEMA_VERSION,
         "kind": CODE_GRAPH_OBSERVATION_KIND,
         "provider_id": provider_id,
         "implementation_id": str(implementation_id or provider_id),
-        "family_id": str(family_id or provider_id),
+        "family_id": provider_id,
         "claim_fingerprint": str(claim_fingerprint),
         "source_snapshot": graph_model.source_snapshot,
         "graph_model_fingerprint": graph_model.fingerprint,
@@ -300,11 +302,17 @@ def decode_code_graph_observation_evidence(evidence: Evidence) -> CodeGraphProvi
         raise CodeGraphObservationError("code graph observation graph model fingerprint mismatch")
     if _snapshot(payload.get("source_snapshot", {})) != graph_model.source_snapshot:
         raise CodeGraphObservationError("code graph observation snapshot mismatch")
+    provider_id = _required_string(payload, "provider_id")
+    family_id = _required_string(payload, "family_id")
+    if provider_id != graph_model.provider:
+        raise CodeGraphObservationError("code graph observation provider does not match graph model provider")
+    if family_id != provider_id:
+        raise CodeGraphObservationError("code graph observation provider family is not adapter-sealed")
     return CodeGraphProviderObservation(
         evidence_id=evidence.id,
-        provider_id=_required_string(payload, "provider_id"),
+        provider_id=provider_id,
         implementation_id=_required_string(payload, "implementation_id"),
-        family_id=_required_string(payload, "family_id"),
+        family_id=family_id,
         claim_fingerprint=_required_string(payload, "claim_fingerprint"),
         graph_model=graph_model,
         graph_model_fingerprint=graph_model.fingerprint,

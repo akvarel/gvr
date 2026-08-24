@@ -17,6 +17,7 @@ from gvr import (
     verify_data_flow_claim,
 )
 from gvr.code_graph import GraphEvidenceModelError
+from gvr.code_graph import CodeGraphObservationError, GraphEvidenceModel, encode_code_graph_observation_evidence
 from gvr.graphify_contract import expected_graphify_df_key, validate_graphify_df_evidence
 from gvr.verifiers.corroboration import ProviderVerificationObservation, reconcile_provider_observations
 from gvr.model import VerificationIssue, VerificationReport
@@ -196,6 +197,13 @@ def test_task31_adapter_sealed_provider_families_cannot_be_rebound_by_callers():
         encode_codeflow_code_graph_observation_evidence(
             payload,
             evidence_id="obs.codeflow.forged-family",
+            claim_fingerprint="claim",
+            family_id="looks-independent",
+        )
+    with pytest.raises(CodeGraphObservationError, match="provider family is sealed"):
+        encode_code_graph_observation_evidence(
+            GraphEvidenceModel(provider="graphify", nodes=(), edges=()),
+            evidence_id="obs.core.forged-family",
             claim_fingerprint="claim",
             family_id="looks-independent",
         )

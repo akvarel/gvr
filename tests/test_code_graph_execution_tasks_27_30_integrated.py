@@ -441,14 +441,12 @@ def test_iv_independent_decisive_pass_fail_conflict_is_unknown(tmp_path: Path) -
         evidence_id="obs.exact.pass",
         claim=claim,
         implementation_id="exact-pass-v1",
-        family_id="exact-pass-family",
     )
     failing = encode_code_graph_observation_evidence(
         GraphEvidenceModel(provider="exact-fail", nodes=(), edges=(), absence_subjects=("graphify:node:A->graphify:node:B",), source_snapshot=SNAPSHOT_PATH),
         evidence_id="obs.exact.fail",
         claim=claim,
         implementation_id="exact-fail-v1",
-        family_id="exact-fail-family",
     )
     result = execute_verification_plan(
         execution_request(
@@ -533,7 +531,6 @@ def test_vi_contamination_mix_claim_mismatch_never_upgrades_truth(tmp_path: Path
         evidence_id="obs.contaminant",
         claim=contaminant_claim,
         implementation_id="contaminant-v1",
-        family_id="contaminant-family",
     )
     result = execute_verification_plan(
         execution_request(
@@ -598,18 +595,16 @@ def test_viii_real_codeflow_262206cb_fixture_executes_through_sqlite_without_syn
 def test_ix_same_provider_family_pass_fail_contradiction_is_not_independent_sqlite(tmp_path: Path) -> None:
     claim = path_claim("cg-same-family-contradiction")
     passing = encode_code_graph_observation_evidence(
-        exact_model("wrapper-pass", "same-family:pass"),
+        exact_model("graphify", "same-family:pass"),
         evidence_id="obs.same-family.pass",
         claim=claim,
         implementation_id="graphify-cli",
-        family_id="graphify",
     )
     failing = encode_code_graph_observation_evidence(
-        GraphEvidenceModel(provider="wrapper-fail", nodes=(), edges=(), absence_subjects=("graphify:node:A->graphify:node:B",), source_snapshot=SNAPSHOT_PATH),
+        GraphEvidenceModel(provider="graphify", nodes=(), edges=(), absence_subjects=("graphify:node:A->graphify:node:B",), source_snapshot=SNAPSHOT_PATH),
         evidence_id="obs.same-family.fail",
         claim=claim,
         implementation_id="graphify-wrapper",
-        family_id="graphify",
     )
 
     result = execute_verification_plan(
