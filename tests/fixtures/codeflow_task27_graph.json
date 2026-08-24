@@ -1,0 +1,16 @@
+{
+  "source_snapshot": {"repository": "fixture", "revision": "abc123"},
+  "nodes": [
+    {"id": "file:src/app.py", "kind": "file", "label": "src/app.py", "semantic_identity": {"path": "src/app.py"}, "exact_identity": {"path": "src/app.py", "sha256": "111"}},
+    {"id": "symbol:src/app.py#handler", "kind": "symbol", "label": "handler", "semantic_identity": {"qualified_name": "app.handler"}, "exact_identity": {"path": "src/app.py", "span": [1, 5], "sha256": "222"}},
+    {"id": "symbol:src/db.py#save", "kind": "symbol", "label": "save", "semantic_identity": {"qualified_name": "db.save"}, "exact_identity": {"path": "src/db.py", "span": [1, 5], "sha256": "333"}}
+  ],
+  "edges": [
+    {"id": "edge:call:handler-save", "kind": "call", "source": "symbol:src/app.py#handler", "target": "symbol:src/db.py#save", "semantic_identity": {"caller": "app.handler", "callee": "db.save"}, "exact_identity": {"file": "src/app.py", "line": 3}},
+    {"id": "edge:ref:app-db", "kind": "reference", "source": "file:src/app.py", "target": "symbol:src/db.py#save", "semantic_identity": {"from": "src/app.py", "to": "db.save"}, "exact_identity": {"file": "src/app.py", "line": 2}},
+    {"id": "edge:arch:web-db", "kind": "architecture", "source": "web", "target": "db", "semantic_identity": {"from_layer": "web", "to_layer": "db"}, "exact_identity": {"rule": "layer-inference"}}
+  ],
+  "blockers": [{"id": "blocker:unsupported-language", "reason": "unsupported_language", "scope": "src/legacy.pl"}],
+  "absence": [{"subject": "db.delete_all", "complete": true}],
+  "duplicates": []
+}
