@@ -18,6 +18,9 @@ from gvr import (
     EvidenceProviderCapabilityRegistry,
     EvidenceProviderResult,
     EvidenceProviderRuntimeRegistry,
+    FalsificationRequirement,
+    FalsificationStrategyBinding,
+    FalsificationStrategyCapabilityRegistry,
     EvidenceRequest,
     SQLiteStorage,
     StorageIntegrityError,
@@ -26,6 +29,9 @@ from gvr import (
     VerificationPlanningRequest,
     VerificationReport,
     VerificationVerdict,
+    builtin_falsification_strategy_capability_registry,
+    builtin_falsification_strategy_runtime_registry,
+    COUNTEREXAMPLE_SEARCH_STRATEGY_ID,
     VerifierCapability,
     VerifierCapabilityRegistry,
     VerifierCost,
@@ -35,10 +41,6 @@ from gvr import (
     execute_verification_plan,
 )
 
-from test_durable_storage_task_24 import (
-    _execute as _execute_task24,
-    _request as _request_task24,
-)
 from test_durable_storage_task_25 import _tamper
 
 
@@ -125,6 +127,7 @@ def _request(
     snapshots: dict[str, str] | None = None,
     values: dict[str, str] | None = None,
     immutable_without_slots: bool = False,
+    with_falsification: bool = False,
 ) -> VerificationExecutionRequest:
     repository_values = {claim_id: f"repo-{claim_id}" for claim_id in claim_order}
     repository_values.update(repositories or {})
@@ -135,10 +138,28 @@ def _request(
     }
     evidence_values.update(values or {})
     evidence_kind = "fixture.immutable" if immutable_without_slots else "fixture.state"
+    falsification_descriptor = None
+    falsification_capabilities = None
+    accepted_falsification_kinds: tuple[str, ...] = ()
+    falsification_requirement = FalsificationRequirement.NONE
+    claim_kind = "ASSERT_STATE"
+    claim_spec: dict[str, Any] = {"expected": True}
+    if with_falsification:
+        falsification_descriptor = builtin_falsification_strategy_capability_registry().lookup(
+            COUNTEREXAMPLE_SEARCH_STRATEGY_ID,
+            "1",
+        )
+        falsification_capabilities = FalsificationStrategyCapabilityRegistry(
+            (falsification_descriptor,)
+        )
+        accepted_falsification_kinds = (falsification_descriptor.strategy_kind,)
+        falsification_requirement = FalsificationRequirement.REQUIRED_BEFORE_PASS
+        claim_kind = "gvr.text.sequence_predicate"
+        claim_spec = {"candidate": "fixture"}
     verifier_capability = VerifierCapability(
         verifier_id=VERIFIER_ID,
         version="1",
-        claim_kinds=("ASSERT_STATE",),
+        claim_kinds=(claim_kind,),
         accepted_evidence_kinds=(evidence_kind,),
         required_evidence_kinds=(evidence_kind,),
         input_schema={"type": "object"},
@@ -149,6 +170,8 @@ def _request(
         bounds={"max_items": 10},
         coverage={"mode": "DECLARED_SCOPE"},
         authoritative=True,
+        accepted_falsification_strategy_kinds=accepted_falsification_kinds,
+        falsification_requirement=falsification_requirement,
     )
     provider_capability = EvidenceProviderCapability(
         provider_id=PROVIDER_ID,
@@ -168,8 +191,8 @@ def _request(
     claims = {
         claim_id: AtomicClaim(
             claim_id=claim_id,
-            claim_kind="ASSERT_STATE",
-            spec={"claim": claim_id, "expected": True},
+            claim_kind=claim_kind,
+            spec={"claim": claim_id, **claim_spec},
             verifier=VERIFIER_ID,
         )
         for claim_id in claim_order
@@ -202,6 +225,33 @@ def _request(
             verifier_version="1",
             verifier_capability_fingerprint=verifier_capability.fingerprint,
             evidence_requests=(requests[claim_id],),
+            falsification_bindings=(
+                ()
+                if falsification_descriptor is None
+                else (
+                    FalsificationStrategyBinding(
+                        binding_id=f"{claim_id}:falsification",
+                        verifier_id=VERIFIER_ID,
+                        strategy_id=falsification_descriptor.strategy_id,
+                        strategy_version=falsification_descriptor.version,
+                        strategy_capability_fingerprint=falsification_descriptor.fingerprint,
+                        parameters={
+                            "input_kind": "gvr.falsification.finite_text_sequence.v1",
+                            "corpus": ("a", "b"),
+                            "needle": "z",
+                            "predicate": {
+                                "kind": "EXACT_MEMBERSHIP",
+                                "expected_members": (),
+                            },
+                            "unicode_unit": "CODE_POINT",
+                            "normalization": "NFC",
+                            "casefold": False,
+                            "reverse": False,
+                            "duplicate_semantics": "PRESERVE",
+                        },
+                    ),
+                )
+            ),
         )
         for claim_id in claim_order
     )
@@ -212,6 +262,10 @@ def _request(
         verifier_capability_registry_fingerprint=verifier_capabilities.fingerprint,
         evidence_provider_capability_registry=provider_capabilities,
         evidence_provider_capability_registry_fingerprint=provider_capabilities.fingerprint,
+        falsification_strategy_capability_registry=falsification_capabilities,
+        falsification_strategy_capability_registry_fingerprint=(
+            None if falsification_capabilities is None else falsification_capabilities.fingerprint
+        ),
     )
     plan = compile_verification_plan(planning_request)
     return VerificationExecutionRequest(
@@ -237,6 +291,14 @@ def _request(
         ),
         evidence_provider_capability_registry_fingerprint=provider_capabilities.fingerprint,
         evidence_requests={(item.request_id, item.fingerprint): item for item in requests.values()},
+        falsification_strategy_runtime_registry=(
+            None
+            if falsification_capabilities is None
+            else builtin_falsification_strategy_runtime_registry(falsification_capabilities)
+        ),
+        falsification_strategy_capability_registry_fingerprint=(
+            None if falsification_capabilities is None else falsification_capabilities.fingerprint
+        ),
         limits=VerificationExecutionLimits(),
     )
 
@@ -386,7 +448,8 @@ def test_task26_04_advancing_a_then_c_preserves_b_replay_isolation(tmp_path: Pat
 def test_task26_05_immutable_evidence_without_slot_identities_supports_three_claims(
     tmp_path: Path,
 ) -> None:
-    db = SQLiteStorage(tmp_path / "task26-immutable.sqlite3")
+    path = tmp_path / "task26-immutable.sqlite3"
+    db = SQLiteStorage(path)
 
     result = execute_verification_plan(
         _request(immutable_without_slots=True),
@@ -397,31 +460,129 @@ def test_task26_05_immutable_evidence_without_slot_identities_supports_three_cla
     session = db.get_session(result.session.fingerprint)
     assert len({claim.bundle_record_fingerprint for claim in claims}) == 3
     assert all(dependency.slot is None for claim in claims for dependency in claim.evidence_dependencies)
+    assert all(dependency.evidence_id == EVIDENCE_ID for claim in claims for dependency in claim.evidence_dependencies)
+    connection = sqlite3.connect(db.path)
+    try:
+        assert connection.execute("SELECT COUNT(*) FROM evidence_slots").fetchone()[0] == 0
+        assert connection.execute("SELECT COUNT(*) FROM evidence_slot_versions").fetchone()[0] == 0
+    finally:
+        connection.close()
     assert session.bundle_record_fingerprints == tuple(
         sorted(claim.bundle_record_fingerprint for claim in claims)
     )
+
+    before = _counts(path)
+    replayed = execute_verification_plan(
+        _request(
+            claim_order=("C", "B", "A"),
+            roots=("C", "B", "A"),
+            immutable_without_slots=True,
+        ),
+        storage=SQLiteStorage(path),
+    )
+    replayed_claims = _claim_records(SQLiteStorage(path), "A", "B", "C")
+    reopened_session = SQLiteStorage(path).get_session(replayed.session.fingerprint)
+    assert replayed.fingerprint == result.fingerprint
+    assert reopened_session.record_fingerprint == session.record_fingerprint
+    assert tuple(claim.bundle_record_fingerprint for claim in replayed_claims) == tuple(
+        claim.bundle_record_fingerprint for claim in claims
+    )
+    assert all(
+        SQLiteStorage(path).get_bundle(
+            claim.bundle_fingerprint,
+            record_fingerprint=claim.bundle_record_fingerprint,
+        ).current
+        for claim in replayed_claims
+    )
+    assert _counts(path) == before
 
 
 def test_task26_06_two_claim_same_domain_multiplicity_with_required_falsification(
     tmp_path: Path,
 ) -> None:
-    db = SQLiteStorage(tmp_path / "task26-falsification.sqlite3")
-    first = _execute_task24(db, _request_task24("a", with_falsification=True))
-    second = _execute_task24(db, _request_task24("b", with_falsification=True))
-    assert first.falsification_record is not None
-    assert second.falsification_record is not None
-    assert first.falsification_record.record_fingerprint != second.falsification_record.record_fingerprint
-    first_claim, second_claim = db.claim_history("claim-task23")
-    assert first_claim.bundle_record_fingerprint != second_claim.bundle_record_fingerprint
+    path = tmp_path / "task26-falsification.sqlite3"
+    db = SQLiteStorage(path)
 
-    replayed = _execute_task24(db, _request_task24("a", with_falsification=True))
+    request = _request(
+        claim_order=("A", "B"),
+        with_falsification=True,
+    )
+    result = execute_verification_plan(request, storage=db)
+    falsification_result_by_claim = {
+        step.claim_id: result.falsification_results[step.step_id]
+        for step in request.plan.steps
+        if step.step_id in result.falsification_results
+    }
 
-    assert replayed.result.fingerprint == first.result.fingerprint
-    assert replayed.falsification_record is not None
-    assert replayed.falsification_record.record_fingerprint == first.falsification_record.record_fingerprint
-    first_claim, second_claim, replayed_claim = db.claim_history("claim-task23")
-    assert replayed_claim.bundle_record_fingerprint == first_claim.bundle_record_fingerprint
-    assert replayed_claim.falsification_record_fingerprints == first_claim.falsification_record_fingerprints
+    claim_a, claim_b = _claim_records(db, "A", "B")
+    bundle_a, bundle_b = _bundle_records(db, "A", "B")
+    session = db.get_session(result.session.fingerprint)
+    assert falsification_result_by_claim.keys() == {"A", "B"}
+    assert result.bundles["A"].fingerprint == result.bundles["B"].fingerprint
+    assert bundle_a.fingerprint == bundle_b.fingerprint
+    assert bundle_a.record_fingerprint != bundle_b.record_fingerprint
+    assert claim_a.bundle_record_fingerprint == bundle_a.record_fingerprint
+    assert claim_b.bundle_record_fingerprint == bundle_b.record_fingerprint
+    assert len(claim_a.falsification_record_fingerprints) == 1
+    assert len(claim_b.falsification_record_fingerprints) == 1
+    assert claim_a.falsification_record_fingerprints != claim_b.falsification_record_fingerprints
+    falsification_a = db.get_falsification_result(
+        falsification_result_by_claim["A"].fingerprint,
+        record_fingerprint=claim_a.falsification_record_fingerprints[0],
+    )
+    falsification_b = db.get_falsification_result(
+        falsification_result_by_claim["B"].fingerprint,
+        record_fingerprint=claim_b.falsification_record_fingerprints[0],
+    )
+    assert falsification_a.record_fingerprint in claim_a.falsification_record_fingerprints
+    assert falsification_b.record_fingerprint in claim_b.falsification_record_fingerprints
+    assert session.bundle_record_fingerprints == tuple(
+        sorted((bundle_a.record_fingerprint, bundle_b.record_fingerprint))
+    )
+    assert session.falsification_record_fingerprints == tuple(
+        sorted((falsification_a.record_fingerprint, falsification_b.record_fingerprint))
+    )
+
+    before = _counts(path)
+    replayed = execute_verification_plan(
+        _request(
+            claim_order=("B", "A"),
+            roots=("B", "A"),
+            with_falsification=True,
+        ),
+        storage=SQLiteStorage(path),
+    )
+    replayed_claim_a, replayed_claim_b = _claim_records(SQLiteStorage(path), "A", "B")
+    replayed_session = SQLiteStorage(path).get_session(replayed.session.fingerprint)
+    assert replayed.fingerprint == result.fingerprint
+    assert replayed_session.record_fingerprint == session.record_fingerprint
+    assert replayed_claim_a.bundle_record_fingerprint == claim_a.bundle_record_fingerprint
+    assert replayed_claim_b.bundle_record_fingerprint == claim_b.bundle_record_fingerprint
+    assert replayed_claim_a.falsification_record_fingerprints == claim_a.falsification_record_fingerprints
+    assert replayed_claim_b.falsification_record_fingerprints == claim_b.falsification_record_fingerprints
+    assert _counts(path) == before
+
+    advanced_request = _request(
+        claim_order=("A",),
+        snapshots={"A": "revision-2"},
+        values={"request-A": "changed-a"},
+        with_falsification=True,
+    )
+    advanced = execute_verification_plan(advanced_request, storage=SQLiteStorage(path))
+    advanced_falsification_result_by_claim = {
+        step.claim_id: advanced.falsification_results[step.step_id]
+        for step in advanced_request.plan.steps
+        if step.step_id in advanced.falsification_results
+    }
+    advanced_claim_a = SQLiteStorage(path).claim_history("A")[-1]
+    preserved_claim_b = SQLiteStorage(path).claim_history("B")[-1]
+    assert advanced_claim_a.bundle_record_fingerprint != claim_a.bundle_record_fingerprint
+    assert advanced_claim_a.falsification_record_fingerprints != claim_a.falsification_record_fingerprints
+    assert preserved_claim_b.bundle_record_fingerprint == claim_b.bundle_record_fingerprint
+    assert preserved_claim_b.falsification_record_fingerprints == claim_b.falsification_record_fingerprints
+    assert preserved_claim_b.bundle_record_fingerprint != advanced_claim_a.bundle_record_fingerprint
+    assert preserved_claim_b.falsification_record_fingerprints != advanced_claim_a.falsification_record_fingerprints
+    assert advanced_falsification_result_by_claim.keys() == {"A"}
 
 
 def test_task26_07_missing_exact_link_fails_closed_and_rolls_back(tmp_path: Path) -> None:

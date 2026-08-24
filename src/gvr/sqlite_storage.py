@@ -4550,17 +4550,14 @@ class SQLiteUnitOfWork:
                 ordered_falsifications = tuple(
                     sorted(
                         supplied_falsifications,
-                        key=lambda item: (
-                            item.fingerprint,
-                            item.record_fingerprint or "",
-                        ),
+                        key=lambda item: item.record_fingerprint or "",
                     )
                 )
                 if supplied_falsifications != ordered_falsifications or len({
-                    item.fingerprint for item in supplied_falsifications
+                    item.record_fingerprint for item in supplied_falsifications
                 }) != len(supplied_falsifications):
                     raise StorageIntegrityError(
-                        "session falsification records must be unique by domain and sorted"
+                        "session falsification records must be unique by exact record and sorted"
                     )
                 falsifications = tuple(
                     self.get_falsification_result(
