@@ -5,12 +5,17 @@ from copy import deepcopy
 import pytest
 
 from gvr import (
+    DataFlowClaim,
+    DataFlowClaimKind,
+    DataFlowQueryScope,
+    SourceRevisionIdentity,
     VerificationVerdict,
     decode_code_graph_observation_evidence,
     encode_graphify_code_graph_observation_evidence,
+    verify_data_flow_claim,
 )
 from gvr.adapters.graphify import ingest_traversal_graph
-from gvr.code_graph import EvidenceConfidence
+from gvr.code_graph import EvidenceConfidence, GraphEvidenceModelError
 from gvr.graphify_contract import validate_graphify_envelope_authority
 
 from test_code_graph_execution_tasks_27_30_integrated import (
@@ -173,13 +178,29 @@ def test_task33d_target_stop_truncation_and_complete_negative_regressions() -> N
 def test_task33d_zero_step_identity_is_valid_without_fabricated_self_edge() -> None:
     result = traversal([path_for()])
     result.update(start="A", target="A", visited_count=1, expanded_count=0)
-    contract, adapter, typed, verdict, negative = _surface_authority(result)
-    assert contract == frozenset()
-    assert adapter == ()
-    assert typed == ()
+    contract = validate_graphify_envelope_authority(result)
+    graph = ingest_traversal_graph(result)
+    typed = decode_code_graph_observation_evidence(
+        encode_graphify_code_graph_observation_evidence(
+            result,
+            evidence_id="obs.task33d.identity",
+            source_revision=SourceRevisionIdentity("fixture-repo", "rev1"),
+            claim_fingerprint="task33d-identity",
+        )
+    ).graph_model
+    verdict = verify_data_flow_claim(
+        DataFlowClaim(
+            DataFlowClaimKind.CAN_FLOW_TO,
+            "A",
+            "A",
+            scope=DataFlowQueryScope(effective_allowed_relations=frozenset(result["query_bounds"]["effective_allowed_relations"])),
+        ),
+        result,
+    ).verdict
+    assert contract.positive_authorized
+    assert graph.edges == ()
+    assert typed.edges == ()
     assert verdict is VerificationVerdict.PASS
-    assert negative is False
-    assert ingest_traversal_graph(result).edges == ()
 
 
 @pytest.mark.parametrize(
@@ -196,9 +217,12 @@ def test_task33d_adversarial_shared_authority_implies_all_exact_surfaces_and_dat
     result = traversal([path_for(df_edge())])
     mutation(result)
     result["completeness_certificate"]["termination_reason"] = result["termination_reason"]
-    authority = validate_graphify_envelope_authority(result)
+    try:
+        authority = validate_graphify_envelope_authority(result)
+    except GraphEvidenceModelError:
+        authority = None
     contract, adapter, typed, verdict, _ = _surface_authority(result)
-    if authority.positive_authorized:
+    if authority is not None and authority.positive_authorized:
         assert contract != "REJECTED" and contract
         assert adapter != "REJECTED" and set(adapter) == {EvidenceConfidence.EXACT}
         assert typed != "REJECTED" and set(typed) == {EvidenceConfidence.EXACT}

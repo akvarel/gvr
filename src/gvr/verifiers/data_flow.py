@@ -480,21 +480,29 @@ def _global_issues(
     paths: Sequence[Mapping[str, Any]],
     boundaries: Sequence[Mapping[str, Any]],
 ) -> tuple[set[str], str, str, frozenset[str]]:
+    """Apply claim-specific checks to one shared current-native parse.
+
+    Producer envelope accounting, path-set, bounds, vocabulary, and
+    resolution/termination semantics are owned exclusively by
+    ``validate_graphify_envelope_authority``. This verifier adds only claim
+    binding and user-facing diagnostic categories.
+    """
+
     issues: set[str] = set()
     try:
-        envelope_authority = validate_graphify_envelope_authority(result)
+        envelope = validate_graphify_envelope_authority(result)
     except GraphEvidenceModelError:
-        envelope_authority = None
+        envelope = None
         issues.add("MALFORMED_TRAVERSAL")
-    else:
-        if paths and not envelope_authority.positive_authorized:
-            issues.add("CONTRADICTORY_TRAVERSAL")
-        if not paths and result.get("complete_supported_search") is True and not envelope_authority.negative_authorized:
-            issues.add("CONTRADICTORY_TRAVERSAL")
-    direction = str(result.get("direction") or "")
-    query_start = str(result.get("start") or "")
+
+    direction = envelope.direction if envelope is not None else str(result.get("direction") or "")
+    query_start = envelope.start if envelope is not None else str(result.get("start") or "")
     raw_target = result.get("target")
-    query_target = "" if raw_target is None else str(raw_target)
+    query_target = envelope.target if envelope is not None else ("" if raw_target is None else str(raw_target))
+    effective_allowed_relations = (
+        envelope.effective_allowed_relations if envelope is not None else frozenset()
+    )
+    stop_nodes = envelope.stop_nodes if envelope is not None else frozenset()
 
     if direction == "FORWARD":
         flow_start, flow_target = query_start, query_target
@@ -511,46 +519,9 @@ def _global_issues(
     if result.get("query_validity") is not True:
         issues.add("INVALID_QUERY")
 
-    query_bounds = result.get("query_bounds")
-    effective_allowed_relations: frozenset[str] = frozenset()
-    actual_stop_nodes: frozenset[str] = frozenset()
-    query_limits: dict[str, int] = {}
-    if not isinstance(query_bounds, Mapping):
-        issues.add("MALFORMED_TRAVERSAL")
-    else:
-        requested = query_bounds.get("requested_allowed_relations")
-        effective = query_bounds.get("effective_allowed_relations")
-        bounds_rejected = query_bounds.get("rejected_relations")
-        stop_nodes = query_bounds.get("stop_nodes")
-        string_arrays = (requested, effective, bounds_rejected, stop_nodes)
-        if any(
-            not isinstance(items, (list, tuple))
-            or not all(isinstance(item, str) for item in items)
-            for items in string_arrays
-        ):
-            issues.add("MALFORMED_TRAVERSAL")
-        else:
-            requested_relations = frozenset(requested)
-            effective_allowed_relations = frozenset(effective)
-            # Graphify treats the point-to-point target as terminal before it
-            # consults stop_nodes. Listing that same target is therefore a
-            # canonical no-op, not a different claim scope.
-            actual_stop_nodes = frozenset(stop_nodes) - {query_target}
-            expected_effective = requested_relations & SUPPORTED_DATA_FLOW_RELATIONS
-            expected_rejected = requested_relations - SUPPORTED_DATA_FLOW_RELATIONS
-            if effective_allowed_relations != expected_effective:
-                issues.add("CONTRADICTORY_TRAVERSAL")
-            if frozenset(bounds_rejected) != expected_rejected:
-                issues.add("CONTRADICTORY_TRAVERSAL")
-        if str(query_bounds.get("direction") or "") != direction:
-            issues.add("CONTRADICTORY_TRAVERSAL")
-        for name, minimum in (("max_depth", 0), ("max_paths", 1), ("max_expansions", 1)):
-            value = query_bounds.get(name)
-            if not isinstance(value, int) or isinstance(value, bool) or value < minimum:
-                issues.add("MALFORMED_TRAVERSAL")
-            else:
-                query_limits[name] = value
-
+    # The target is terminal before Graphify consults stop_nodes, so listing it
+    # is a producer-canonical no-op for claim-scope comparison.
+    actual_stop_nodes = stop_nodes - {query_target}
     if (
         claim.scope.direction != direction
         or claim.scope.effective_allowed_relations != effective_allowed_relations
@@ -560,161 +531,41 @@ def _global_issues(
 
     claimed_revision = _source_revision_metadata(claim)
     result_revision = result.get("source_revision")
-    if claimed_revision is not None:
-        if not isinstance(result_revision, Mapping) or dict(_stable(result_revision)) != dict(_stable(claimed_revision)):
-            issues.add("SOURCE_REVISION_MISMATCH")
-
-    rejected_relations = result.get("rejected_relations")
-    if not isinstance(rejected_relations, (list, tuple)) or not all(
-        isinstance(item, str) for item in rejected_relations
+    if claimed_revision is not None and (
+        not isinstance(result_revision, Mapping)
+        or dict(_stable(result_revision)) != dict(_stable(claimed_revision))
     ):
-        issues.add("MALFORMED_TRAVERSAL")
-    elif isinstance(query_bounds, Mapping) and isinstance(
-        query_bounds.get("rejected_relations"), (list, tuple)
-    ) and tuple(sorted(rejected_relations)) != tuple(sorted(query_bounds["rejected_relations"])):
-        issues.add("CONTRADICTORY_TRAVERSAL")
+        issues.add("SOURCE_REVISION_MISMATCH")
 
-    counts: dict[str, int] = {}
-    for count_field in ("visited_count", "expanded_count"):
-        count = result.get(count_field)
-        if not isinstance(count, int) or isinstance(count, bool) or count < 0:
-            issues.add("MALFORMED_TRAVERSAL")
-        else:
-            counts[count_field] = count
-
-    epistemic_flags = (
-        "encountered_partial_evidence",
-        "encountered_unknown_evidence",
-        "encountered_may_evidence",
+    blocking = any(
+        str(event.get("resolution") or "") in BLOCKING_RESOLUTIONS
+        for event in boundaries
     )
-    if any(not isinstance(result.get(field), bool) for field in epistemic_flags):
-        issues.add("MALFORMED_TRAVERSAL")
+    if blocking:
+        issues.add("BLOCKING_BOUNDARY")
     if result.get("encountered_may_evidence") is True:
         issues.add("MAY_SEARCH_EVIDENCE")
 
-    complete = result.get("complete_supported_search")
-    truncated = result.get("truncated")
-    start_found = result.get("start_node_found")
-    target_found = result.get("target_node_found")
-    if not isinstance(complete, bool) or not isinstance(truncated, bool):
-        issues.add("MALFORMED_TRAVERSAL")
-    if not isinstance(start_found, bool) or not isinstance(target_found, bool):
-        issues.add("MALFORMED_TRAVERSAL")
-
-    termination = str(result.get("termination_reason") or "")
-    coverage = str(result.get("search_coverage") or "")
-    resolution = str(result.get("input_resolution") or "")
-    if coverage not in {COMPLETE_COVERAGE, "PARTIAL", "UNKNOWN"}:
-        issues.add("MALFORMED_TRAVERSAL")
-    if resolution not in {"RESOLVED", "START_NODE_NOT_FOUND", "TARGET_NODE_NOT_FOUND"}:
-        issues.add("MALFORMED_TRAVERSAL")
-    if termination not in {"COMPLETE", *_TRUNCATION_REASONS, "START_NODE_NOT_FOUND", "TARGET_NODE_NOT_FOUND"}:
-        issues.add("MALFORMED_TRAVERSAL")
-
-    blocking = False
-    for event in boundaries:
-        key = str(event.get("evidence_key") or "")
-        boundary_resolution = str(event.get("resolution") or "")
-        if not key:
-            issues.add("MALFORMED_TRAVERSAL")
-        if boundary_resolution not in BLOCKING_RESOLUTIONS:
-            issues.add("MALFORMED_TRAVERSAL")
-        else:
-            blocking = True
-
-    if blocking:
-        issues.add("BLOCKING_BOUNDARY")
+    resolution = (
+        envelope.input_resolution if envelope is not None
+        else str(result.get("input_resolution") or "")
+    )
     if resolution == "START_NODE_NOT_FOUND":
         issues.add("START_NODE_NOT_FOUND")
-        if start_found is not False or termination != resolution or paths:
-            issues.add("CONTRADICTORY_TRAVERSAL")
     elif resolution == "TARGET_NODE_NOT_FOUND":
         issues.add("TARGET_NODE_NOT_FOUND")
-        if target_found is not False or termination != resolution or paths:
+
+    if envelope is not None:
+        if paths and not envelope.positive_authorized:
             issues.add("CONTRADICTORY_TRAVERSAL")
-    elif resolution == "RESOLVED" and (start_found is not True or target_found is not True):
-        issues.add("CONTRADICTORY_TRAVERSAL")
-
-    if resolution == "RESOLVED" and counts.get("visited_count", 0) < 1:
-        issues.add("CONTRADICTORY_TRAVERSAL")
-    if resolution == "START_NODE_NOT_FOUND" and counts.get("visited_count") not in {None, 0}:
-        issues.add("CONTRADICTORY_TRAVERSAL")
-
-    required_expansions = 0
-    required_visited = 1 if paths else 0
-    returned_path_nodes: set[str] = set()
-    for path in paths:
-        path_steps = _mapping_sequence(path.get("steps"))
-        if path_steps is None:
-            continue
-        if len(path_steps) > query_limits.get("max_depth", len(path_steps)):
+        if (
+            not paths
+            and result.get("complete_supported_search") is True
+            and not envelope.negative_authorized
+        ):
             issues.add("CONTRADICTORY_TRAVERSAL")
-        required_expansions = max(required_expansions, len(path_steps))
-        path_nodes = {
-            str(step.get(field) or "")
-            for step in path_steps
-            for field in ("source", "target")
-            if str(step.get(field) or "")
-        }
-        returned_path_nodes.update(path_nodes)
-    required_visited = max(required_visited, len(returned_path_nodes))
-    if counts.get("expanded_count", required_expansions) < required_expansions:
-        issues.add("CONTRADICTORY_TRAVERSAL")
-    if counts.get("visited_count", required_visited) < required_visited:
-        issues.add("CONTRADICTORY_TRAVERSAL")
-    if counts.get("expanded_count", 0) > 0 and counts.get("visited_count", 0) < 2:
-        issues.add("CONTRADICTORY_TRAVERSAL")
-    if resolution == "RESOLVED" and counts.get("visited_count", 0) > counts.get("expanded_count", 0) + 1:
-        issues.add("CONTRADICTORY_TRAVERSAL")
-    if resolution != "RESOLVED" and any(counts.get(name, 0) != 0 for name in ("visited_count", "expanded_count")):
-        issues.add("CONTRADICTORY_TRAVERSAL")
-    non_identity_path_count = sum(
-        1
-        for path in paths
-        if (_mapping_sequence(path.get("steps")) or ())
-    )
-    if non_identity_path_count > counts.get("expanded_count", non_identity_path_count):
-        issues.add("CONTRADICTORY_TRAVERSAL")
-    if len(paths) > query_limits.get("max_paths", len(paths)):
-        issues.add("CONTRADICTORY_TRAVERSAL")
-    if counts.get("expanded_count", 0) > query_limits.get(
-        "max_expansions", counts.get("expanded_count", 0)
-    ):
-        issues.add("CONTRADICTORY_TRAVERSAL")
-
-    if truncated is True and termination not in _TRUNCATION_REASONS:
-        issues.add("CONTRADICTORY_TRAVERSAL")
-    if truncated is False and termination in _TRUNCATION_REASONS:
-        issues.add("CONTRADICTORY_TRAVERSAL")
-    if resolution != "RESOLVED":
-        expected_coverage = "UNKNOWN"
-    elif (
-        truncated is True
-        or blocking
-        or result.get("encountered_partial_evidence") is True
-        or result.get("encountered_unknown_evidence") is True
-    ):
-        expected_coverage = "PARTIAL"
-    else:
-        expected_coverage = COMPLETE_COVERAGE
-    if coverage != expected_coverage:
-        issues.add("CONTRADICTORY_TRAVERSAL")
-
-    expected_complete = (
-        resolution == "RESOLVED"
-        and result.get("query_validity") is True
-        and truncated is False
-        and not blocking
-        and result.get("encountered_partial_evidence") is False
-        and result.get("encountered_unknown_evidence") is False
-        and coverage == COMPLETE_COVERAGE
-        and start_found is True
-        and target_found is True
-    )
-    if isinstance(complete, bool) and complete is not expected_complete:
-        issues.add("CONTRADICTORY_TRAVERSAL")
-    if complete is False and not paths:
-        issues.add("INCOMPLETE_SUPPORTED_SEARCH")
+        if not paths and not envelope.negative_authorized:
+            issues.add("INCOMPLETE_SUPPORTED_SEARCH")
 
     return issues, flow_start, flow_target, effective_allowed_relations
 

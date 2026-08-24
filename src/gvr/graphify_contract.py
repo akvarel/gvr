@@ -69,6 +69,18 @@ class GraphifyEnvelopeAuthority:
 
     positive_authorized: bool
     negative_authorized: bool
+    current_native: bool = False
+    direction: str = ""
+    start: str = ""
+    target: str = ""
+    effective_allowed_relations: frozenset[str] = frozenset()
+    stop_nodes: frozenset[str] = frozenset()
+    visited_count: int = 0
+    expanded_count: int = 0
+    input_resolution: str = ""
+    termination_reason: str = ""
+    search_coverage: str = ""
+    complete_supported_search: bool = False
 
 
 def _field_pairs(item: Mapping[str, Any]) -> list[tuple[str, str]]:
@@ -297,8 +309,11 @@ def validate_graphify_envelope_authority(result: Mapping[str, Any]) -> GraphifyE
             raise GraphEvidenceModelError("Graphify path exactness is not native")
         if path["path_receiver_confidence"] not in {"PROVEN", "MAY"}:
             raise GraphEvidenceModelError("Graphify path receiver confidence is not native")
-        if path["path_coverage"] not in {"COMPLETE_FOR_SUPPORTED_CONSTRUCT", "PARTIAL", "UNKNOWN"}:
+        if path["path_coverage"] not in {"COMPLETE_FOR_SUPPORTED_CONSTRUCT", "PARTIAL"}:
             raise GraphEvidenceModelError("Graphify path coverage is not native")
+        identity = path.get("path_identity")
+        if not isinstance(identity, (list, tuple)) or not all(isinstance(key, str) for key in identity):
+            raise GraphEvidenceModelError("Graphify path_identity must be ordered public df keys")
         steps = _mapping_sequence(path.get("steps"), "path steps")
         required_expansions = max(required_expansions, len(steps))
         if len(steps) > limits["max_depth"]:
@@ -314,12 +329,35 @@ def validate_graphify_envelope_authority(result: Mapping[str, Any]) -> GraphifyE
         and expanded <= limits["max_expansions"]
         and len(paths) <= limits["max_paths"]
     )
+    path_identities = tuple(tuple(path["path_identity"]) for path in paths)
+    non_identity_path_count = sum(bool(identity) for identity in path_identities)
+    path_set_valid = len(set(path_identities)) == len(path_identities)
     counts_valid = counts_valid and expanded >= required_expansions and visited >= max(1, len(returned_nodes))
     if expanded > 0 and visited < 2:
+        counts_valid = False
+    if resolution == "RESOLVED" and visited > expanded + 1:
+        counts_valid = False
+    if non_identity_path_count > expanded:
+        counts_valid = False
+    if resolution != "RESOLVED" and (visited != 0 or expanded != 0):
         counts_valid = False
 
     truncation_valid = truncated is (termination in _TRUNCATION_REASONS)
     resolved = resolution == "RESOLVED" and result["start_node_found"] is True and result["target_node_found"] is True
+    if resolution == "RESOLVED":
+        resolution_state_valid = termination in {"COMPLETE", *_TRUNCATION_REASONS}
+    elif resolution == "START_NODE_NOT_FOUND":
+        resolution_state_valid = (
+            termination == resolution and not truncated and not paths
+            and visited == 0 and expanded == 0
+            and result["start_node_found"] is False
+        )
+    else:
+        resolution_state_valid = (
+            termination == resolution and not truncated and not paths
+            and visited == 0 and expanded == 0
+            and result["target_node_found"] is False
+        )
     expected_coverage = (
         "UNKNOWN" if resolution != "RESOLVED"
         else "PARTIAL" if truncated or blocking or epistemic["encountered_partial_evidence"] or epistemic["encountered_unknown_evidence"]
@@ -332,7 +370,11 @@ def validate_graphify_envelope_authority(result: Mapping[str, Any]) -> GraphifyE
         and coverage == "COMPLETE_FOR_SUPPORTED_CONSTRUCT"
     )
     completeness_valid = result["complete_supported_search"] is expected_complete
-    common = direction_valid and partition_valid and certificate_valid and counts_valid and truncation_valid and coverage_valid and completeness_valid
+    common = (
+        direction_valid and partition_valid and certificate_valid and path_set_valid
+        and counts_valid and truncation_valid and resolution_state_valid
+        and coverage_valid and completeness_valid
+    )
     positive = (
         common and bool(paths) and resolved and result["query_validity"] is True
         and not blocking and not epistemic["encountered_may_evidence"]
@@ -340,7 +382,22 @@ def validate_graphify_envelope_authority(result: Mapping[str, Any]) -> GraphifyE
         and not ((stop_nodes - {target}) & returned_nodes)
     )
     negative = common and not paths and expected_complete and not epistemic["encountered_may_evidence"]
-    return GraphifyEnvelopeAuthority(positive_authorized=positive, negative_authorized=negative)
+    return GraphifyEnvelopeAuthority(
+        positive_authorized=positive,
+        negative_authorized=negative,
+        current_native=True,
+        direction=direction,
+        start=start,
+        target=target,
+        effective_allowed_relations=effective,
+        stop_nodes=stop_nodes,
+        visited_count=visited,
+        expanded_count=expanded,
+        input_resolution=resolution,
+        termination_reason=termination,
+        search_coverage=coverage,
+        complete_supported_search=result["complete_supported_search"],
+    )
 
 
 def validate_graphify_positive_traversal(result: Mapping[str, Any]) -> frozenset[str]:
@@ -445,6 +502,7 @@ def validate_graphify_positive_traversal(result: Mapping[str, Any]) -> frozenset
         query_authority = False
 
     seen_evidence: dict[str, Any] = {}
+    seen_path_identities: set[tuple[str, ...]] = set()
     authoritative_keys: set[str] = set()
     for path in paths:
         steps = _mapping_sequence(path.get("steps"), "path steps")
@@ -453,7 +511,8 @@ def validate_graphify_positive_traversal(result: Mapping[str, Any]) -> frozenset
         if not isinstance(identity_raw, (list, tuple)):
             raise GraphEvidenceModelError("Graphify path_identity must be ordered public df keys")
         identity = tuple(str(key or "") for key in identity_raw)
-        if not steps or len(steps) != len(evidence) or len(identity) != len(evidence):
+        identity_path = not steps and flow_start == flow_target
+        if (not steps and not identity_path) or len(steps) != len(evidence) or len(identity) != len(evidence):
             raise GraphEvidenceModelError("Graphify positive path steps, evidence, and identity must align")
         if max_depth is not None and len(steps) > max_depth:
             raise GraphEvidenceModelError("Graphify positive path exceeds max_depth")
@@ -488,7 +547,10 @@ def validate_graphify_positive_traversal(result: Mapping[str, Any]) -> frozenset
             raise GraphEvidenceModelError("Graphify path_identity must exactly match supporting_evidence order")
         if len(set(identity)) != len(identity):
             raise GraphEvidenceModelError("Graphify positive path repeats a df evidence key")
-        if (
+        if envelope.current_native and identity in seen_path_identities:
+            raise GraphEvidenceModelError("Graphify returned path_identity values must be unique")
+        seen_path_identities.add(identity)
+        if steps and (
             str(steps[0].get("source") or "") != flow_start
             or str(steps[-1].get("target") or "") != flow_target
         ):

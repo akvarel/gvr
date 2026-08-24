@@ -94,10 +94,12 @@ def test_task28_deduplicates_and_is_stable_under_path_reordering():
     direct = _ev(source="A", target="C")
 
     one = ingest_traversal_graph(_result([_path(ab, bc), _path(direct)]))
-    two = ingest_traversal_graph(_result([_path(direct), _path(ab, bc), _path(ab, bc)]))
+    two = ingest_traversal_graph(_result([_path(direct), _path(ab, bc)]))
 
     assert [edge.id for edge in one.edges] == sorted([ab["key"], bc["key"], direct["key"]])
     assert one.fingerprint == two.fingerprint
+    with pytest.raises(GraphEvidenceModelError, match="path_identity values must be unique"):
+        ingest_traversal_graph(_result([_path(direct), _path(ab, bc), _path(ab, bc)]))
 
 
 def test_task28_rejects_malformed_or_conflicting_df_keys_instead_of_rekeying():
