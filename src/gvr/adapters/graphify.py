@@ -310,7 +310,7 @@ def ingest_traversal_graph(result: Mapping[str, Any]) -> GraphEvidenceModel:
     start = str(result.get("start") or "")
     target = result.get("target")
     if complete_absence and not edges_by_id and start and target is not None:
-        absence_subjects = (f"{start}->{target}",)
+        absence_subjects = (f"{_node_id(start)}->{_node_id(str(target))}",)
 
     return GraphEvidenceModel(
         provider="graphify",

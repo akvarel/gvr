@@ -122,9 +122,9 @@ class GraphEvidenceModel:
     source_snapshot: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "nodes", tuple(self.nodes))
-        object.__setattr__(self, "edges", tuple(self.edges))
-        object.__setattr__(self, "blockers", tuple(sorted(self.blockers, key=lambda b: b.id)))
+        object.__setattr__(self, "nodes", tuple(sorted(self.nodes, key=_graph_evidence_sort_key)))
+        object.__setattr__(self, "edges", tuple(sorted(self.edges, key=_graph_evidence_sort_key)))
+        object.__setattr__(self, "blockers", tuple(sorted(self.blockers, key=_graph_blocker_sort_key)))
         object.__setattr__(self, "absence_subjects", tuple(sorted(str(s) for s in self.absence_subjects)))
         object.__setattr__(self, "source_snapshot", _snapshot(self.source_snapshot))
         seen: dict[str, GraphEvidence] = {}
@@ -143,6 +143,8 @@ class GraphEvidenceModel:
         return canonical_fingerprint(self.to_dict(), fingerprint_format=GRAPH_MODEL_FINGERPRINT_FORMAT)
 
     def absence_verdict(self, subject: str) -> VerificationVerdict:
+        if str(subject) in self.absence_subjects:
+            return VerificationVerdict.PASS
         return VerificationVerdict.UNKNOWN
 
     def to_dict(self) -> dict[str, Any]:
@@ -154,6 +156,43 @@ class GraphEvidenceModel:
             "blockers": [item.to_dict() for item in self.blockers],
             "absence_subjects": self.absence_subjects,
         }
+
+
+def _graph_evidence_sort_key(item: GraphEvidence) -> tuple[str, ...]:
+    return (
+        str(_graph_kind_sort_order(item.kind)),
+        item.id,
+        item.kind.value,
+        item.source,
+        item.target,
+        item.label,
+        item.confidence.value,
+        item.semantic_fingerprint,
+        item.exact_fingerprint,
+        item.fingerprint,
+    )
+
+
+def _graph_kind_sort_order(kind: GraphEvidenceKind) -> int:
+    order = {
+        GraphEvidenceKind.NODE: 0,
+        GraphEvidenceKind.CALL: 1,
+        GraphEvidenceKind.REFERENCE: 2,
+        GraphEvidenceKind.ARCHITECTURE: 3,
+    }
+    return order.get(kind, 99)
+
+
+def _graph_blocker_sort_key(item: GraphBlocker) -> tuple[str, ...]:
+    return (
+        item.id,
+        item.reason,
+        item.scope,
+        canonical_fingerprint(
+            item.to_dict(),
+            fingerprint_format=GRAPH_MODEL_FINGERPRINT_FORMAT + ".blocker",
+        ),
+    )
 
 
 @dataclass(frozen=True)

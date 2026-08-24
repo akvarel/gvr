@@ -56,8 +56,20 @@ def test_node_exists_edge_exists_path_exists_no_path_and_absence_truth_table():
     assert verify_code_graph_claim(_claim(CodeGraphClaimKind.NO_PATH, source="C", target="A", relations={"CALL"}), model).verdict is VerificationVerdict.PASS
 
     absent = verify_code_graph_claim(_claim(CodeGraphClaimKind.NODE_EXISTS, node="Z"), model)
+    assert absent.verdict is VerificationVerdict.UNKNOWN
+    assert "ABSENCE_NOT_PROVEN" in _codes(absent)
+
+    absent = verify_code_graph_claim(_claim(CodeGraphClaimKind.NODE_EXISTS, node="Z"), _model([], [], absence=("Z",)))
     assert absent.verdict is VerificationVerdict.FAIL
     assert "NODE_ABSENT" in _codes(absent)
+
+    absent_edge = verify_code_graph_claim(_claim(CodeGraphClaimKind.EDGE_EXISTS, source="A", target="Z"), model)
+    assert absent_edge.verdict is VerificationVerdict.UNKNOWN
+    assert "ABSENCE_NOT_PROVEN" in _codes(absent_edge)
+
+    absent_edge = verify_code_graph_claim(_claim(CodeGraphClaimKind.EDGE_EXISTS, source="A", target="Z"), _model([], [], absence=("A->Z",)))
+    assert absent_edge.verdict is VerificationVerdict.FAIL
+    assert "EDGE_ABSENT" in _codes(absent_edge)
 
 
 def test_unknown_for_heuristic_codeflow_only_complete_absence_and_partial_or_truncated_evidence():
@@ -92,6 +104,11 @@ def test_counterexample_fail_for_no_path_all_paths_and_blast_radius_contains():
     assert "COUNTEREXAMPLE_PATH" in _codes(all_paths)
 
     blast = verify_code_graph_claim(_claim(CodeGraphClaimKind.BLAST_RADIUS_CONTAINS, source="A", target="C", max_depth=1), model)
+    assert blast.verdict is VerificationVerdict.UNKNOWN
+    assert "ABSENCE_NOT_PROVEN" in _codes(blast)
+
+    scoped_absence = _model([_node("A"), _node("C")], [], absence=("A->C:max_depth:1",))
+    blast = verify_code_graph_claim(_claim(CodeGraphClaimKind.BLAST_RADIUS_CONTAINS, source="A", target="C", max_depth=1), scoped_absence)
     assert blast.verdict is VerificationVerdict.FAIL
     assert "TARGET_OUTSIDE_BLAST_RADIUS" in _codes(blast)
 
@@ -112,6 +129,30 @@ def test_non_exact_paths_are_not_decisive_negative_counterexamples():
     assert "EDGE_NOT_EXACT" in _codes(all_paths)
 
 
+def test_exact_paths_are_not_masked_by_heuristic_alternatives():
+    model = _model(
+        [_node("A"), _node("B"), _node("X")],
+        [
+            _edge("A", "B", confidence=EvidenceConfidence.HEURISTIC),
+            _edge("A", "X", edge_id="edge:exact:A:X"),
+            _edge("X", "B", edge_id="edge:exact:X:B"),
+        ],
+        absence=("A->B:bypass:Y",),
+    )
+
+    path = verify_code_graph_claim(_claim(CodeGraphClaimKind.PATH_EXISTS, source="A", target="B"), model)
+    assert path.verdict is VerificationVerdict.PASS
+    assert path.evidence_ids == ("edge:exact:A:X", "edge:exact:X:B")
+
+    no_path = verify_code_graph_claim(_claim(CodeGraphClaimKind.NO_PATH, source="A", target="B"), model)
+    assert no_path.verdict is VerificationVerdict.FAIL
+    assert "COUNTEREXAMPLE_PATH" in _codes(no_path)
+
+    all_paths = verify_code_graph_claim(_claim(CodeGraphClaimKind.ALL_PATHS_PASS_THROUGH, source="A", target="B", through="Y"), model)
+    assert all_paths.verdict is VerificationVerdict.FAIL
+    assert "COUNTEREXAMPLE_PATH" in _codes(all_paths)
+
+
 def test_cycles_duplicates_deterministic_order_invariant_relation_filtering_and_canonical_bfs_path_ids():
     nodes = [_node(x) for x in "ABCD"]
     edges = [_edge("A", "B"), _edge("A", "C", "REF"), _edge("B", "D"), _edge("C", "D", "REF"), _edge("D", "A")]
@@ -127,6 +168,23 @@ def test_cycles_duplicates_deterministic_order_invariant_relation_filtering_and_
     assert r1.metadata["canonical_path"] == ("A", "B", "D")
 
 
+def test_graph_model_fingerprint_is_stable_under_nodes_edges_and_blockers_ordering():
+    nodes = [_node(x) for x in "ABC"]
+    edges = [_edge("A", "B"), _edge("B", "C")]
+    blockers = [
+        GraphBlocker("b:2", "partial", "C", {"index": 2}),
+        GraphBlocker("b:1", "partial", "B", {"index": 1}),
+    ]
+
+    first = _model(nodes, edges, blockers=blockers, absence=("Z", "A->Z"))
+    second = _model(list(reversed(nodes)), list(reversed(edges)), blockers=tuple(reversed(blockers)), absence=("A->Z", "Z"))
+
+    assert [node.id for node in first.nodes] == [node.id for node in second.nodes]
+    assert [edge.id for edge in first.edges] == [edge.id for edge in second.edges]
+    assert [blocker.id for blocker in first.blockers] == [blocker.id for blocker in second.blockers]
+    assert first.fingerprint == second.fingerprint
+
+
 def test_snapshot_mismatch_stale_unsupported_and_inferred_blockers_are_unknown_not_provider_branches():
     stale = _model([_node("A")], snapshot="s2", provider="graphify")
     report = verify_code_graph_claim(_claim(CodeGraphClaimKind.NODE_EXISTS, node="A"), stale)
@@ -140,7 +198,7 @@ def test_snapshot_mismatch_stale_unsupported_and_inferred_blockers_are_unknown_n
 
 
 def test_all_paths_pass_fail_nonvacuous_and_blast_depth():
-    model = _model([_node(x) for x in "ABCD"], [_edge("A", "B"), _edge("B", "D"), _edge("A", "C"), _edge("C", "D")], absence=("Z->D",))
+    model = _model([_node(x) for x in "ABCD"], [_edge("A", "B"), _edge("B", "D"), _edge("A", "C"), _edge("C", "D")], absence=("A->D:bypass:A", "Z->D"))
     assert verify_code_graph_claim(_claim(CodeGraphClaimKind.ALL_PATHS_PASS_THROUGH, source="A", target="D", through="A"), model).verdict is VerificationVerdict.PASS
     assert verify_code_graph_claim(_claim(CodeGraphClaimKind.ALL_PATHS_PASS_THROUGH, source="Z", target="D", through="A"), model).verdict is VerificationVerdict.FAIL
     assert verify_code_graph_claim(_claim(CodeGraphClaimKind.BLAST_RADIUS_CONTAINS, source="A", target="D", max_depth=2), model).verdict is VerificationVerdict.PASS

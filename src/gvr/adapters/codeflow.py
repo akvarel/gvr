@@ -99,18 +99,13 @@ def ingest_codeflow_graph(result: Mapping[str, Any]) -> GraphEvidenceModel:
         for item in _items(result.get("blockers"))
         if str(item.get("id") or "")
     )
-    absence_subjects = tuple(
-        str(item.get("subject") or "")
-        for item in _items(result.get("absence"))
-        if str(item.get("subject") or "")
-    )
     snapshot = result.get("source_snapshot")
     return GraphEvidenceModel(
         provider="codeflow",
         nodes=nodes,
         edges=edges,
         blockers=blockers,
-        absence_subjects=absence_subjects,
+        absence_subjects=(),
         source_snapshot=dict(snapshot) if isinstance(snapshot, Mapping) else {},
     )
 
