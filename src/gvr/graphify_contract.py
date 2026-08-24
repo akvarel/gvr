@@ -17,6 +17,16 @@ _GRAPHIFY_DF_KEY_FIELDS = (
     "source_location",
     "provenance",
 )
+_SUPPORTED_RELATIONS = frozenset({
+    "FLOWS_TO",
+    "PASSED_AS_ARGUMENT",
+    "READ_FROM",
+    "RETURNED_AS",
+    "TRANSFORMED_BY",
+    "WRITTEN_TO",
+})
+_TRUNCATION_REASONS = frozenset({"MAX_DEPTH", "MAX_PATHS", "MAX_EXPANSIONS"})
+_BLOCKING_BOUNDARY_RESOLUTIONS = frozenset({"AMBIGUOUS", "UNRESOLVED", "UNSUPPORTED"})
 
 
 def _field_pairs(item: Mapping[str, Any]) -> list[tuple[str, str]]:
@@ -119,18 +129,73 @@ def validate_graphify_positive_traversal(result: Mapping[str, Any]) -> frozenset
     bounds = result.get("query_bounds")
     if not isinstance(bounds, Mapping):
         raise GraphEvidenceModelError("Graphify positive traversal requires query_bounds")
-    effective_raw = bounds.get("effective_allowed_relations", bounds.get("effective_relations", bounds.get("relations", ())))
-    if isinstance(effective_raw, (str, bytes)) or not isinstance(effective_raw, (list, tuple, set, frozenset)):
-        raise GraphEvidenceModelError("Graphify effective relations must be a sequence")
-    effective = frozenset(str(item) for item in effective_raw)
+    def relation_set(value: Any, name: str) -> frozenset[str]:
+        if isinstance(value, (str, bytes)) or not isinstance(value, (list, tuple, set, frozenset)):
+            raise GraphEvidenceModelError(f"Graphify {name} must be a sequence")
+        return frozenset(str(item) for item in value)
+
+    requested_raw = bounds.get(
+        "requested_allowed_relations",
+        bounds.get("requested_relations", bounds.get("relations", ())),
+    )
+    effective_raw = bounds.get(
+        "effective_allowed_relations",
+        bounds.get("effective_relations", bounds.get("relations", ())),
+    )
+    rejected_raw = bounds.get("rejected_relations", ())
+    requested = relation_set(requested_raw, "requested relations")
+    effective = relation_set(effective_raw, "effective relations")
+    rejected = relation_set(rejected_raw, "rejected relations")
+    stop_nodes = relation_set(bounds.get("stop_nodes", ()), "stop_nodes")
+    query_authority = (
+        result.get("query_validity") is True
+        and str(result.get("input_resolution") or "") == "RESOLVED"
+        and result.get("start_node_found") is True
+        and result.get("target_node_found") is True
+        and effective == requested & _SUPPORTED_RELATIONS
+        and rejected == requested - _SUPPORTED_RELATIONS
+        and not effective - _SUPPORTED_RELATIONS
+    )
+    if bounds.get("direction") is not None and str(bounds.get("direction") or "") != direction:
+        query_authority = False
+    top_rejected = result.get("rejected_relations")
+    if top_rejected is not None:
+        query_authority = query_authority and relation_set(top_rejected, "top-level rejected relations") == rejected
     max_depth = bounds.get("max_depth")
     max_paths = bounds.get("max_paths")
+    max_expansions = bounds.get(
+        "max_expansions",
+        bounds.get("max_visited_expansions", bounds.get("visited_expansion_bound")),
+    )
     if max_depth is not None and (type(max_depth) is not int or max_depth < 0):
         raise GraphEvidenceModelError("Graphify max_depth must be a non-negative integer")
     if max_paths is not None and (type(max_paths) is not int or max_paths < 0):
         raise GraphEvidenceModelError("Graphify max_paths must be a non-negative integer")
+    if max_expansions is not None and (type(max_expansions) is not int or max_expansions < 0):
+        raise GraphEvidenceModelError("Graphify max_expansions must be a non-negative integer")
     if max_paths is not None and len(paths) > max_paths:
         raise GraphEvidenceModelError("Graphify returned paths exceed max_paths")
+    truncated = result.get("truncated")
+    termination = str(result.get("termination_reason") or "")
+    if not isinstance(truncated, bool):
+        query_authority = False
+    elif truncated is not (termination in _TRUNCATION_REASONS):
+        query_authority = False
+    boundaries = _mapping_sequence(result.get("boundary_events", ()), "boundary_events")
+    if any(
+        str(event.get("resolution") or "") in _BLOCKING_BOUNDARY_RESOLUTIONS
+        for event in boundaries
+    ):
+        query_authority = False
+    if any(
+        result.get(flag) is True
+        for flag in (
+            "encountered_may_evidence",
+            "encountered_partial_evidence",
+            "encountered_unknown_evidence",
+        )
+    ):
+        query_authority = False
 
     seen_evidence: dict[str, Any] = {}
     authoritative_keys: set[str] = set()
@@ -146,7 +211,8 @@ def validate_graphify_positive_traversal(result: Mapping[str, Any]) -> frozenset
         if max_depth is not None and len(steps) > max_depth:
             raise GraphEvidenceModelError("Graphify positive path exceeds max_depth")
         authoritative = (
-            str(path.get("path_exactness") or "") == "EXACT_FOR_RETURNED_PATH"
+            query_authority
+            and str(path.get("path_exactness") or "") == "EXACT_FOR_RETURNED_PATH"
             and str(path.get("path_receiver_confidence") or "") == "PROVEN"
             and str(path.get("path_coverage") or "") == "COMPLETE_FOR_SUPPORTED_CONSTRUCT"
             and all(str(item.get("receiver_confidence") or "") == "PROVEN" for item in evidence)
@@ -165,7 +231,7 @@ def validate_graphify_positive_traversal(result: Mapping[str, Any]) -> frozenset
             if _stable(step.get("evidence")) != canonical:
                 raise GraphEvidenceModelError("Graphify path step evidence must exactly match supporting_evidence")
             relation = str(item.get("relation") or "")
-            if effective and relation not in effective:
+            if relation not in _SUPPORTED_RELATIONS or (effective and relation not in effective):
                 authoritative = False
             if any(str(step.get(field) or "") != str(item.get(field) or "") for field in ("source", "target", "relation")):
                 raise GraphEvidenceModelError("Graphify path step must exactly match supporting evidence endpoints and relation")
@@ -179,6 +245,12 @@ def validate_graphify_positive_traversal(result: Mapping[str, Any]) -> frozenset
             str(steps[0].get("source") or "") != flow_start
             or str(steps[-1].get("target") or "") != flow_target
         ):
+            authoritative = False
+        interior_nodes = {
+            str(step.get("target") or "")
+            for step in steps[:-1]
+        }
+        if interior_nodes & stop_nodes:
             authoritative = False
         if authoritative:
             authoritative_keys.update(keys)

@@ -121,6 +121,41 @@ def test_task33_positive_authority_rejects_confidence_completeness_and_bound_upg
     assert_positive_rejected(too_deep)
 
 
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"query_validity": False},
+        {"input_resolution": "START_NODE_NOT_FOUND", "start_node_found": False},
+        {"input_resolution": "AMBIGUOUS_TARGET", "target_node_found": False},
+        {"direction": "BACKWARD"},
+        {"truncated": True, "termination_reason": "COMPLETE"},
+        {
+            "boundary_events": [
+                {
+                    "boundary_evidence_key": "bnd:task33",
+                    "resolution": "UNSUPPORTED",
+                    "canonical_caller_file": "src/Flow.java",
+                }
+            ]
+        },
+        {"encountered_unknown_evidence": True},
+    ],
+)
+def test_task33_query_level_failures_cannot_authorize_exact_positive_edges(overrides) -> None:
+    result = traversal([path_for(df_edge("A", "B"))])
+    result.update(overrides)
+    assert_positive_downgraded(result)
+
+
+def test_task33_valid_exact_typed_positive_witness_is_decisive() -> None:
+    result = traversal([path_for(df_edge("A", "B"))])
+    report = verify_data_flow_claim(claim(), result)
+    assert report.verdict is VerificationVerdict.PASS
+    graph = ingest_traversal_graph(result)
+    assert graph.edges
+    assert all(edge.confidence is EvidenceConfidence.EXACT for edge in graph.edges)
+
+
 def test_task33_negative_authority_preservation_keeps_complete_absence_and_incomplete_unknown() -> None:
     complete = traversal([])
     complete["visited_count"] = 1
@@ -188,7 +223,20 @@ def test_task33_downgraded_positive_authority_runs_real_executor_and_replays_fro
         edge.confidence is EvidenceConfidence.HEURISTIC
         for edge in decode_code_graph_observation_evidence(observation).graph_model.edges
     )
-    request = execution_request(claim_value, {"graphify.snapshot": (observation, SNAPSHOT_PATH)})
+    codeflow_observation = encode_codeflow_code_graph_observation_evidence(
+        codeflow_result(),
+        evidence_id="obs.task33.sqlite.codeflow",
+        claim=claim_value,
+        source_revision=SourceRevisionIdentity("fixture-repo", "rev-1"),
+        query_scope=codeflow_scope(),
+    )
+    request = execution_request(
+        claim_value,
+        {
+            "graphify.snapshot": (observation, SNAPSHOT_PATH),
+            "codeflow.snapshot": (codeflow_observation, SNAPSHOT_PATH),
+        },
+    )
     database = tmp_path / "task33.sqlite3"
 
     first = execute_verification_plan(request, storage=SQLiteStorage(database))

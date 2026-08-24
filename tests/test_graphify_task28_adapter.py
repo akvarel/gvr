@@ -45,7 +45,12 @@ def _result(paths, **overrides):
         "expanded_count": 2,
         "truncated": False,
         "termination_reason": "COMPLETE",
-        "query_bounds": {"effective_allowed_relations": ["FLOWS_TO"]},
+        "query_bounds": {
+            "requested_allowed_relations": ["FLOWS_TO"],
+            "effective_allowed_relations": ["FLOWS_TO"],
+            "rejected_relations": [],
+            "stop_nodes": [],
+        },
         "boundary_events": [],
         "search_coverage": COMPLETE,
         "complete_supported_search": True,
