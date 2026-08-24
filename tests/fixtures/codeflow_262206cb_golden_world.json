@@ -1,0 +1,910 @@
+{
+  "schemaVersion": 1,
+  "data": {
+    "files": [
+      {
+        "path": "README.md",
+        "name": "README.md",
+        "folder": "root",
+        "content": null,
+        "functions": [],
+        "lines": 4,
+        "layer": "note",
+        "churn": 0,
+        "isCode": false,
+        "dependencies": [
+          {
+            "kind": "wikilink",
+            "raw": "[[service]]",
+            "target": "service",
+            "resolved": "service.md"
+          },
+          {
+            "kind": "mdlink",
+            "raw": "[math](src/math.js)",
+            "target": "src/math.js",
+            "resolved": "src/math.js"
+          }
+        ],
+        "complexity": {
+          "score": 0,
+          "level": "low"
+        },
+        "parserProvenance": "markdown-link-parser"
+      },
+      {
+        "path": "service.md",
+        "name": "service.md",
+        "folder": "root",
+        "content": null,
+        "functions": [],
+        "lines": 4,
+        "layer": "note",
+        "churn": 0,
+        "isCode": false,
+        "dependencies": [
+          {
+            "kind": "mdlink",
+            "raw": "[Python service](src/service.py)",
+            "target": "src/service.py",
+            "resolved": "src/service.py"
+          }
+        ],
+        "complexity": {
+          "score": 0,
+          "level": "low"
+        },
+        "parserProvenance": "markdown-link-parser"
+      },
+      {
+        "path": "src/app.js",
+        "name": "app.js",
+        "folder": "src",
+        "content": null,
+        "functions": [
+          {
+            "name": "boot",
+            "file": "src/app.js",
+            "line": 3,
+            "code": "export function boot() {\n  return double(add(1, 2));\n}\n\nboot();\n",
+            "isTopLevel": true,
+            "type": "function"
+          }
+        ],
+        "lines": 8,
+        "layer": "utils",
+        "churn": 0,
+        "isCode": true,
+        "dependencies": [],
+        "complexity": {
+          "score": 1,
+          "level": "low"
+        },
+        "parserProvenance": "heuristic-regex"
+      },
+      {
+        "path": "src/main.py",
+        "name": "main.py",
+        "folder": "src",
+        "content": null,
+        "functions": [
+          {
+            "name": "run",
+            "file": "src/main.py",
+            "line": 4,
+            "code": "def run():\n    return hydrate(\" demo \")\n\n",
+            "isTopLevel": true,
+            "isExported": true,
+            "isClassMethod": false,
+            "type": "function"
+          }
+        ],
+        "lines": 9,
+        "layer": "utils",
+        "churn": 0,
+        "isCode": true,
+        "dependencies": [],
+        "complexity": {
+          "score": 1,
+          "level": "low"
+        },
+        "parserProvenance": "heuristic-regex"
+      },
+      {
+        "path": "src/math.js",
+        "name": "math.js",
+        "folder": "src",
+        "content": null,
+        "functions": [
+          {
+            "name": "add",
+            "file": "src/math.js",
+            "line": 1,
+            "code": "export function add(a, b) {\n  return a + b;\n}\n\nexport function double(value) {\n  return add(value, value);\n}\n\nfunction unusedHelper() {\n  return add(1, 1);\n}\n",
+            "isTopLevel": true,
+            "type": "function"
+          },
+          {
+            "name": "double",
+            "file": "src/math.js",
+            "line": 5,
+            "code": "export function double(value) {\n  return add(value, value);\n}\n\nfunction unusedHelper() {\n  return add(1, 1);\n}\n",
+            "isTopLevel": true,
+            "type": "function"
+          },
+          {
+            "name": "unusedHelper",
+            "file": "src/math.js",
+            "line": 9,
+            "code": "function unusedHelper() {\n  return add(1, 1);\n}\n",
+            "isTopLevel": true,
+            "type": "function"
+          }
+        ],
+        "lines": 12,
+        "layer": "utils",
+        "churn": 0,
+        "isCode": true,
+        "dependencies": [],
+        "complexity": {
+          "score": 1,
+          "level": "low"
+        },
+        "parserProvenance": "heuristic-regex"
+      },
+      {
+        "path": "src/service.py",
+        "name": "service.py",
+        "folder": "src",
+        "content": null,
+        "functions": [
+          {
+            "name": "hydrate",
+            "file": "src/service.py",
+            "line": 1,
+            "code": "def hydrate(value):\n    return normalize(value)\n\n",
+            "isTopLevel": true,
+            "isExported": true,
+            "isClassMethod": false,
+            "type": "function"
+          },
+          {
+            "name": "normalize",
+            "file": "src/service.py",
+            "line": 5,
+            "code": "def normalize(value):\n    return value.strip()",
+            "isTopLevel": true,
+            "isExported": true,
+            "isClassMethod": false,
+            "type": "function"
+          }
+        ],
+        "lines": 7,
+        "layer": "services",
+        "churn": 0,
+        "isCode": true,
+        "dependencies": [],
+        "complexity": {
+          "score": 1,
+          "level": "low"
+        },
+        "parserProvenance": "heuristic-regex"
+      }
+    ],
+    "functions": [
+      {
+        "name": "boot",
+        "file": "src/app.js",
+        "line": 3,
+        "code": "export function boot() {\n  return double(add(1, 2));\n}\n\nboot();\n",
+        "isTopLevel": true,
+        "type": "function",
+        "folder": "src",
+        "layer": "utils",
+        "key": "src/app.js|3|boot"
+      },
+      {
+        "name": "run",
+        "file": "src/main.py",
+        "line": 4,
+        "code": "def run():\n    return hydrate(\" demo \")\n\n",
+        "isTopLevel": true,
+        "isExported": true,
+        "isClassMethod": false,
+        "type": "function",
+        "folder": "src",
+        "layer": "utils",
+        "key": "src/main.py|4|run"
+      },
+      {
+        "name": "add",
+        "file": "src/math.js",
+        "line": 1,
+        "code": "export function add(a, b) {\n  return a + b;\n}\n\nexport function double(value) {\n  return add(value, value);\n}\n\nfunction unusedHelper() {\n  return add(1, 1);\n}\n",
+        "isTopLevel": true,
+        "type": "function",
+        "folder": "src",
+        "layer": "utils",
+        "key": "src/math.js|1|add"
+      },
+      {
+        "name": "double",
+        "file": "src/math.js",
+        "line": 5,
+        "code": "export function double(value) {\n  return add(value, value);\n}\n\nfunction unusedHelper() {\n  return add(1, 1);\n}\n",
+        "isTopLevel": true,
+        "type": "function",
+        "folder": "src",
+        "layer": "utils",
+        "key": "src/math.js|5|double"
+      },
+      {
+        "name": "unusedHelper",
+        "file": "src/math.js",
+        "line": 9,
+        "code": "function unusedHelper() {\n  return add(1, 1);\n}\n",
+        "isTopLevel": true,
+        "type": "function",
+        "folder": "src",
+        "layer": "utils",
+        "key": "src/math.js|9|unusedHelper"
+      },
+      {
+        "name": "hydrate",
+        "file": "src/service.py",
+        "line": 1,
+        "code": "def hydrate(value):\n    return normalize(value)\n\n",
+        "isTopLevel": true,
+        "isExported": true,
+        "isClassMethod": false,
+        "type": "function",
+        "folder": "src",
+        "layer": "services",
+        "key": "src/service.py|1|hydrate"
+      },
+      {
+        "name": "normalize",
+        "file": "src/service.py",
+        "line": 5,
+        "code": "def normalize(value):\n    return value.strip()",
+        "isTopLevel": true,
+        "isExported": true,
+        "isClassMethod": false,
+        "type": "function",
+        "folder": "src",
+        "layer": "services",
+        "key": "src/service.py|5|normalize"
+      }
+    ],
+    "connections": [
+      {
+        "source": "src/math.js",
+        "target": "src/app.js",
+        "fn": "add",
+        "count": 2,
+        "functionKey": "src/math.js|1|add"
+      },
+      {
+        "source": "src/math.js",
+        "target": "src/app.js",
+        "fn": "double",
+        "count": 2,
+        "functionKey": "src/math.js|5|double"
+      },
+      {
+        "source": "src/service.py",
+        "target": "src/main.py",
+        "fn": "hydrate",
+        "count": 2,
+        "functionKey": "src/service.py|1|hydrate"
+      },
+      {
+        "source": "README.md",
+        "target": "service.md",
+        "fn": "[[service]]",
+        "count": 1,
+        "kind": "wikilink"
+      },
+      {
+        "source": "README.md",
+        "target": "src/math.js",
+        "fn": "[math](src/math.js)",
+        "count": 1,
+        "kind": "mdlink"
+      },
+      {
+        "source": "service.md",
+        "target": "src/service.py",
+        "fn": "[Python service](src/service.py)",
+        "count": 1,
+        "kind": "mdlink"
+      }
+    ],
+    "fnStats": {
+      "src/app.js|3|boot": {
+        "key": "src/app.js|3|boot",
+        "name": "boot",
+        "internal": 1,
+        "external": 0,
+        "callers": [],
+        "file": "src/app.js",
+        "folder": "src",
+        "line": 3,
+        "code": "export function boot() {\n  return double(add(1, 2));\n}\n\nboot();\n",
+        "isTopLevel": true,
+        "isExported": false,
+        "isClassMethod": false,
+        "type": "function",
+        "decorators": null,
+        "className": null,
+        "count": 1
+      },
+      "src/main.py|4|run": {
+        "key": "src/main.py|4|run",
+        "name": "run",
+        "internal": 1,
+        "external": 0,
+        "callers": [],
+        "file": "src/main.py",
+        "folder": "src",
+        "line": 4,
+        "code": "def run():\n    return hydrate(\" demo \")\n\n",
+        "isTopLevel": true,
+        "isExported": true,
+        "isClassMethod": false,
+        "type": "function",
+        "decorators": null,
+        "className": null,
+        "count": 1
+      },
+      "src/math.js|1|add": {
+        "key": "src/math.js|1|add",
+        "name": "add",
+        "internal": 2,
+        "external": 2,
+        "callers": [
+          {
+            "file": "src/app.js",
+            "name": "app.js",
+            "count": 2
+          }
+        ],
+        "file": "src/math.js",
+        "folder": "src",
+        "line": 1,
+        "code": "export function add(a, b) {\n  return a + b;\n}\n\nexport function double(value) {\n  return add(value, value);\n}\n\nfunction unusedHelper() {\n  return add(1, 1);\n}\n",
+        "isTopLevel": true,
+        "isExported": false,
+        "isClassMethod": false,
+        "type": "function",
+        "decorators": null,
+        "className": null,
+        "count": 4
+      },
+      "src/math.js|5|double": {
+        "key": "src/math.js|5|double",
+        "name": "double",
+        "internal": 0,
+        "external": 2,
+        "callers": [
+          {
+            "file": "src/app.js",
+            "name": "app.js",
+            "count": 2
+          }
+        ],
+        "file": "src/math.js",
+        "folder": "src",
+        "line": 5,
+        "code": "export function double(value) {\n  return add(value, value);\n}\n\nfunction unusedHelper() {\n  return add(1, 1);\n}\n",
+        "isTopLevel": true,
+        "isExported": false,
+        "isClassMethod": false,
+        "type": "function",
+        "decorators": null,
+        "className": null,
+        "count": 2
+      },
+      "src/math.js|9|unusedHelper": {
+        "key": "src/math.js|9|unusedHelper",
+        "name": "unusedHelper",
+        "internal": 0,
+        "external": 0,
+        "callers": [],
+        "file": "src/math.js",
+        "folder": "src",
+        "line": 9,
+        "code": "function unusedHelper() {\n  return add(1, 1);\n}\n",
+        "isTopLevel": true,
+        "isExported": false,
+        "isClassMethod": false,
+        "type": "function",
+        "decorators": null,
+        "className": null,
+        "count": 0
+      },
+      "src/service.py|1|hydrate": {
+        "key": "src/service.py|1|hydrate",
+        "name": "hydrate",
+        "internal": 0,
+        "external": 2,
+        "callers": [
+          {
+            "file": "src/main.py",
+            "name": "main.py",
+            "count": 2
+          }
+        ],
+        "file": "src/service.py",
+        "folder": "src",
+        "line": 1,
+        "code": "def hydrate(value):\n    return normalize(value)\n\n",
+        "isTopLevel": true,
+        "isExported": true,
+        "isClassMethod": false,
+        "type": "function",
+        "decorators": null,
+        "className": null,
+        "count": 2
+      },
+      "src/service.py|5|normalize": {
+        "key": "src/service.py|5|normalize",
+        "name": "normalize",
+        "internal": 1,
+        "external": 0,
+        "callers": [],
+        "file": "src/service.py",
+        "folder": "src",
+        "line": 5,
+        "code": "def normalize(value):\n    return value.strip()",
+        "isTopLevel": true,
+        "isExported": true,
+        "isClassMethod": false,
+        "type": "function",
+        "decorators": null,
+        "className": null,
+        "count": 1
+      }
+    },
+    "folders": [
+      "root",
+      "src"
+    ],
+    "tree": {
+      "name": "root",
+      "path": "",
+      "children": {
+        "src": {
+          "name": "src",
+          "path": "src",
+          "children": {},
+          "files": [
+            {
+              "path": "src/app.js",
+              "name": "app.js",
+              "folder": "src",
+              "content": null,
+              "functions": [
+                {
+                  "name": "boot",
+                  "file": "src/app.js",
+                  "line": 3,
+                  "code": "export function boot() {\n  return double(add(1, 2));\n}\n\nboot();\n",
+                  "isTopLevel": true,
+                  "type": "function"
+                }
+              ],
+              "lines": 8,
+              "layer": "utils",
+              "churn": 0,
+              "isCode": true,
+              "dependencies": [],
+              "complexity": {
+                "score": 1,
+                "level": "low"
+              },
+              "parserProvenance": "heuristic-regex"
+            },
+            {
+              "path": "src/main.py",
+              "name": "main.py",
+              "folder": "src",
+              "content": null,
+              "functions": [
+                {
+                  "name": "run",
+                  "file": "src/main.py",
+                  "line": 4,
+                  "code": "def run():\n    return hydrate(\" demo \")\n\n",
+                  "isTopLevel": true,
+                  "isExported": true,
+                  "isClassMethod": false,
+                  "type": "function"
+                }
+              ],
+              "lines": 9,
+              "layer": "utils",
+              "churn": 0,
+              "isCode": true,
+              "dependencies": [],
+              "complexity": {
+                "score": 1,
+                "level": "low"
+              },
+              "parserProvenance": "heuristic-regex"
+            },
+            {
+              "path": "src/math.js",
+              "name": "math.js",
+              "folder": "src",
+              "content": null,
+              "functions": [
+                {
+                  "name": "add",
+                  "file": "src/math.js",
+                  "line": 1,
+                  "code": "export function add(a, b) {\n  return a + b;\n}\n\nexport function double(value) {\n  return add(value, value);\n}\n\nfunction unusedHelper() {\n  return add(1, 1);\n}\n",
+                  "isTopLevel": true,
+                  "type": "function"
+                },
+                {
+                  "name": "double",
+                  "file": "src/math.js",
+                  "line": 5,
+                  "code": "export function double(value) {\n  return add(value, value);\n}\n\nfunction unusedHelper() {\n  return add(1, 1);\n}\n",
+                  "isTopLevel": true,
+                  "type": "function"
+                },
+                {
+                  "name": "unusedHelper",
+                  "file": "src/math.js",
+                  "line": 9,
+                  "code": "function unusedHelper() {\n  return add(1, 1);\n}\n",
+                  "isTopLevel": true,
+                  "type": "function"
+                }
+              ],
+              "lines": 12,
+              "layer": "utils",
+              "churn": 0,
+              "isCode": true,
+              "dependencies": [],
+              "complexity": {
+                "score": 1,
+                "level": "low"
+              },
+              "parserProvenance": "heuristic-regex"
+            },
+            {
+              "path": "src/service.py",
+              "name": "service.py",
+              "folder": "src",
+              "content": null,
+              "functions": [
+                {
+                  "name": "hydrate",
+                  "file": "src/service.py",
+                  "line": 1,
+                  "code": "def hydrate(value):\n    return normalize(value)\n\n",
+                  "isTopLevel": true,
+                  "isExported": true,
+                  "isClassMethod": false,
+                  "type": "function"
+                },
+                {
+                  "name": "normalize",
+                  "file": "src/service.py",
+                  "line": 5,
+                  "code": "def normalize(value):\n    return value.strip()",
+                  "isTopLevel": true,
+                  "isExported": true,
+                  "isClassMethod": false,
+                  "type": "function"
+                }
+              ],
+              "lines": 7,
+              "layer": "services",
+              "churn": 0,
+              "isCode": true,
+              "dependencies": [],
+              "complexity": {
+                "score": 1,
+                "level": "low"
+              },
+              "parserProvenance": "heuristic-regex"
+            }
+          ]
+        }
+      },
+      "files": [
+        {
+          "path": "README.md",
+          "name": "README.md",
+          "folder": "root",
+          "content": null,
+          "functions": [],
+          "lines": 4,
+          "layer": "note",
+          "churn": 0,
+          "isCode": false,
+          "dependencies": [
+            {
+              "kind": "wikilink",
+              "raw": "[[service]]",
+              "target": "service",
+              "resolved": "service.md"
+            },
+            {
+              "kind": "mdlink",
+              "raw": "[math](src/math.js)",
+              "target": "src/math.js",
+              "resolved": "src/math.js"
+            }
+          ],
+          "complexity": {
+            "score": 0,
+            "level": "low"
+          },
+          "parserProvenance": "markdown-link-parser"
+        },
+        {
+          "path": "service.md",
+          "name": "service.md",
+          "folder": "root",
+          "content": null,
+          "functions": [],
+          "lines": 4,
+          "layer": "note",
+          "churn": 0,
+          "isCode": false,
+          "dependencies": [
+            {
+              "kind": "mdlink",
+              "raw": "[Python service](src/service.py)",
+              "target": "src/service.py",
+              "resolved": "src/service.py"
+            }
+          ],
+          "complexity": {
+            "score": 0,
+            "level": "low"
+          },
+          "parserProvenance": "markdown-link-parser"
+        }
+      ]
+    },
+    "issues": [
+      {
+        "type": "warning",
+        "title": "1 Unused Functions",
+        "desc": "Functions not called from other files",
+        "items": [
+          {
+            "name": "unusedHelper",
+            "file": "src/math.js",
+            "line": 9,
+            "code": "function unusedHelper() {\n  return add(1, 1);\n}\n"
+          }
+        ]
+      },
+      {
+        "type": "critical",
+        "title": "1 Architecture Violations",
+        "desc": "Lower layers importing from higher layers",
+        "items": [
+          {
+            "name": "utils → services",
+            "file": "src/main.py",
+            "toFile": "src/service.py",
+            "fn": "hydrate",
+            "suggestion": "utils should not import from services. Consider inverting the dependency or using dependency injection."
+          }
+        ]
+      }
+    ],
+    "patterns": [],
+    "securityIssues": [],
+    "duplicates": [],
+    "layerViolations": [
+      {
+        "from": "src/main.py",
+        "fromLayer": "utils",
+        "to": "src/service.py",
+        "toLayer": "services",
+        "fn": "hydrate",
+        "suggestion": "utils should not import from services. Consider inverting the dependency or using dependency injection."
+      }
+    ],
+    "architectureDiagram": {
+      "framework": "JavaScript/TypeScript",
+      "profile": "web-app",
+      "type": "block-diagram",
+      "options": {
+        "includeTests": false,
+        "includeBuildOutput": false
+      },
+      "mermaid": "%%{init: {\"flowchart\": {\"nodeSpacing\": 45, \"rankSpacing\": 80}} }%%\nflowchart TB\n  classDef browser fill:#102033,stroke:#4d9fff,color:#f0f0f2;\n  classDef action fill:#1f2433,stroke:#7c8cff,color:#f0f0f2;\n  classDef analysis fill:#102033,stroke:#4d9fff,color:#f0f0f2;\n  classDef collection fill:#251b33,stroke:#a78bfa,color:#f0f0f2;\n  classDef rendering fill:#2b2414,stroke:#ff9f43,color:#f0f0f2;\n  classDef testing fill:#252529,stroke:#8b8b95,color:#f0f0f2;\n  classDef fixtures fill:#1f2b1f,stroke:#22c55e,color:#f0f0f2;\n  classDef storage fill:#2b2414,stroke:#ff9f43,color:#f0f0f2;\n  classDef application fill:#252529,stroke:#8b8b95,color:#f0f0f2;\n  classDef appentry fill:#102033,stroke:#4d9fff,color:#f0f0f2;\n  classDef frontend fill:#102033,stroke:#4d9fff,color:#f0f0f2;\n  classDef fecomponents fill:#152238,stroke:#6eb6ff,color:#f0f0f2;\n  classDef backend fill:#251b33,stroke:#a78bfa,color:#f0f0f2;\n  classDef config fill:#2b2414,stroke:#ff9f43,color:#f0f0f2;\n  classDef content fill:#1f2b1f,stroke:#22c55e,color:#f0f0f2;\n  classDef buildoutput fill:#252529,stroke:#666,color:#aaa;\n  subgraph Shared___Utilities_Group[\"Shared / Utilities\"]\n    direction TB\n    agg_shared_utilities[\"Utilities<br/>src/service.py\"]\n  end\n  class agg_shared_utilities shared;",
+      "blocks": [
+        {
+          "id": "agg_shared_utilities",
+          "title": "Utilities",
+          "kind": "service",
+          "role": "shared-module",
+          "group": "Shared / Utilities",
+          "layer": "Backend",
+          "route": null,
+          "files": [
+            "src/service.py",
+            "src/app.js",
+            "src/main.py",
+            "src/math.js"
+          ],
+          "profile": "web-app",
+          "isTest": false,
+          "isFixture": false,
+          "isBuildOutput": false,
+          "loc": 36
+        }
+      ],
+      "dependencies": [],
+      "groups": {
+        "Shared / Utilities": [
+          "agg_shared_utilities"
+        ]
+      },
+      "stats": {
+        "blocks": 1,
+        "dependencies": 0,
+        "routes": 0,
+        "apiRoutes": 0,
+        "databaseTouchpoints": 0,
+        "warnings": 1
+      },
+      "hiddenSummary": {
+        "build": 0,
+        "tests": 0,
+        "fixtures": 0,
+        "lowSignal": 0,
+        "total": 0
+      },
+      "warnings": [
+        "Aggregated 4 architecture files into 1 diagram blocks for readability."
+      ]
+    },
+    "deadFunctions": [
+      {
+        "name": "unusedHelper",
+        "file": "src/math.js",
+        "folder": "src",
+        "line": 9,
+        "code": "function unusedHelper() {\n  return add(1, 1);\n}\n",
+        "codeLines": 4,
+        "ext": "js"
+      }
+    ],
+    "excludePatterns": [],
+    "stats": {
+      "files": 6,
+      "functions": 7,
+      "connections": 6,
+      "dead": 1,
+      "patterns": 0,
+      "security": 0,
+      "duplicates": 0,
+      "violations": 1,
+      "skipped": 0,
+      "loc": 44,
+      "languages": [
+        {
+          "ext": "js",
+          "lines": 20,
+          "pct": 45
+        },
+        {
+          "ext": "py",
+          "lines": 16,
+          "pct": 36
+        },
+        {
+          "ext": "md",
+          "lines": 8,
+          "pct": 18
+        }
+      ],
+      "parserModes": [
+        {
+          "mode": "heuristic-regex",
+          "files": 4
+        },
+        {
+          "mode": "markdown-link-parser",
+          "files": 2
+        }
+      ]
+    },
+    "suggestions": [
+      {
+        "priority": "high",
+        "icon": "layers",
+        "title": "Fix Architecture Violations",
+        "desc": "1 layer violations found. Lower layers should not depend on higher layers.",
+        "action": "Invert dependencies or use interfaces/events",
+        "impact": "Improves architecture and testability"
+      }
+    ]
+  },
+  "snapshot": {
+    "at": "2026-08-24T13:07:41.199Z",
+    "sha": null,
+    "pr": null,
+    "actor": null,
+    "files": 6,
+    "functions": 7,
+    "loc": 44,
+    "languages": 3,
+    "topLanguages": [
+      {
+        "ext": "js",
+        "pct": 45,
+        "lines": 20
+      },
+      {
+        "ext": "py",
+        "pct": 36,
+        "lines": 16
+      },
+      {
+        "ext": "md",
+        "pct": 18,
+        "lines": 8
+      }
+    ],
+    "dead": 1,
+    "deadPct": 14.3,
+    "circular": 0,
+    "godObjects": 0,
+    "avgCoupling": 1,
+    "securityIssues": 0,
+    "patterns": 0,
+    "duplicates": 0,
+    "layerViolations": 1,
+    "connections": 6,
+    "avgFnLines": 5.7,
+    "longestFn": 12,
+    "testFiles": 0,
+    "testRatio": 0,
+    "topFolders": [
+      {
+        "name": "src",
+        "count": 4
+      },
+      {
+        "name": "root",
+        "count": 2
+      }
+    ],
+    "folders": 2,
+    "grade": "B",
+    "score": 86,
+    "topBlast": {
+      "path": "src/math.js",
+      "direct": 1,
+      "transitive": 1,
+      "total": 2
+    },
+    "fragility": [
+      {
+        "path": "src/math.js",
+        "direct": 1,
+        "transitive": 1,
+        "total": 2
+      },
+      {
+        "path": "src/service.py",
+        "direct": 1,
+        "transitive": 1,
+        "total": 2
+      }
+    ]
+  }
+}
