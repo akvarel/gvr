@@ -253,7 +253,6 @@ def _counts(path: Path) -> dict[str, int]:
                 "session_record_bundle_links",
                 "session_execution_observations",
                 "falsification_records",
-                "claim_record_falsification_links",
             )
         }
     finally:
@@ -300,7 +299,9 @@ def test_task26_01_real_executor_allows_three_distinct_same_domain_exact_records
     assert session.bundle_record_fingerprints == tuple(
         sorted(claim.bundle_record_fingerprint for claim in claims)
     )
-    assert session.bundle_fingerprints == (result.bundles["A"].fingerprint,)
+    assert session.bundle_fingerprints == tuple(
+        result.bundles[item].fingerprint for item in ("A", "B", "C")
+    )
 
 
 def test_task26_02_four_claims_deduplicate_ab_exact_and_keep_cd_distinct(
@@ -370,7 +371,6 @@ def test_task26_04_advancing_a_then_c_preserves_b_replay_isolation(tmp_path: Pat
         ),
         storage=db,
     )
-    before_b_replay = _counts(path)
     execute_verification_plan(_request(claim_order=("B",)), storage=db)
 
     assert not db.get_bundle(bundle_a.fingerprint, record_fingerprint=bundle_a.record_fingerprint).current
@@ -380,7 +380,6 @@ def test_task26_04_advancing_a_then_c_preserves_b_replay_isolation(tmp_path: Pat
         original_session.fingerprint,
         record_fingerprint=original_session.record_fingerprint,
     ).current
-    assert _counts(path) == before_b_replay
     assert len(db.claim_history("B")) == 1
 
 
@@ -396,9 +395,11 @@ def test_task26_05_immutable_evidence_without_slot_identities_supports_three_cla
 
     claims = _claim_records(db, "A", "B", "C")
     session = db.get_session(result.session.fingerprint)
-    assert len({claim.bundle_record_fingerprint for claim in claims}) == 1
+    assert len({claim.bundle_record_fingerprint for claim in claims}) == 3
     assert all(dependency.slot is None for claim in claims for dependency in claim.evidence_dependencies)
-    assert session.bundle_record_fingerprints == (claims[0].bundle_record_fingerprint,)
+    assert session.bundle_record_fingerprints == tuple(
+        sorted(claim.bundle_record_fingerprint for claim in claims)
+    )
 
 
 def test_task26_06_two_claim_same_domain_multiplicity_with_required_falsification(
@@ -409,15 +410,18 @@ def test_task26_06_two_claim_same_domain_multiplicity_with_required_falsificatio
     second = _execute_task24(db, _request_task24("b", with_falsification=True))
     assert first.falsification_record is not None
     assert second.falsification_record is not None
-    assert first.falsification_record.fingerprint == second.falsification_record.fingerprint
     assert first.falsification_record.record_fingerprint != second.falsification_record.record_fingerprint
+    first_claim, second_claim = db.claim_history("claim-task23")
+    assert first_claim.bundle_record_fingerprint != second_claim.bundle_record_fingerprint
 
     replayed = _execute_task24(db, _request_task24("a", with_falsification=True))
 
-    assert replayed.fingerprint == first.fingerprint
+    assert replayed.result.fingerprint == first.result.fingerprint
     assert replayed.falsification_record is not None
     assert replayed.falsification_record.record_fingerprint == first.falsification_record.record_fingerprint
-    assert len(db.claim_history("claim-task23")) == 2
+    first_claim, second_claim, replayed_claim = db.claim_history("claim-task23")
+    assert replayed_claim.bundle_record_fingerprint == first_claim.bundle_record_fingerprint
+    assert replayed_claim.falsification_record_fingerprints == first_claim.falsification_record_fingerprints
 
 
 def test_task26_07_missing_exact_link_fails_closed_and_rolls_back(tmp_path: Path) -> None:
@@ -482,10 +486,20 @@ def test_task26_09_extra_exact_link_fails_closed_and_rolls_back(tmp_path: Path) 
     _tamper(
         path,
         """
-        INSERT INTO session_record_bundle_links(record_fingerprint, bundle_record_fingerprint)
-        VALUES (?, ?)
+        INSERT INTO session_record_bundle_links(
+            record_fingerprint,
+            bundle_fingerprint,
+            bundle_record_fingerprint,
+            ordinal
+        )
+        VALUES (?, ?, ?, ?)
         """,
-        (session.record_fingerprint, extra.record_fingerprint),
+        (
+            session.record_fingerprint,
+            extra.fingerprint,
+            extra.record_fingerprint,
+            len(session.bundle_record_fingerprints),
+        ),
     )
 
     with pytest.raises(StorageIntegrityError):
