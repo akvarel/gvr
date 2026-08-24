@@ -10,17 +10,20 @@ A provider adapter converts a provider-specific snapshot into a provider-indepen
 - `EvidenceConfidence.EXACT` is decisive for positive claims;
 - `HEURISTIC` and `INFERRED_HINT` can explain support but cannot upgrade truth;
 - `absence_subjects` are explicit complete absence observations, not silence;
-- `source_snapshot` is part of the observation identity and must match the claim scope for direct verification.
+- `SourceRevisionIdentity` binds the exact repository revision independently of query authority;
+- `GraphQueryScope` preserves start/target, direction, requested/effective/rejected relations, stop nodes, max depth, max paths, max expansions, and evidence namespace;
+- `CoverageCertificate` preserves provider-native completeness, termination, truncation, resolution, partial/unknown, and blocking-boundary state;
+- legacy `source_snapshot` compatibility is not used by authoritative Graphify or CodeFlow observations.
 
 The adapter then wraps that model with exact observation metadata:
 
 - provider family and implementation identity;
 - atomic claim fingerprint;
 - graph model fingerprint;
-- source snapshot;
+- typed source revision, query scope, and coverage certificate;
 - the full canonical graph model payload.
 
-Graphify and CodeFlow parsing remains in `gvr.adapters.graphify` and `gvr.adapters.codeflow`. The generic verifier runtime decodes only canonical observation evidence.
+Graphify and CodeFlow parsing remains in `gvr.adapters.graphify` and `gvr.adapters.codeflow`. Their authoritative wrappers always emit typed authority. Graphify derives scope from the validated native traversal result and rejects scope-bearing legacy snapshot overrides. CodeFlow remains heuristic, requires explicit typed acquisition/index authority when its envelope does not carry it, and cannot prove absence. The generic verifier runtime decodes only canonical observation evidence and performs exact typed revision and query-scope comparison before considering graph facts.
 
 ## Supported claims
 

@@ -119,13 +119,13 @@ def test_task32b_graphify_rejects_scope_bearing_legacy_snapshot_and_decodes_nati
         encode_graphify_code_graph_observation_evidence(
             graphify_result(),
             evidence_id="obs.graphify.rebind",
-            source_revision=REVISION,
+            source_revision=REVISION, claim_fingerprint="task32b",
             source_snapshot={**SNAPSHOT_PATH, "start": "B", "target": "C", "query_bounds": {"max_depth": 99}},
         )
 
     decoded = decode_code_graph_observation_evidence(
         encode_graphify_code_graph_observation_evidence(
-            graphify_result(), evidence_id="obs.graphify.typed", source_revision=REVISION
+            graphify_result(), evidence_id="obs.graphify.typed", source_revision=REVISION, claim_fingerprint="task32b"
         )
     )
     assert decoded.graph_model._typed_authority is True
@@ -148,7 +148,7 @@ def test_task32b_graphify_rejects_scope_bearing_legacy_snapshot_and_decodes_nati
 def test_task32b_graphify_coverage_preserves_native_negative_authority_state() -> None:
     decoded = decode_code_graph_observation_evidence(
         encode_graphify_code_graph_observation_evidence(
-            graphify_result(), evidence_id="obs.graphify.coverage", source_revision=REVISION
+            graphify_result(), evidence_id="obs.graphify.coverage", source_revision=REVISION, claim_fingerprint="task32b"
         )
     )
     assert decoded.coverage == CoverageCertificate(
@@ -182,7 +182,7 @@ def test_task32b_codeflow_revision_rebinding_fails_closed_and_output_remains_heu
         encode_codeflow_code_graph_observation_evidence(
             codeflow_result(),
             evidence_id="obs.codeflow.typed",
-            source_revision=REVISION,
+            source_revision=REVISION, claim_fingerprint="task32b",
             query_scope=codeflow_scope(),
         )
     )
@@ -203,7 +203,7 @@ def test_task32b_query_scope_sets_and_bounds_are_distinct_canonical_authorities(
     base = codeflow_scope()
     assert base.requested_relations != frozenset({"REFERENCE"})
     assert replace(base, requested_relations=frozenset({"REFERENCE"})) != base
-    assert replace(base, effective_relations=frozenset({"REFERENCE"})) != base
+    assert replace(base, relations=frozenset(), effective_relations=frozenset({"REFERENCE"})) != base
     assert replace(base, rejected_relations=frozenset({"REFERENCE"})) != base
     assert replace(base, max_paths=5) != base
     assert replace(base, max_expansions=41) != base
@@ -213,12 +213,12 @@ def test_task32b_query_scope_sets_and_bounds_are_distinct_canonical_authorities(
 def test_task32b_set_reordering_is_fingerprint_invariant_and_scope_revision_changes_are_independent() -> None:
     first = decode_code_graph_observation_evidence(
         encode_graphify_code_graph_observation_evidence(
-            graphify_result(), evidence_id="obs.graphify.first", source_revision=REVISION
+            graphify_result(), evidence_id="obs.graphify.first", source_revision=REVISION, claim_fingerprint="task32b"
         )
     ).graph_model
     reordered = decode_code_graph_observation_evidence(
         encode_graphify_code_graph_observation_evidence(
-            graphify_result(reordered=True), evidence_id="obs.graphify.reordered", source_revision=REVISION
+            graphify_result(reordered=True), evidence_id="obs.graphify.reordered", source_revision=REVISION, claim_fingerprint="task32b"
         )
     ).graph_model
     assert first.fingerprint == reordered.fingerprint
@@ -232,6 +232,7 @@ def test_task32b_sqlite_execution_enforces_scope_mismatch_unknown_and_replays_ex
         "requested_relations": ["FLOWS_TO"],
         "effective_allowed_relations": ["FLOWS_TO"],
         "rejected_relations": [],
+        "max_paths": 1,
     }
     claim = path_claim("task32b-sqlite")
     observation = encode_graphify_code_graph_observation_evidence(

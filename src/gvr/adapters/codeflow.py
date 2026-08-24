@@ -11,7 +11,11 @@ from ..code_graph import (
     GraphEvidenceKind,
     GraphEvidenceModel,
     GraphEvidenceModelError,
+    CoverageCertificate,
+    GraphFacts,
+    GraphQueryScope,
     ProviderImplementationIdentity,
+    SourceRevisionIdentity,
     encode_code_graph_observation_evidence,
 )
 from ..model import Evidence
@@ -267,6 +271,8 @@ def encode_codeflow_code_graph_observation_evidence(
     claim_fingerprint: str | None = None,
     implementation_id: str = "codeflow",
     family_id: str = "codeflow",
+    source_revision: SourceRevisionIdentity | None = None,
+    query_scope: GraphQueryScope | None = None,
     source_snapshot: Mapping[str, Any] | None = None,
 ) -> Evidence:
     """Encode a precomputed CodeFlow canonical graph snapshot for execution.
@@ -277,18 +283,120 @@ def encode_codeflow_code_graph_observation_evidence(
 
     _require_adapter_family(family_id)
     graph = ingest_codeflow_graph(result)
+    native_revision = _native_codeflow_revision(result)
+    compatibility_revision = _revision_only_snapshot(source_snapshot)
+    revisions = tuple(item for item in (native_revision, source_revision, compatibility_revision) if item is not None)
+    if not revisions:
+        raise GraphEvidenceModelError("CodeFlow authoritative observations require a typed source revision")
+    if any(item != revisions[0] for item in revisions[1:]):
+        raise GraphEvidenceModelError("CodeFlow source revision conflict")
+    native_scope = _typed_query_scope(result.get("query_scope"))
+    scopes = tuple(item for item in (native_scope, query_scope) if item is not None)
+    if not scopes:
+        raise GraphEvidenceModelError("CodeFlow authoritative observations require a typed query scope")
+    if any(item != scopes[0] for item in scopes[1:]):
+        raise GraphEvidenceModelError("CodeFlow query scope conflict")
     graph = GraphEvidenceModel(
         provider_identity=ProviderImplementationIdentity("codeflow", implementation_id, "codeflow"),
-        nodes=graph.nodes,
-        edges=graph.edges,
-        blockers=graph.blockers,
-        absence_subjects=graph.absence_subjects,
-        source_snapshot=graph.source_snapshot if source_snapshot is None else source_snapshot,
-        _typed_authority=False,
+        source_revision=revisions[0],
+        query_scope=scopes[0],
+        coverage=CoverageCertificate(
+            coverage="HEURISTIC_INDEX",
+            complete_supported_search=False,
+            termination_reason="CODEFLOW_HEURISTIC_ANALYSIS",
+            truncated=False,
+            details={"negative_authority": False},
+        ),
+        facts=GraphFacts(
+            nodes=tuple(_as_heuristic(item) for item in graph.nodes),
+            edges=tuple(_as_heuristic(item) for item in graph.edges),
+            blockers=graph.blockers,
+            absence_subjects=(),
+        ),
     )
     return encode_code_graph_observation_evidence(
         graph,
         evidence_id=evidence_id,
         claim=claim,
         claim_fingerprint=claim_fingerprint,
+    )
+
+
+def _typed_revision(value: Any) -> SourceRevisionIdentity | None:
+    if value is None:
+        return None
+    if not isinstance(value, Mapping):
+        raise GraphEvidenceModelError("CodeFlow source_revision must be a mapping")
+    try:
+        return SourceRevisionIdentity(str(value["repository"]), str(value["revision"]))
+    except KeyError as exc:
+        raise GraphEvidenceModelError("CodeFlow source_revision requires repository and revision") from exc
+
+
+def _native_codeflow_revision(result: Mapping[str, Any]) -> SourceRevisionIdentity | None:
+    native = _typed_revision(result.get("source_revision"))
+    snapshot = result.get("snapshot")
+    if not isinstance(snapshot, Mapping):
+        return native
+    revision = snapshot.get("revision") or snapshot.get("commit") or snapshot.get("sha")
+    if revision is None:
+        return native
+    repository = snapshot.get("repository") or snapshot.get("repo") or result.get("repository") or result.get("repo")
+    if not repository:
+        raise GraphEvidenceModelError("CodeFlow native snapshot revision requires repository identity")
+    snapshot_revision = SourceRevisionIdentity(str(repository), str(revision))
+    if native is not None and native != snapshot_revision:
+        raise GraphEvidenceModelError("CodeFlow source revision conflict")
+    return snapshot_revision
+
+
+def _revision_only_snapshot(value: Mapping[str, Any] | None) -> SourceRevisionIdentity | None:
+    if value is None:
+        return None
+    allowed = {"repository", "repo", "revision", "commit", "sha", "source_revision"}
+    if set(value) - allowed:
+        raise GraphEvidenceModelError("scope-bearing legacy source_snapshot is forbidden on provider authority paths")
+    nested = value.get("source_revision")
+    if nested is not None:
+        return _typed_revision(nested)
+    repository = value.get("repository") or value.get("repo")
+    revision = value.get("revision") or value.get("commit") or value.get("sha")
+    if not repository or not revision:
+        raise GraphEvidenceModelError("revision-only source_snapshot requires repository and revision")
+    return SourceRevisionIdentity(str(repository), str(revision))
+
+
+def _typed_query_scope(value: Any) -> GraphQueryScope | None:
+    if value is None:
+        return None
+    if not isinstance(value, Mapping):
+        raise GraphEvidenceModelError("CodeFlow query_scope must be a mapping")
+    return GraphQueryScope(
+        start=str(value.get("start") or ""),
+        target=None if value.get("target") is None else str(value.get("target")),
+        direction=str(value.get("direction") or "FORWARD"),
+        requested_relations=frozenset(str(item) for item in value.get("requested_relations", value.get("relations", ()))),
+        effective_relations=frozenset(str(item) for item in value.get("effective_relations", value.get("relations", ()))),
+        rejected_relations=frozenset(str(item) for item in value.get("rejected_relations", ())),
+        max_depth=None if value.get("max_depth") is None else int(value["max_depth"]),
+        max_paths=None if value.get("max_paths") is None else int(value["max_paths"]),
+        max_expansions=None if value.get("max_expansions") is None else int(value["max_expansions"]),
+        stop_nodes=frozenset(str(item) for item in value.get("stop_nodes", ())),
+        evidence_namespace=str(value.get("evidence_namespace") or "default"),
+    )
+
+
+def _as_heuristic(item: GraphEvidence) -> GraphEvidence:
+    if item.confidence in {EvidenceConfidence.HEURISTIC, EvidenceConfidence.INFERRED_HINT}:
+        return item
+    return GraphEvidence(
+        id=item.id,
+        kind=item.kind,
+        semantic_identity=item.semantic_identity,
+        exact_identity=item.exact_identity,
+        confidence=EvidenceConfidence.HEURISTIC,
+        source=item.source,
+        target=item.target,
+        label=item.label,
+        native=item.native,
     )

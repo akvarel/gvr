@@ -133,7 +133,12 @@ class GraphQueryScope:
     target: str | None = None
     direction: str = "FORWARD"
     relations: frozenset[str] = field(default_factory=frozenset)
+    requested_relations: frozenset[str] = field(default_factory=frozenset)
+    effective_relations: frozenset[str] = field(default_factory=frozenset)
+    rejected_relations: frozenset[str] = field(default_factory=frozenset)
     max_depth: int | None = None
+    max_paths: int | None = None
+    max_expansions: int | None = None
     stop_nodes: frozenset[str] = field(default_factory=frozenset)
     evidence_namespace: str = "default"
 
@@ -141,14 +146,29 @@ class GraphQueryScope:
         direction = str(self.direction or "FORWARD").upper()
         if direction not in {"FORWARD", "BACKWARD"}:
             raise GraphEvidenceModelError(f"invalid graph query direction: {direction!r}")
-        if self.max_depth is not None and (type(self.max_depth) is not int or self.max_depth < 0):
-            raise GraphEvidenceModelError("graph query max_depth must be non-negative")
+        for name in ("max_depth", "max_paths", "max_expansions"):
+            value = getattr(self, name)
+            if value is not None and (type(value) is not int or value < 0):
+                raise GraphEvidenceModelError(f"graph query {name} must be non-negative")
         if not str(self.evidence_namespace):
             raise GraphEvidenceModelError("graph query evidence_namespace is required")
         object.__setattr__(self, "start", str(self.start))
         object.__setattr__(self, "target", None if self.target is None else str(self.target))
         object.__setattr__(self, "direction", direction)
-        object.__setattr__(self, "relations", frozenset(str(item) for item in self.relations))
+        legacy_relations = frozenset(str(item) for item in self.relations)
+        requested = frozenset(str(item) for item in self.requested_relations)
+        effective = frozenset(str(item) for item in self.effective_relations)
+        rejected = frozenset(str(item) for item in self.rejected_relations)
+        if legacy_relations:
+            if effective and legacy_relations != effective:
+                raise GraphEvidenceModelError("graph query relations conflict with effective_relations")
+            effective = legacy_relations
+            if not requested:
+                requested = legacy_relations
+        object.__setattr__(self, "relations", effective)
+        object.__setattr__(self, "requested_relations", requested)
+        object.__setattr__(self, "effective_relations", effective)
+        object.__setattr__(self, "rejected_relations", rejected)
         object.__setattr__(self, "stop_nodes", frozenset(str(item) for item in self.stop_nodes))
         object.__setattr__(self, "evidence_namespace", str(self.evidence_namespace))
 
@@ -157,8 +177,12 @@ class GraphQueryScope:
             "start": self.start,
             "target": self.target,
             "direction": self.direction,
-            "relations": tuple(sorted(self.relations)),
+            "requested_relations": tuple(sorted(self.requested_relations)),
+            "effective_relations": tuple(sorted(self.effective_relations)),
+            "rejected_relations": tuple(sorted(self.rejected_relations)),
             "max_depth": self.max_depth,
+            "max_paths": self.max_paths,
+            "max_expansions": self.max_expansions,
             "stop_nodes": tuple(sorted(self.stop_nodes)),
             "evidence_namespace": self.evidence_namespace,
         }
@@ -400,9 +424,9 @@ def _source_revision_from_legacy(snapshot: Mapping[str, Any]) -> SourceRevisionI
 def _query_scope_from_legacy(snapshot: Mapping[str, Any]) -> GraphQueryScope:
     bounds = snapshot.get("query_bounds")
     bounds = bounds if isinstance(bounds, Mapping) else {}
-    relations = bounds.get("effective_allowed_relations", bounds.get("relations", ()))
-    if isinstance(relations, (str, bytes)) or not isinstance(relations, (list, tuple, set, frozenset)):
-        relations = ()
+    requested_relations = _legacy_set(bounds.get("requested_relations", bounds.get("relations", ())))
+    effective_relations = _legacy_set(bounds.get("effective_allowed_relations", bounds.get("effective_relations", bounds.get("relations", ()))))
+    rejected_relations = _legacy_set(bounds.get("rejected_relations", ()))
     stop_nodes = bounds.get("stop_nodes", ())
     if isinstance(stop_nodes, (str, bytes)) or not isinstance(stop_nodes, (list, tuple, set, frozenset)):
         stop_nodes = ()
@@ -410,11 +434,21 @@ def _query_scope_from_legacy(snapshot: Mapping[str, Any]) -> GraphQueryScope:
         start=str(snapshot.get("start") or ""),
         target=None if snapshot.get("target") is None else str(snapshot.get("target")),
         direction=str(snapshot.get("direction") or bounds.get("direction") or "FORWARD"),
-        relations=frozenset(str(item) for item in relations),
+        requested_relations=requested_relations,
+        effective_relations=effective_relations,
+        rejected_relations=rejected_relations,
         max_depth=None if bounds.get("max_depth") is None else int(bounds["max_depth"]),
+        max_paths=None if bounds.get("max_paths") is None else int(bounds["max_paths"]),
+        max_expansions=None if bounds.get("max_expansions") is None else int(bounds["max_expansions"]),
         stop_nodes=frozenset(str(item) for item in stop_nodes),
         evidence_namespace=str(snapshot.get("evidence_namespace") or "default"),
     )
+
+
+def _legacy_set(value: Any) -> frozenset[str]:
+    if isinstance(value, (str, bytes)) or not isinstance(value, (list, tuple, set, frozenset)):
+        return frozenset()
+    return frozenset(str(item) for item in value)
 
 
 def _coverage_from_legacy(snapshot: Mapping[str, Any]) -> CoverageCertificate:
@@ -610,8 +644,12 @@ def graph_model_from_dict(document: Mapping[str, Any]) -> GraphEvidenceModel:
                 start=str(scope.get("start") or ""),
                 target=None if scope.get("target") is None else str(scope.get("target")),
                 direction=str(scope.get("direction") or "FORWARD"),
-                relations=frozenset(str(item) for item in _sequence(scope.get("relations", ()), "relations")),
+                requested_relations=frozenset(str(item) for item in _sequence(scope.get("requested_relations", scope.get("relations", ())), "requested_relations")),
+                effective_relations=frozenset(str(item) for item in _sequence(scope.get("effective_relations", scope.get("relations", ())), "effective_relations")),
+                rejected_relations=frozenset(str(item) for item in _sequence(scope.get("rejected_relations", ()), "rejected_relations")),
                 max_depth=None if scope.get("max_depth") is None else int(scope["max_depth"]),
+                max_paths=None if scope.get("max_paths") is None else int(scope["max_paths"]),
+                max_expansions=None if scope.get("max_expansions") is None else int(scope["max_expansions"]),
                 stop_nodes=frozenset(str(item) for item in _sequence(scope.get("stop_nodes", ()), "stop_nodes")),
                 evidence_namespace=str(scope.get("evidence_namespace") or "default"),
             ),

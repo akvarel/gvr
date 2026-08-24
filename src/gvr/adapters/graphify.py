@@ -10,7 +10,11 @@ from ..code_graph import (
     GraphEvidenceKind,
     GraphEvidenceModel,
     GraphEvidenceModelError,
+    CoverageCertificate,
+    GraphFacts,
+    GraphQueryScope,
     ProviderImplementationIdentity,
+    SourceRevisionIdentity,
     encode_code_graph_observation_evidence,
 )
 from ..graphify_contract import validate_graphify_df_evidence
@@ -343,6 +347,7 @@ def encode_graphify_code_graph_observation_evidence(
     claim_fingerprint: str | None = None,
     implementation_id: str = "graphify",
     family_id: str = "graphify",
+    source_revision: SourceRevisionIdentity | None = None,
     source_snapshot: Mapping[str, Any] | None = None,
 ) -> Evidence:
     """Encode a precomputed Graphify traversal snapshot for execution.
@@ -353,18 +358,149 @@ def encode_graphify_code_graph_observation_evidence(
 
     _require_adapter_family(family_id)
     graph = ingest_traversal_graph(result)
+    revision = _authoritative_source_revision(result, source_revision, source_snapshot)
+    query_scope = _graphify_query_scope(result)
+    coverage = _graphify_coverage(result)
     graph = GraphEvidenceModel(
         provider_identity=ProviderImplementationIdentity("graphify", implementation_id, "graphify"),
-        nodes=graph.nodes,
-        edges=graph.edges,
-        blockers=graph.blockers,
-        absence_subjects=graph.absence_subjects,
-        source_snapshot=graph.source_snapshot if source_snapshot is None else source_snapshot,
-        _typed_authority=False,
+        source_revision=revision,
+        query_scope=query_scope,
+        coverage=coverage,
+        facts=GraphFacts(
+            nodes=graph.nodes,
+            edges=graph.edges,
+            blockers=graph.blockers,
+            absence_subjects=graph.absence_subjects,
+        ),
     )
     return encode_code_graph_observation_evidence(
         graph,
         evidence_id=evidence_id,
         claim=claim,
         claim_fingerprint=claim_fingerprint,
+    )
+
+
+def _authoritative_source_revision(
+    result: Mapping[str, Any],
+    supplied: SourceRevisionIdentity | None,
+    legacy: Mapping[str, Any] | None,
+) -> SourceRevisionIdentity:
+    native = _revision_mapping(result.get("source_revision"))
+    if native is None:
+        repository = result.get("repository") or result.get("repo")
+        revision = result.get("revision") or result.get("commit") or result.get("sha")
+        if repository is not None or revision is not None:
+            if not repository or not revision:
+                raise GraphEvidenceModelError("Graphify native revision requires repository and revision")
+            native = SourceRevisionIdentity(str(repository), str(revision))
+    compatibility = _revision_only_legacy_snapshot(legacy)
+    candidates = tuple(item for item in (native, supplied, compatibility) if item is not None)
+    if not candidates:
+        raise GraphEvidenceModelError("Graphify authoritative observations require a typed source revision")
+    if any(item != candidates[0] for item in candidates[1:]):
+        raise GraphEvidenceModelError("Graphify source revision conflict")
+    return candidates[0]
+
+
+def _revision_mapping(value: Any) -> SourceRevisionIdentity | None:
+    if value is None:
+        return None
+    if not isinstance(value, Mapping):
+        raise GraphEvidenceModelError("provider source_revision must be a mapping")
+    try:
+        return SourceRevisionIdentity(str(value["repository"]), str(value["revision"]))
+    except KeyError as exc:
+        raise GraphEvidenceModelError("provider source_revision requires repository and revision") from exc
+
+
+def _revision_only_legacy_snapshot(value: Mapping[str, Any] | None) -> SourceRevisionIdentity | None:
+    if value is None:
+        return None
+    allowed = {"repository", "repo", "revision", "commit", "sha", "source_revision"}
+    if set(value) - allowed:
+        raise GraphEvidenceModelError("scope-bearing legacy source_snapshot is forbidden on provider authority paths")
+    nested = value.get("source_revision")
+    if nested is not None:
+        return _revision_mapping(nested)
+    repository = value.get("repository") or value.get("repo")
+    revision = value.get("revision") or value.get("commit") or value.get("sha")
+    if not repository or not revision:
+        raise GraphEvidenceModelError("revision-only source_snapshot requires repository and revision")
+    return SourceRevisionIdentity(str(repository), str(revision))
+
+
+def _native_set(value: Any, name: str) -> frozenset[str]:
+    if value is None:
+        return frozenset()
+    if isinstance(value, (str, bytes)) or not isinstance(value, (list, tuple, set, frozenset)):
+        raise GraphEvidenceModelError(f"Graphify {name} must be a sequence")
+    return frozenset(str(item) for item in value)
+
+
+def _native_bound(bounds: Mapping[str, Any], name: str) -> int | None:
+    value = bounds.get(name)
+    if value is None:
+        return None
+    if type(value) is not int or value < 0:
+        raise GraphEvidenceModelError(f"Graphify {name} must be a non-negative integer")
+    return value
+
+
+def _native_bound_alias(bounds: Mapping[str, Any], *names: str) -> int | None:
+    present = tuple(name for name in names if bounds.get(name) is not None)
+    if not present:
+        return None
+    values = tuple(_native_bound(bounds, name) for name in present)
+    if any(value != values[0] for value in values[1:]):
+        raise GraphEvidenceModelError(f"Graphify conflicting bound aliases: {', '.join(present)}")
+    return values[0]
+
+
+def _graphify_query_scope(result: Mapping[str, Any]) -> GraphQueryScope:
+    bounds = result.get("query_bounds", {})
+    if not isinstance(bounds, Mapping):
+        raise GraphEvidenceModelError("Graphify query_bounds must be a mapping")
+    start = str(result.get("start") or "")
+    target = result.get("target")
+    if not start:
+        raise GraphEvidenceModelError("Graphify authoritative query requires start")
+    requested = _native_set(bounds.get("requested_relations", bounds.get("relations", ())), "requested_relations")
+    effective = _native_set(bounds.get("effective_allowed_relations", bounds.get("effective_relations", bounds.get("relations", ()))), "effective_relations")
+    return GraphQueryScope(
+        start=_node_id(start),
+        target=None if target is None else _node_id(str(target)),
+        direction=str(result.get("direction") or bounds.get("direction") or "FORWARD"),
+        requested_relations=requested,
+        effective_relations=effective,
+        rejected_relations=_native_set(bounds.get("rejected_relations", ()), "rejected_relations"),
+        max_depth=_native_bound(bounds, "max_depth"),
+        max_paths=_native_bound(bounds, "max_paths"),
+        max_expansions=_native_bound_alias(bounds, "max_expansions", "max_visited_expansions", "visited_expansion_bound"),
+        stop_nodes=frozenset(_node_id(item) for item in _native_set(bounds.get("stop_nodes", ()), "stop_nodes")),
+        evidence_namespace=str(result.get("evidence_namespace") or "default"),
+    )
+
+
+def _graphify_coverage(result: Mapping[str, Any]) -> CoverageCertificate:
+    boundary_keys = tuple(sorted(
+        str(item.get("boundary_evidence_key") or item.get("diagnostic_evidence_key") or "")
+        for item in _mapping_items(result.get("boundary_events"))
+        if str(item.get("boundary_evidence_key") or item.get("diagnostic_evidence_key") or "")
+    ))
+    return CoverageCertificate(
+        coverage=str(result.get("search_coverage") or "UNKNOWN"),
+        complete_supported_search=result.get("complete_supported_search") is True,
+        termination_reason=str(result.get("termination_reason") or "UNKNOWN"),
+        truncated=result.get("truncated") is True,
+        details={
+            "query_validity": result.get("query_validity") is True,
+            "input_resolution": str(result.get("input_resolution") or "UNKNOWN"),
+            "start_node_found": result.get("start_node_found") is True,
+            "target_node_found": None if result.get("target_node_found") is None else result.get("target_node_found") is True,
+            "encountered_partial_evidence": result.get("encountered_partial_evidence") is True,
+            "encountered_may_evidence": result.get("encountered_may_evidence") is True,
+            "encountered_unknown_evidence": result.get("encountered_unknown_evidence") is True,
+            "blocking_boundary_keys": boundary_keys,
+        },
     )

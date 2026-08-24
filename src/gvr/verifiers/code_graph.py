@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict, deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum
 from typing import Any, Mapping
 
@@ -257,7 +257,8 @@ def verify_code_graph_observation(claim: CodeGraphClaim, graph: GraphEvidenceMod
         return _report(VerificationVerdict.UNKNOWN, [_issue("GRAPH_QUERY_SCOPE_MISMATCH", VerificationVerdict.UNKNOWN)], ())
     if claim.kind in {CodeGraphClaimKind.NO_PATH, CodeGraphClaimKind.ALL_PATHS_PASS_THROUGH} and not graph.coverage.proves_complete_search:
         return _report(VerificationVerdict.UNKNOWN, [_issue("INCOMPLETE_COVERAGE_CERTIFICATE", VerificationVerdict.UNKNOWN)], ())
-    return verify_code_graph_claim(claim, graph)
+    typed_claim = replace(claim, scope=replace(claim.scope, snapshot={}))
+    return verify_code_graph_claim(typed_claim, graph)
 
 
 def _positive_item(

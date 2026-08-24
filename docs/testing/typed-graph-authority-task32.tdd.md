@@ -16,7 +16,7 @@ The first Task 32 commit adds `tests/test_task32_typed_graph_authority.py` befor
 `GraphEvidenceModel` now separates five immutable authorities:
 
 1. `SourceRevisionIdentity` identifies the repository and exact revision.
-2. `GraphQueryScope` identifies start/target, direction, relations, bounds, stop nodes, and evidence namespace.
+2. `GraphQueryScope` identifies start/target, direction, distinct requested/effective/rejected relations, max depth/path/expansion bounds, stop nodes, and evidence namespace.
 3. `CoverageCertificate` states whether the bounded search is complete and why it terminated.
 4. `ProviderImplementationIdentity` identifies the provider, exact implementation, and adapter-sealed family.
 5. `GraphFacts` contains only nodes, edges, blockers, and complete absence subjects.

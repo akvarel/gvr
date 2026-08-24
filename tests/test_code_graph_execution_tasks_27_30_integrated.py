@@ -22,6 +22,8 @@ from gvr import (
     EvidenceProviderResult,
     EvidenceProviderRuntimeRegistry,
     EvidenceRequest,
+    GraphQueryScope,
+    SourceRevisionIdentity,
     SQLiteStorage,
     VerificationExecutionRequest,
     VerificationExecutionTermination,
@@ -42,6 +44,7 @@ from gvr import (
     safe_handle_request,
 )
 from gvr.code_graph import EvidenceConfidence, GraphEvidence, GraphEvidenceKind, GraphEvidenceModel
+from gvr.canonical import canonical_fingerprint
 from gvr.graphify_contract import expected_graphify_df_key
 from gvr.verifiers.code_graph import CodeGraphClaimKind
 
@@ -141,6 +144,30 @@ def path_claim(claim_id: str = "cg-path", *, snapshot: Mapping[str, Any] = SNAPS
     )
 
 
+def typed_revision(snapshot: Mapping[str, Any]) -> SourceRevisionIdentity:
+    repository = str(snapshot.get("repository") or snapshot.get("repo") or "unknown")
+    revision = snapshot.get("revision") or snapshot.get("commit") or snapshot.get("sha")
+    if revision is None:
+        revision = canonical_fingerprint(snapshot, fingerprint_format="gvr.code_graph.claim_revision.v1")
+    return SourceRevisionIdentity(repository, str(revision))
+
+
+def typed_query_scope(claim: AtomicClaim) -> GraphQueryScope:
+    scope = claim.spec.get("scope", {})
+    return GraphQueryScope(
+        start=str(claim.spec.get("source") or claim.spec.get("node") or ""),
+        target=None if claim.spec.get("target") is None else str(claim.spec.get("target")),
+        direction=str(scope.get("direction") or "FORWARD"),
+        requested_relations=frozenset(str(item) for item in scope.get("relations", claim.spec.get("relations", ()))),
+        effective_relations=frozenset(str(item) for item in scope.get("relations", claim.spec.get("relations", ()))),
+        max_depth=None if scope.get("max_depth") is None else int(scope["max_depth"]),
+        max_paths=None if scope.get("max_paths") is None else int(scope["max_paths"]),
+        max_expansions=None if scope.get("max_expansions") is None else int(scope["max_expansions"]),
+        stop_nodes=frozenset(str(item) for item in scope.get("stop_nodes", ())),
+        evidence_namespace=str(scope.get("evidence_namespace") or claim.spec.get("evidence_namespace") or "default"),
+    )
+
+
 def no_path_claim(claim_id: str = "cg-no-path", *, snapshot: Mapping[str, Any] = SNAPSHOT_PATH) -> AtomicClaim:
     return AtomicClaim(
         claim_id=claim_id,
@@ -186,12 +213,15 @@ def graphify_path_snapshot(snapshot: Mapping[str, Any] = SNAPSHOT_PATH) -> Mappi
         "start": "A",
         "target": "B",
         "direction": "FORWARD",
+        "evidence_namespace": "integrated-27-30",
         "termination_reason": snapshot["termination_reason"],
         "search_coverage": snapshot["search_coverage"],
         "complete_supported_search": snapshot["complete_supported_search"],
         "query_bounds": snapshot["query_bounds"],
         "query_validity": True,
         "input_resolution": "RESOLVED",
+        "start_node_found": True,
+        "target_node_found": True,
         "truncated": False,
         "paths": [
             {
@@ -212,12 +242,15 @@ def graphify_no_path_snapshot(snapshot: Mapping[str, Any] = SNAPSHOT_PATH) -> Ma
         "start": "A",
         "target": "B",
         "direction": "FORWARD",
+        "evidence_namespace": "integrated-27-30",
         "termination_reason": snapshot["termination_reason"],
         "search_coverage": snapshot["search_coverage"],
         "complete_supported_search": snapshot["complete_supported_search"],
         "query_bounds": snapshot["query_bounds"],
         "query_validity": True,
         "input_resolution": "RESOLVED",
+        "start_node_found": True,
+        "target_node_found": True,
         "truncated": False,
         "paths": [],
         "boundary_events": [],
@@ -358,12 +391,14 @@ def test_i_graphify_proven_plus_codeflow_heuristic_passes_with_both_exact_acquis
         graphify_path_snapshot(),
         evidence_id="obs.graphify.path",
         claim=claim,
-        source_snapshot=SNAPSHOT_PATH,
+        source_revision=typed_revision(SNAPSHOT_PATH),
     )
     codeflow = encode_codeflow_code_graph_observation_evidence(
         codeflow_path_snapshot(),
         evidence_id="obs.codeflow.path",
         claim=claim,
+        source_revision=typed_revision(SNAPSHOT_PATH),
+        query_scope=typed_query_scope(claim),
     )
     request = execution_request(
         claim,
@@ -394,6 +429,8 @@ def test_ii_codeflow_only_heuristic_remains_unknown(tmp_path: Path) -> None:
         codeflow_path_snapshot(),
         evidence_id="obs.codeflow.only",
         claim=claim,
+        source_revision=typed_revision(SNAPSHOT_PATH),
+        query_scope=typed_query_scope(claim),
     )
     result = execute_verification_plan(
         execution_request(claim, {"codeflow.snapshot": (codeflow, SNAPSHOT_PATH)}),
@@ -413,12 +450,14 @@ def test_iii_graphify_complete_no_path_passes_without_codeflow_silence(tmp_path:
         graphify_no_path_snapshot(),
         evidence_id="obs.graphify.no-path",
         claim=claim,
-        source_snapshot=SNAPSHOT_PATH,
+        source_revision=typed_revision(SNAPSHOT_PATH),
     )
     codeflow = encode_codeflow_code_graph_observation_evidence(
         codeflow_silence_snapshot(),
         evidence_id="obs.codeflow.silence",
         claim=claim,
+        source_revision=typed_revision(SNAPSHOT_PATH),
+        query_scope=typed_query_scope(claim),
     )
     result = execute_verification_plan(
         execution_request(
@@ -431,7 +470,7 @@ def test_iii_graphify_complete_no_path_passes_without_codeflow_silence(tmp_path:
 
     assert report.verdict is VerificationVerdict.PASS
     assert report.evidence_ids == ("obs.graphify.no-path",)
-    assert {"PROVEN_ABSENCE", "ABSENCE_NOT_PROVEN", "PROVIDER_SINGLE_FAMILY_DECISIVE_PASS"} <= issue_codes(report)
+    assert {"PROVEN_ABSENCE", "INCOMPLETE_COVERAGE_CERTIFICATE", "PROVIDER_SINGLE_FAMILY_DECISIVE_PASS"} <= issue_codes(report)
 
 
 def test_iv_independent_decisive_pass_fail_conflict_is_unknown(tmp_path: Path) -> None:
@@ -469,12 +508,14 @@ def test_v_close_reopen_replay_idempotency_then_one_provider_snapshot_advance_is
         graphify_path_snapshot(),
         evidence_id="obs.graphify.replay",
         claim=claim,
-        source_snapshot=SNAPSHOT_PATH,
+        source_revision=typed_revision(SNAPSHOT_PATH),
     )
     codeflow_v1 = encode_codeflow_code_graph_observation_evidence(
         codeflow_path_snapshot(),
         evidence_id="obs.codeflow.replay",
         claim=claim,
+        source_revision=typed_revision(SNAPSHOT_PATH),
+        query_scope=typed_query_scope(claim),
     )
     first_request = execution_request(
         claim,
@@ -493,6 +534,8 @@ def test_v_close_reopen_replay_idempotency_then_one_provider_snapshot_advance_is
         codeflow_path_snapshot(SNAPSHOT_ADVANCED),
         evidence_id="obs.codeflow.replay",
         claim=claim,
+        source_revision=typed_revision(SNAPSHOT_ADVANCED),
+        query_scope=typed_query_scope(claim),
     )
     advanced = execute_verification_plan(
         execution_request(
@@ -524,7 +567,7 @@ def test_vi_contamination_mix_claim_mismatch_never_upgrades_truth(tmp_path: Path
         graphify_path_snapshot(),
         evidence_id="obs.clean.graphify",
         claim=claim,
-        source_snapshot=SNAPSHOT_PATH,
+        source_revision=typed_revision(SNAPSHOT_PATH),
     )
     contaminant = encode_code_graph_observation_evidence(
         exact_model("contaminant", "exact:contaminant"),
@@ -552,6 +595,8 @@ def test_vii_protocol_execution_keeps_codeflow_silence_unknown_for_path_exists()
         codeflow_silence_snapshot(),
         evidence_id="obs.codeflow.silence.protocol",
         claim=claim,
+        source_revision=typed_revision(SNAPSHOT_PATH),
+        query_scope=typed_query_scope(claim),
     )
     request = execution_request(claim, {"codeflow.snapshot": (codeflow, SNAPSHOT_PATH)})
 
@@ -577,6 +622,8 @@ def test_viii_real_codeflow_262206cb_fixture_executes_through_sqlite_without_syn
         payload,
         evidence_id="obs.codeflow.real.262206cb",
         claim=claim,
+        source_revision=typed_revision(snapshot),
+        query_scope=typed_query_scope(claim),
     )
 
     result = execute_verification_plan(

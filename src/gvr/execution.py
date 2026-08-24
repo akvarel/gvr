@@ -835,9 +835,13 @@ def _code_graph_claim_from_atomic(claim: AtomicClaim) -> CodeGraphClaim:
         start=str(spec.get("source") or spec.get("node") or ""),
         target=None if spec.get("target") is None else str(spec.get("target")),
         direction=str(scope_data.get("direction", "FORWARD")),
-        relations=frozenset(str(item) for item in scope_data.get("relations", spec.get("relations", ()))),
+        requested_relations=frozenset(str(item) for item in scope_data.get("requested_relations", scope_data.get("relations", spec.get("relations", ())))),
+        effective_relations=frozenset(str(item) for item in scope_data.get("effective_relations", scope_data.get("relations", spec.get("relations", ())))),
+        rejected_relations=frozenset(str(item) for item in scope_data.get("rejected_relations", ())),
         evidence_namespace=str(scope_data.get("evidence_namespace", spec.get("evidence_namespace", "default"))),
         max_depth=None if scope_data.get("max_depth") is None else int(scope_data.get("max_depth")),
+        max_paths=None if scope_data.get("max_paths") is None else int(scope_data.get("max_paths")),
+        max_expansions=None if scope_data.get("max_expansions") is None else int(scope_data.get("max_expansions")),
         stop_nodes=frozenset(str(item) for item in scope_data.get("stop_nodes", ())),
     )
     scope = CodeGraphScope(
