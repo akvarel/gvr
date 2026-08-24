@@ -195,3 +195,9 @@ Discovery uses the JSON protocol operation:
 ```
 
 The response kind is `evidence_provider_capability_registry` and currently contains an empty `capabilities` list.
+
+## CodeFlow graph evidence adapter (Task 27)
+
+`gvr.adapters.codeflow.ingest_codeflow_graph()` accepts an already-captured CodeFlow graph-like mapping and normalizes it into the provider-independent `gvr.code_graph.GraphEvidenceModel`. The adapter is deterministic and side-effect-free: it does not execute Node, install dependencies, access the network, open source files, or reparse code.
+
+Epistemic semantics are conservative. CodeFlow call and reference edges are recorded as `HEURISTIC`; architecture edges are `INFERRED_HINT`; absence observations never become complete proof and return `UNKNOWN`; unsupported or truncated scopes must be represented as explicit blockers. The canonical model keeps semantic and exact identities as separate fingerprints. Native duplicate IDs are accepted only when identical; conflicting duplicates fail closed.

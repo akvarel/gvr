@@ -15,6 +15,17 @@ from .core import (
     simulate,
 )
 from .canonical import canonical_fingerprint, canonical_json
+from .code_graph import (
+    GRAPH_EVIDENCE_FINGERPRINT_FORMAT,
+    GRAPH_MODEL_FINGERPRINT_FORMAT,
+    EvidenceConfidence,
+    GraphBlocker,
+    GraphEvidence,
+    GraphEvidenceKind,
+    GraphEvidenceModel,
+    GraphEvidenceModelError,
+)
+from .adapters.codeflow import ingest_codeflow_graph
 from .capabilities import (
     BUILTIN_VERIFIER_CAPABILITY_REGISTRY,
     VERIFIER_CAPABILITY_FINGERPRINT_FORMAT,
