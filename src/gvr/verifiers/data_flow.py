@@ -14,7 +14,11 @@ from ..bundle import (
 )
 from ..code_graph import GraphEvidenceModelError
 from ..model import Evidence, VerificationIssue, VerificationReport, VerificationVerdict
-from ..graphify_contract import expected_graphify_df_key, validate_graphify_df_evidence
+from ..graphify_contract import (
+    expected_graphify_df_key,
+    validate_graphify_df_evidence,
+    validate_graphify_positive_traversal,
+)
 
 
 DATA_FLOW_VERIFIER = "gvr.graphify.data_flow.v1"
@@ -728,7 +732,17 @@ def verify_data_flow_claim(
     MAY/PARTIAL state, or treats truncated search absence as proof.
     """
 
-    ingested = ingest_traversal_result(traversal_result)
+    positive_validation_error = False
+    try:
+        validate_graphify_positive_traversal(traversal_result)
+    except GraphEvidenceModelError:
+        positive_validation_error = True
+    try:
+        ingested = ingest_traversal_result(traversal_result)
+    except GraphEvidenceModelError:
+        # Preserve verifier fail-closed reporting while adapters and typed
+        # observation encoders reject the same malformed positive authority.
+        ingested = ingest_traversal_result({**dict(traversal_result), "paths": []})
     query_evidence = build_query_result_evidence(claim, traversal_result)
     raw_paths = _mapping_sequence(traversal_result.get("paths"))
     boundaries = _boundary_events(traversal_result)
@@ -741,6 +755,8 @@ def verify_data_flow_claim(
     )
     if structural_issue:
         global_codes.add("MALFORMED_TRAVERSAL")
+    if positive_validation_error:
+        global_codes.add("MALFORMED_PATH")
 
     seen_evidence: dict[str, Any] = {}
     analyses = tuple(

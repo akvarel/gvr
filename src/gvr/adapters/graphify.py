@@ -17,7 +17,7 @@ from ..code_graph import (
     SourceRevisionIdentity,
     encode_code_graph_observation_evidence,
 )
-from ..graphify_contract import validate_graphify_df_evidence
+from ..graphify_contract import validate_graphify_df_evidence, validate_graphify_positive_traversal
 from ..model import Evidence, VerificationVerdict
 
 
@@ -205,7 +205,14 @@ def _path_by_evidence(paths: tuple[Mapping[str, Any], ...]) -> dict[str, tuple[M
     return owners
 
 
-def _edge_confidence(item: Mapping[str, Any], path: Mapping[str, Any] | None) -> EvidenceConfidence:
+def _edge_confidence(
+    item: Mapping[str, Any],
+    path: Mapping[str, Any] | None,
+    *,
+    query_authorized: bool,
+) -> EvidenceConfidence:
+    if not query_authorized:
+        return EvidenceConfidence.HEURISTIC
     relation = str(item.get("relation") or "")
     if relation not in _SUPPORTED_DATA_FLOW_RELATIONS:
         return EvidenceConfidence.HEURISTIC
@@ -247,6 +254,7 @@ def ingest_traversal_graph(result: Mapping[str, Any]) -> GraphEvidenceModel:
     missing evidence keys, or upgrades MAY/PARTIAL/unsupported evidence to exact.
     """
 
+    authoritative_keys = validate_graphify_positive_traversal(result)
     paths = _mapping_items(result.get("paths"))
     path_owners = _path_by_evidence(paths)
 
@@ -281,7 +289,7 @@ def ingest_traversal_graph(result: Mapping[str, Any]) -> GraphEvidenceModel:
             kind=GraphEvidenceKind.REFERENCE,
             semantic_identity={"relation": identity["relation"], "source": source, "target": target},
             exact_identity=identity,
-            confidence=_edge_confidence(item, path),
+            confidence=_edge_confidence(item, path, query_authorized=key in authoritative_keys),
             source=_node_id(source),
             target=_node_id(target),
             label=identity["relation"],

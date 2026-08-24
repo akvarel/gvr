@@ -229,6 +229,14 @@ def graphify_path_snapshot(snapshot: Mapping[str, Any] = SNAPSHOT_PATH) -> Mappi
                 "path_exactness": "EXACT_FOR_RETURNED_PATH",
                 "path_receiver_confidence": "PROVEN",
                 "path_coverage": "COMPLETE_FOR_SUPPORTED_CONSTRUCT",
+                "steps": [
+                    {
+                        "source": evidence["source"],
+                        "target": evidence["target"],
+                        "relation": evidence["relation"],
+                        "evidence": evidence,
+                    }
+                ],
                 "supporting_evidence": [
                     evidence
                 ],
