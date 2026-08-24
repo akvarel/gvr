@@ -5,7 +5,13 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Mapping
 
-from ..code_graph import EvidenceConfidence, GraphEvidence, GraphEvidenceModel
+from ..code_graph import (
+    EvidenceConfidence,
+    GraphEvidence,
+    GraphEvidenceModel,
+    GraphQueryScope,
+    SourceRevisionIdentity,
+)
 from ..model import VerificationIssue, VerificationReport, VerificationVerdict
 
 CODE_GRAPH_VERIFIER = "gvr.code_graph.v1"
@@ -28,8 +34,21 @@ class CodeGraphScope:
     evidence_namespace: str = "default"
     max_depth: int | None = None
     stop_nodes: frozenset[str] = field(default_factory=frozenset)
+    source_revision: SourceRevisionIdentity | None = None
+    query_scope: GraphQueryScope | None = None
 
     def __post_init__(self) -> None:
+        if self.query_scope is not None:
+            if not isinstance(self.query_scope, GraphQueryScope):
+                raise ValueError("code-graph query_scope must be a GraphQueryScope")
+            typed = self.query_scope
+            object.__setattr__(self, "relations", typed.relations)
+            object.__setattr__(self, "direction", typed.direction)
+            object.__setattr__(self, "evidence_namespace", typed.evidence_namespace)
+            object.__setattr__(self, "max_depth", typed.max_depth)
+            object.__setattr__(self, "stop_nodes", typed.stop_nodes)
+        if self.source_revision is not None and not isinstance(self.source_revision, SourceRevisionIdentity):
+            raise ValueError("code-graph source_revision must be a SourceRevisionIdentity")
         object.__setattr__(self, "snapshot", _stable(self.snapshot))
         object.__setattr__(self, "relations", frozenset(str(r) for r in self.relations))
         direction = str(self.direction or "FORWARD").upper()
@@ -115,6 +134,9 @@ _MESSAGES = {
     "UNSUPPORTED_RELATION": "The graph evidence records an unsupported relation for this claim.",
     "CONFLICTING_GRAPH_EVIDENCE": "The graph evidence contains conflicting observations for this claim.",
     "MALFORMED_GRAPH_EVIDENCE": "The graph evidence is malformed and was treated as fail-closed UNKNOWN.",
+    "SOURCE_REVISION_MISMATCH": "The claim and graph observation are bound to different source revisions.",
+    "GRAPH_QUERY_SCOPE_MISMATCH": "The claim and graph observation are bound to different query scopes.",
+    "INCOMPLETE_COVERAGE_CERTIFICATE": "The typed coverage certificate cannot prove a complete negative search.",
 }
 
 _LEGACY_ISSUE_ALIASES = {
@@ -220,6 +242,22 @@ def verify_code_graph_claim(claim: CodeGraphClaim, graph: GraphEvidenceModel) ->
             return _report(VerificationVerdict.UNKNOWN, blocker_issues or _incomplete_issues(claim))
 
     raise ValueError(f"unsupported code graph claim kind: {claim.kind}")
+
+
+def verify_code_graph_observation(claim: CodeGraphClaim, graph: GraphEvidenceModel) -> VerificationReport:
+    """Verify one canonical observation only after exact typed authority binding."""
+
+    if not graph._typed_authority:
+        return verify_code_graph_claim(claim, graph)
+    if claim.scope.source_revision is None or claim.scope.query_scope is None:
+        return _report(VerificationVerdict.UNKNOWN, [_issue("MALFORMED_GRAPH_EVIDENCE", VerificationVerdict.UNKNOWN)], ())
+    if claim.scope.source_revision != graph.source_revision:
+        return _report(VerificationVerdict.UNKNOWN, [_issue("SOURCE_REVISION_MISMATCH", VerificationVerdict.UNKNOWN)], ())
+    if claim.scope.query_scope != graph.query_scope:
+        return _report(VerificationVerdict.UNKNOWN, [_issue("GRAPH_QUERY_SCOPE_MISMATCH", VerificationVerdict.UNKNOWN)], ())
+    if claim.kind in {CodeGraphClaimKind.NO_PATH, CodeGraphClaimKind.ALL_PATHS_PASS_THROUGH} and not graph.coverage.proves_complete_search:
+        return _report(VerificationVerdict.UNKNOWN, [_issue("INCOMPLETE_COVERAGE_CERTIFICATE", VerificationVerdict.UNKNOWN)], ())
+    return verify_code_graph_claim(claim, graph)
 
 
 def _positive_item(

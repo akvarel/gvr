@@ -11,6 +11,7 @@ from ..code_graph import (
     GraphEvidenceKind,
     GraphEvidenceModel,
     GraphEvidenceModelError,
+    ProviderImplementationIdentity,
     encode_code_graph_observation_evidence,
 )
 from ..model import Evidence
@@ -275,12 +276,19 @@ def encode_codeflow_code_graph_observation_evidence(
     """
 
     _require_adapter_family(family_id)
+    graph = ingest_codeflow_graph(result)
+    graph = GraphEvidenceModel(
+        provider_identity=ProviderImplementationIdentity("codeflow", implementation_id, "codeflow"),
+        nodes=graph.nodes,
+        edges=graph.edges,
+        blockers=graph.blockers,
+        absence_subjects=graph.absence_subjects,
+        source_snapshot=graph.source_snapshot if source_snapshot is None else source_snapshot,
+        _typed_authority=False,
+    )
     return encode_code_graph_observation_evidence(
-        ingest_codeflow_graph(result),
+        graph,
         evidence_id=evidence_id,
         claim=claim,
         claim_fingerprint=claim_fingerprint,
-        implementation_id=implementation_id,
-        family_id=family_id,
-        source_snapshot=source_snapshot,
     )

@@ -24,6 +24,8 @@ from .code_graph import (
     CODE_GRAPH_OBSERVATION_EVIDENCE_KIND,
     CodeGraphObservationError,
     decode_code_graph_observation_evidence,
+    GraphQueryScope,
+    SourceRevisionIdentity,
 )
 from .falsification import (
     FalsificationDependency,
@@ -96,6 +98,7 @@ from .verifiers.code_graph import (
     CodeGraphClaimKind,
     CodeGraphScope,
     verify_code_graph_claim,
+    verify_code_graph_observation,
 )
 from .verifiers.corroboration import (
     ProviderVerificationObservation,
@@ -782,7 +785,7 @@ class _CodeGraphVerifierRuntime:
                         ),
                     ))
                     continue
-                provider_report = verify_code_graph_claim(
+                provider_report = verify_code_graph_observation(
                     code_graph_claim,
                     decoded.graph_model,
                 )
@@ -821,6 +824,22 @@ def _code_graph_claim_from_atomic(claim: AtomicClaim) -> CodeGraphClaim:
     scope_data = spec.get("scope", claim.scope)
     if not isinstance(scope_data, Mapping):
         raise ValueError("code graph claim scope must be a mapping")
+    snapshot = scope_data.get("snapshot", {})
+    if not isinstance(snapshot, Mapping):
+        raise ValueError("code graph claim snapshot must be a mapping")
+    repository = str(snapshot.get("repository") or snapshot.get("repo") or "unknown")
+    revision = snapshot.get("revision") or snapshot.get("commit") or snapshot.get("sha")
+    if revision is None:
+        revision = canonical_fingerprint(snapshot, fingerprint_format="gvr.code_graph.claim_revision.v1")
+    query_scope = GraphQueryScope(
+        start=str(spec.get("source") or spec.get("node") or ""),
+        target=None if spec.get("target") is None else str(spec.get("target")),
+        direction=str(scope_data.get("direction", "FORWARD")),
+        relations=frozenset(str(item) for item in scope_data.get("relations", spec.get("relations", ()))),
+        evidence_namespace=str(scope_data.get("evidence_namespace", spec.get("evidence_namespace", "default"))),
+        max_depth=None if scope_data.get("max_depth") is None else int(scope_data.get("max_depth")),
+        stop_nodes=frozenset(str(item) for item in scope_data.get("stop_nodes", ())),
+    )
     scope = CodeGraphScope(
         snapshot=scope_data.get("snapshot", {}),
         relations=frozenset(str(item) for item in scope_data.get("relations", ())),
@@ -828,6 +847,8 @@ def _code_graph_claim_from_atomic(claim: AtomicClaim) -> CodeGraphClaim:
         evidence_namespace=str(scope_data.get("evidence_namespace", spec.get("evidence_namespace", "default"))),
         max_depth=(None if scope_data.get("max_depth") is None else int(scope_data.get("max_depth"))),
         stop_nodes=frozenset(str(item) for item in scope_data.get("stop_nodes", ())),
+        source_revision=SourceRevisionIdentity(repository, str(revision)),
+        query_scope=query_scope,
     )
     relations = spec.get("relations", ())
     return CodeGraphClaim(
