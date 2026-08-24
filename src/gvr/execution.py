@@ -818,6 +818,10 @@ def _code_graph_claim_from_atomic(claim: AtomicClaim) -> CodeGraphClaim:
     scope = CodeGraphScope(
         snapshot=scope_data.get("snapshot", {}),
         relations=frozenset(str(item) for item in scope_data.get("relations", ())),
+        direction=str(scope_data.get("direction", "FORWARD")),
+        evidence_namespace=str(scope_data.get("evidence_namespace", spec.get("evidence_namespace", "default"))),
+        max_depth=(None if scope_data.get("max_depth") is None else int(scope_data.get("max_depth"))),
+        stop_nodes=frozenset(str(item) for item in scope_data.get("stop_nodes", ())),
     )
     relations = spec.get("relations", ())
     return CodeGraphClaim(

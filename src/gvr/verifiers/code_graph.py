@@ -24,10 +24,27 @@ class CodeGraphClaimKind(str, Enum):
 class CodeGraphScope:
     snapshot: Mapping[str, Any] = field(default_factory=dict)
     relations: frozenset[str] = field(default_factory=frozenset)
+    direction: str = "FORWARD"
+    evidence_namespace: str = "default"
+    max_depth: int | None = None
+    stop_nodes: frozenset[str] = field(default_factory=frozenset)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "snapshot", _stable(self.snapshot))
         object.__setattr__(self, "relations", frozenset(str(r) for r in self.relations))
+        direction = str(self.direction or "FORWARD").upper()
+        if direction not in {"FORWARD", "BACKWARD"}:
+            raise ValueError(f"invalid code-graph scope direction: {direction!r}")
+        object.__setattr__(self, "direction", direction)
+        if not self.evidence_namespace:
+            raise ValueError("code-graph scope requires a non-empty evidence namespace")
+        object.__setattr__(self, "evidence_namespace", str(self.evidence_namespace))
+        if self.max_depth is not None:
+            max_depth = int(self.max_depth)
+            if max_depth < 0:
+                raise ValueError("code-graph scope max_depth must be non-negative")
+            object.__setattr__(self, "max_depth", max_depth)
+        object.__setattr__(self, "stop_nodes", frozenset(str(node) for node in self.stop_nodes))
 
 
 @dataclass(frozen=True)
@@ -49,20 +66,40 @@ class CodeGraphClaim:
             if not isinstance(self.scope, Mapping):
                 raise ValueError("code-graph claim scope must be a CodeGraphScope")
             object.__setattr__(self, "scope", CodeGraphScope(**dict(self.scope)))
-        object.__setattr__(self, "relations", frozenset(str(r) for r in self.relations))
-        if not self.evidence_namespace:
+        claim_relations = frozenset(str(r) for r in self.relations)
+        if claim_relations and self.scope.relations and claim_relations != self.scope.relations:
+            raise ValueError("code-graph claim relations conflict with scope relations")
+        object.__setattr__(self, "relations", claim_relations or self.scope.relations)
+        if self.evidence_namespace and self.scope.evidence_namespace != "default" and self.evidence_namespace != "default" and self.evidence_namespace != self.scope.evidence_namespace:
+            raise ValueError("code-graph claim evidence_namespace conflicts with scope evidence_namespace")
+        evidence_namespace = self.scope.evidence_namespace if self.evidence_namespace == "default" else self.evidence_namespace
+        if not evidence_namespace:
             raise ValueError("code-graph claim requires a non-empty evidence namespace")
+        object.__setattr__(self, "evidence_namespace", evidence_namespace)
+        if self.max_depth is not None:
+            max_depth = int(self.max_depth)
+            if max_depth < 0:
+                raise ValueError("code-graph claim max_depth must be non-negative")
+            if self.scope.max_depth is not None and max_depth != self.scope.max_depth:
+                raise ValueError("code-graph claim max_depth conflicts with scope max_depth")
+            object.__setattr__(self, "max_depth", max_depth)
+        elif self.scope.max_depth is not None:
+            object.__setattr__(self, "max_depth", self.scope.max_depth)
 
 
 _MESSAGES = {
     "PROVEN_NODE": "An exact canonical node proves the node-existence claim.",
     "PROVEN_EDGE": "An exact canonical edge proves the edge-existence claim.",
+    "PROVEN_GRAPH_EDGE": "An exact canonical graph edge proves the edge-existence claim.",
     "PROVEN_PATH": "An exact canonical BFS path proves the path-existence claim.",
+    "PROVEN_GRAPH_PATH": "An exact canonical graph path proves the path-existence claim.",
     "PROVEN_ABSENCE": "The canonical graph contains a scoped complete absence observation.",
+    "COMPLETE_GRAPH_ABSENCE": "The canonical graph contains a scoped complete absence observation.",
     "NODE_ABSENT": "The requested node is absent from the canonical graph.",
     "EDGE_ABSENT": "No matching canonical edge is present.",
     "PATH_ABSENT": "No matching canonical path is present.",
     "ABSENCE_NOT_PROVEN": "The canonical observations do not prove path absence.",
+    "INCOMPLETE_GRAPH_SEARCH": "The canonical graph search is incomplete for this scoped claim.",
     "BYPASS_ABSENCE_NOT_PROVEN": "The canonical observations do not prove complete absence of paths bypassing the required node.",
     "COUNTEREXAMPLE_PATH": "A canonical path counterexample disproves the claim.",
     "NONVACUOUS_PATH_REQUIRED": "All-paths claims require at least one path to quantify over.",
@@ -71,8 +108,22 @@ _MESSAGES = {
     "TARGET_OUTSIDE_BLAST_RADIUS": "The target is not reachable within the requested blast depth.",
     "NODE_NOT_EXACT": "The matching node is heuristic, inferred, or otherwise non-exact.",
     "EDGE_NOT_EXACT": "The matching edge or path contains heuristic, inferred, or otherwise non-exact evidence.",
+    "HEURISTIC_ONLY_SUPPORT": "The matching graph support is heuristic, inferred, or otherwise non-exact.",
     "GRAPH_BLOCKED": "Graph blockers make this canonical observation set incomplete for the claim.",
     "SNAPSHOT_MISMATCH": "The claim scope snapshot does not match the graph evidence snapshot.",
+    "SOURCE_SNAPSHOT_MISMATCH": "The claim scope snapshot does not match the graph evidence source snapshot.",
+    "UNSUPPORTED_RELATION": "The graph evidence records an unsupported relation for this claim.",
+    "CONFLICTING_GRAPH_EVIDENCE": "The graph evidence contains conflicting observations for this claim.",
+    "MALFORMED_GRAPH_EVIDENCE": "The graph evidence is malformed and was treated as fail-closed UNKNOWN.",
+}
+
+_LEGACY_ISSUE_ALIASES = {
+    "PROVEN_GRAPH_EDGE": ("PROVEN_EDGE",),
+    "PROVEN_GRAPH_PATH": ("PROVEN_PATH",),
+    "COMPLETE_GRAPH_ABSENCE": ("PROVEN_ABSENCE",),
+    "HEURISTIC_ONLY_SUPPORT": ("EDGE_NOT_EXACT",),
+    "INCOMPLETE_GRAPH_SEARCH": ("ABSENCE_NOT_PROVEN",),
+    "SOURCE_SNAPSHOT_MISMATCH": ("SNAPSHOT_MISMATCH",),
 }
 
 
@@ -81,13 +132,16 @@ def verify_code_graph_claim(claim: CodeGraphClaim, graph: GraphEvidenceModel) ->
         raise ValueError("claim must be a CodeGraphClaim")
     issues: list[VerificationIssue] = []
     if claim.scope.snapshot and _stable(graph.source_snapshot) != claim.scope.snapshot:
-        issues.append(_issue("SNAPSHOT_MISMATCH", VerificationVerdict.UNKNOWN))
+        issues.extend(_issues("SOURCE_SNAPSHOT_MISMATCH", VerificationVerdict.UNKNOWN))
         return _report(VerificationVerdict.UNKNOWN, issues)
 
-    blocker_issues = [_issue("GRAPH_BLOCKED", VerificationVerdict.UNKNOWN, tuple(b.id for b in graph.blockers))] if graph.blockers else []
+    blocker_issues = _blocker_issues(graph)
     nodes = _node_index(graph)
     edges = _dedupe_edges(graph.edges)
     relations = claim.relations or claim.scope.relations
+    direction = claim.scope.direction
+    max_depth = claim.max_depth
+    stop_nodes = claim.scope.stop_nodes
 
     if claim.kind is CodeGraphClaimKind.NODE_EXISTS:
         matches = nodes.get(str(claim.node), ())
@@ -104,66 +158,66 @@ def verify_code_graph_claim(claim: CodeGraphClaim, graph: GraphEvidenceModel) ->
         matches = [e for e in edges if e.source == claim.source and e.target == claim.target and _relation_ok(e, relations)]
         return _positive_item(
             matches,
-            "PROVEN_EDGE",
-            "EDGE_NOT_EXACT",
+            "PROVEN_GRAPH_EDGE",
+            "HEURISTIC_ONLY_SUPPORT",
             "EDGE_ABSENT",
             _complete_absence_for_pair(graph, claim.source, claim.target, blocker_issues),
             blocker_issues,
         )
 
     if claim.kind is CodeGraphClaimKind.PATH_EXISTS:
-        exact_path = _bfs_exact(edges, str(claim.source), str(claim.target), relations)
+        exact_path = _bfs_exact(edges, str(claim.source), str(claim.target), relations, direction=direction, max_depth=max_depth, stop_nodes=stop_nodes)
         if exact_path is not None:
-            return _report(VerificationVerdict.UNKNOWN if blocker_issues else VerificationVerdict.PASS, blocker_issues or [_issue("PROVEN_PATH", VerificationVerdict.PASS, tuple(e.id for e in exact_path))], exact_path)
-        path = _bfs(edges, str(claim.source), str(claim.target), relations)
+            return _report(VerificationVerdict.UNKNOWN if blocker_issues else VerificationVerdict.PASS, blocker_issues or _issues("PROVEN_GRAPH_PATH", VerificationVerdict.PASS, tuple(e.id for e in exact_path)), exact_path, direction=direction)
+        path = _bfs(edges, str(claim.source), str(claim.target), relations, direction=direction, max_depth=max_depth, stop_nodes=stop_nodes)
         if path is not None:
-            return _report(VerificationVerdict.UNKNOWN, [_issue("EDGE_NOT_EXACT", VerificationVerdict.UNKNOWN, tuple(e.id for e in path))] + blocker_issues, path)
+            return _report(VerificationVerdict.UNKNOWN, _issues("HEURISTIC_ONLY_SUPPORT", VerificationVerdict.UNKNOWN, tuple(e.id for e in path)) + blocker_issues, path, direction=direction)
         else:
             if _complete_absence_for_pair(graph, claim.source, claim.target, blocker_issues):
                 return _report(VerificationVerdict.FAIL, [_issue("PATH_ABSENT", VerificationVerdict.FAIL)])
-            return _report(VerificationVerdict.UNKNOWN, blocker_issues or [_issue("ABSENCE_NOT_PROVEN", VerificationVerdict.UNKNOWN)])
+            return _report(VerificationVerdict.UNKNOWN, blocker_issues or _incomplete_issues(claim))
 
     if claim.kind is CodeGraphClaimKind.NO_PATH:
-        exact_path = _bfs_exact(edges, str(claim.source), str(claim.target), relations)
+        exact_path = _bfs_exact(edges, str(claim.source), str(claim.target), relations, direction=direction, max_depth=max_depth, stop_nodes=stop_nodes)
         if exact_path is not None:
-            return _report(VerificationVerdict.FAIL, [_issue("COUNTEREXAMPLE_PATH", VerificationVerdict.FAIL, tuple(e.id for e in exact_path))], exact_path)
-        path = _bfs(edges, str(claim.source), str(claim.target), relations)
+            return _report(VerificationVerdict.FAIL, [_issue("COUNTEREXAMPLE_PATH", VerificationVerdict.FAIL, tuple(e.id for e in exact_path))], exact_path, direction=direction)
+        path = _bfs(edges, str(claim.source), str(claim.target), relations, direction=direction, max_depth=max_depth, stop_nodes=stop_nodes)
         if path is not None:
-            return _report(VerificationVerdict.UNKNOWN, [_issue("EDGE_NOT_EXACT", VerificationVerdict.UNKNOWN, tuple(e.id for e in path))] + blocker_issues, path)
+            return _report(VerificationVerdict.UNKNOWN, _issues("HEURISTIC_ONLY_SUPPORT", VerificationVerdict.UNKNOWN, tuple(e.id for e in path)) + blocker_issues, path, direction=direction)
         if _complete_absence_for_pair(graph, claim.source, claim.target, blocker_issues):
-            return _report(VerificationVerdict.PASS, [_issue("PROVEN_ABSENCE", VerificationVerdict.PASS)])
-        return _report(VerificationVerdict.UNKNOWN, blocker_issues or [_issue("ABSENCE_NOT_PROVEN", VerificationVerdict.UNKNOWN)])
+            return _report(VerificationVerdict.PASS, _issues("COMPLETE_GRAPH_ABSENCE", VerificationVerdict.PASS))
+        return _report(VerificationVerdict.UNKNOWN, blocker_issues or _incomplete_issues(claim))
 
     if claim.kind is CodeGraphClaimKind.ALL_PATHS_PASS_THROUGH:
-        paths = list(_all_simple_paths(edges, str(claim.source), str(claim.target), relations))
+        paths = list(_all_simple_paths(edges, str(claim.source), str(claim.target), relations, direction=direction, max_depth=max_depth, stop_nodes=stop_nodes))
         if not paths:
             if _complete_absence_for_pair(graph, claim.source, claim.target, blocker_issues):
                 return _report(VerificationVerdict.FAIL, [_issue("NONVACUOUS_PATH_REQUIRED", VerificationVerdict.FAIL)])
-            return _report(VerificationVerdict.UNKNOWN, blocker_issues or [_issue("ABSENCE_NOT_PROVEN", VerificationVerdict.UNKNOWN)])
+            return _report(VerificationVerdict.UNKNOWN, blocker_issues or _incomplete_issues(claim))
         non_exact_path: list[GraphEvidence] | None = None
         for path in paths:
-            route = _path_nodes(str(claim.source), path)
+            route = _path_nodes(str(claim.source), path, direction)
             if _path_exact(path) and claim.through not in route:
-                return _report(VerificationVerdict.FAIL, [_issue("COUNTEREXAMPLE_PATH", VerificationVerdict.FAIL, tuple(e.id for e in path))], path)
+                return _report(VerificationVerdict.FAIL, [_issue("COUNTEREXAMPLE_PATH", VerificationVerdict.FAIL, tuple(e.id for e in path))], path, direction=direction)
             if not _path_exact(path) and non_exact_path is None:
                 non_exact_path = path
         if non_exact_path is not None:
-            return _report(VerificationVerdict.UNKNOWN, [_issue("EDGE_NOT_EXACT", VerificationVerdict.UNKNOWN, tuple(e.id for e in non_exact_path))] + blocker_issues, non_exact_path)
+            return _report(VerificationVerdict.UNKNOWN, _issues("HEURISTIC_ONLY_SUPPORT", VerificationVerdict.UNKNOWN, tuple(e.id for e in non_exact_path)) + blocker_issues, non_exact_path, direction=direction)
         if not _complete_absence_for_bypass(graph, claim.source, claim.target, claim.through, blocker_issues):
             return _report(VerificationVerdict.UNKNOWN, blocker_issues or [_issue("BYPASS_ABSENCE_NOT_PROVEN", VerificationVerdict.UNKNOWN)])
         return _report(VerificationVerdict.UNKNOWN if blocker_issues else VerificationVerdict.PASS, blocker_issues or [_issue("ALL_PATHS_PASS_THROUGH", VerificationVerdict.PASS)])
 
     if claim.kind is CodeGraphClaimKind.BLAST_RADIUS_CONTAINS:
-        exact_path = _bfs_exact(edges, str(claim.source), str(claim.target), relations, max_depth=claim.max_depth)
+        exact_path = _bfs_exact(edges, str(claim.source), str(claim.target), relations, direction=direction, max_depth=max_depth, stop_nodes=stop_nodes)
         if exact_path is not None:
-            return _report(VerificationVerdict.UNKNOWN if blocker_issues else VerificationVerdict.PASS, blocker_issues or [_issue("BLAST_RADIUS_CONTAINS", VerificationVerdict.PASS, tuple(e.id for e in exact_path))], exact_path)
-        path = _bfs(edges, str(claim.source), str(claim.target), relations, max_depth=claim.max_depth)
+            return _report(VerificationVerdict.UNKNOWN if blocker_issues else VerificationVerdict.PASS, blocker_issues or [_issue("BLAST_RADIUS_CONTAINS", VerificationVerdict.PASS, tuple(e.id for e in exact_path))], exact_path, direction=direction)
+        path = _bfs(edges, str(claim.source), str(claim.target), relations, direction=direction, max_depth=max_depth, stop_nodes=stop_nodes)
         if path is not None:
-            return _report(VerificationVerdict.UNKNOWN, [_issue("EDGE_NOT_EXACT", VerificationVerdict.UNKNOWN, tuple(e.id for e in path))] + blocker_issues, path)
+            return _report(VerificationVerdict.UNKNOWN, _issues("HEURISTIC_ONLY_SUPPORT", VerificationVerdict.UNKNOWN, tuple(e.id for e in path)) + blocker_issues, path, direction=direction)
         else:
-            if _complete_absence_for_blast(graph, claim.source, claim.target, claim.max_depth, blocker_issues) or _complete_absence_for_pair(graph, claim.source, claim.target, blocker_issues):
+            if _complete_absence_for_blast(graph, claim.source, claim.target, max_depth, blocker_issues) or _complete_absence_for_pair(graph, claim.source, claim.target, blocker_issues):
                 return _report(VerificationVerdict.FAIL, [_issue("TARGET_OUTSIDE_BLAST_RADIUS", VerificationVerdict.FAIL)])
-            return _report(VerificationVerdict.UNKNOWN, blocker_issues or [_issue("ABSENCE_NOT_PROVEN", VerificationVerdict.UNKNOWN)])
+            return _report(VerificationVerdict.UNKNOWN, blocker_issues or _incomplete_issues(claim))
 
     raise ValueError(f"unsupported code graph claim kind: {claim.kind}")
 
@@ -179,21 +233,68 @@ def _positive_item(
     if not matches:
         if complete_absence:
             return _report(VerificationVerdict.FAIL, [_issue(fail_code, VerificationVerdict.FAIL)])
-        return _report(VerificationVerdict.UNKNOWN, blocker_issues or [_issue("ABSENCE_NOT_PROVEN", VerificationVerdict.UNKNOWN)])
+        return _report(VerificationVerdict.UNKNOWN, blocker_issues or _issues("INCOMPLETE_GRAPH_SEARCH", VerificationVerdict.UNKNOWN))
     exact = [m for m in matches if m.confidence is EvidenceConfidence.EXACT]
     if exact and not blocker_issues:
-        return _report(VerificationVerdict.PASS, [_issue(pass_code, VerificationVerdict.PASS, (exact[0].id,))], evidence_ids=(exact[0].id,))
-    return _report(VerificationVerdict.UNKNOWN, [_issue(unknown_code, VerificationVerdict.UNKNOWN, tuple(m.id for m in matches))] + blocker_issues, evidence_ids=tuple(m.id for m in matches))
+        return _report(VerificationVerdict.PASS, _issues(pass_code, VerificationVerdict.PASS, (exact[0].id,)), evidence_ids=(exact[0].id,))
+    return _report(VerificationVerdict.UNKNOWN, _issues(unknown_code, VerificationVerdict.UNKNOWN, tuple(m.id for m in matches)) + blocker_issues, evidence_ids=tuple(m.id for m in matches))
 
 
-def _report(verdict: VerificationVerdict, issues: list[VerificationIssue], path: list[GraphEvidence] | None = None, evidence_ids: tuple[str, ...] | None = None) -> VerificationReport:
+def _report(
+    verdict: VerificationVerdict,
+    issues: list[VerificationIssue],
+    path: list[GraphEvidence] | None = None,
+    evidence_ids: tuple[str, ...] | None = None,
+    *,
+    direction: str = "FORWARD",
+) -> VerificationReport:
     ids = evidence_ids if evidence_ids is not None else tuple(e.id for e in (path or ()))
-    metadata = {"canonical_path": _path_nodes(path[0].source, path)} if path else {}
+    metadata = {"canonical_path": _path_nodes(_path_start(path, direction), path, direction)} if path else {}
     return VerificationReport(verdict=verdict, verifier=CODE_GRAPH_VERIFIER, issues=tuple(issues), evidence_ids=ids, metadata=metadata)
 
 
 def _issue(code: str, verdict: VerificationVerdict, evidence_ids: tuple[str, ...] = ()) -> VerificationIssue:
     return VerificationIssue(code=code, message=_MESSAGES[code], verdict=verdict, evidence_ids=evidence_ids)
+
+
+def _issues(code: str, verdict: VerificationVerdict, evidence_ids: tuple[str, ...] = ()) -> list[VerificationIssue]:
+    return [_issue(code, verdict, evidence_ids)] + [
+        _issue(alias, verdict, evidence_ids) for alias in _LEGACY_ISSUE_ALIASES.get(code, ())
+    ]
+
+
+def _incomplete_issues(claim: CodeGraphClaim) -> list[VerificationIssue]:
+    return _issues(
+        "INCOMPLETE_GRAPH_SEARCH",
+        VerificationVerdict.UNKNOWN,
+        tuple(sorted(_scope_evidence_ids(claim))),
+    )
+
+
+def _scope_evidence_ids(claim: CodeGraphClaim) -> tuple[str, ...]:
+    ids: list[str] = []
+    if claim.scope.max_depth is not None:
+        ids.append(f"scope:max_depth:{claim.scope.max_depth}")
+    if claim.scope.stop_nodes:
+        ids.extend(f"scope:stop_node:{node}" for node in sorted(claim.scope.stop_nodes))
+    if claim.scope.direction != "FORWARD":
+        ids.append(f"scope:direction:{claim.scope.direction}")
+    return tuple(ids)
+
+
+def _blocker_issues(graph: GraphEvidenceModel) -> list[VerificationIssue]:
+    if not graph.blockers:
+        return []
+    ids = tuple(b.id for b in graph.blockers)
+    issues = [_issue("GRAPH_BLOCKED", VerificationVerdict.UNKNOWN, ids)]
+    reasons = {str(b.reason).upper() for b in graph.blockers}
+    if any("UNSUPPORTED_RELATION" in reason or "UNSUPPORTED" in reason for reason in reasons):
+        issues.append(_issue("UNSUPPORTED_RELATION", VerificationVerdict.UNKNOWN, ids))
+    if any("CONFLICT" in reason for reason in reasons):
+        issues.append(_issue("CONFLICTING_GRAPH_EVIDENCE", VerificationVerdict.UNKNOWN, ids))
+    if any("MALFORMED" in reason for reason in reasons):
+        issues.append(_issue("MALFORMED_GRAPH_EVIDENCE", VerificationVerdict.UNKNOWN, ids))
+    return issues
 
 
 def _node_index(graph: GraphEvidenceModel) -> dict[str, tuple[GraphEvidence, ...]]:
@@ -216,53 +317,96 @@ def _relation_ok(edge: GraphEvidence, relations: frozenset[str]) -> bool:
     return relation in relations or edge.kind.value in relations
 
 
-def _adjacency(edges: tuple[GraphEvidence, ...], relations: frozenset[str]) -> dict[str, tuple[GraphEvidence, ...]]:
+def _adjacency(edges: tuple[GraphEvidence, ...], relations: frozenset[str], direction: str = "FORWARD") -> dict[str, tuple[GraphEvidence, ...]]:
     out: dict[str, list[GraphEvidence]] = defaultdict(list)
     for edge in edges:
         if edge.source and edge.target and _relation_ok(edge, relations):
-            out[edge.source].append(edge)
-    return {node: tuple(sorted(items, key=lambda e: (e.target, e.id))) for node, items in out.items()}
+            out[_edge_from(edge, direction)].append(edge)
+    return {node: tuple(sorted(items, key=lambda e: (_edge_to(e, direction), e.id))) for node, items in out.items()}
 
 
-def _bfs(edges: tuple[GraphEvidence, ...], source: str, target: str, relations: frozenset[str], max_depth: int | None = None) -> list[GraphEvidence] | None:
+def _bfs(
+    edges: tuple[GraphEvidence, ...],
+    source: str,
+    target: str,
+    relations: frozenset[str],
+    *,
+    direction: str = "FORWARD",
+    max_depth: int | None = None,
+    stop_nodes: frozenset[str] = frozenset(),
+) -> list[GraphEvidence] | None:
     if source == target:
         return []
-    adj = _adjacency(edges, relations)
+    adj = _adjacency(edges, relations, direction)
     queue = deque([(source, [])])
     visited = {source}
     while queue:
         node, path = queue.popleft()
         if max_depth is not None and len(path) >= max_depth:
             continue
+        if node in stop_nodes:
+            continue
         for edge in adj.get(node, ()):
-            if edge.target in visited:
+            next_node = _edge_to(edge, direction)
+            if next_node in visited:
                 continue
             next_path = path + [edge]
-            if edge.target == target:
+            if next_node == target:
                 return next_path
-            visited.add(edge.target)
-            queue.append((edge.target, next_path))
+            visited.add(next_node)
+            queue.append((next_node, next_path))
     return None
 
 
-def _bfs_exact(edges: tuple[GraphEvidence, ...], source: str, target: str, relations: frozenset[str], max_depth: int | None = None) -> list[GraphEvidence] | None:
-    return _bfs(tuple(edge for edge in edges if edge.confidence is EvidenceConfidence.EXACT), source, target, relations, max_depth=max_depth)
+def _bfs_exact(
+    edges: tuple[GraphEvidence, ...],
+    source: str,
+    target: str,
+    relations: frozenset[str],
+    *,
+    direction: str = "FORWARD",
+    max_depth: int | None = None,
+    stop_nodes: frozenset[str] = frozenset(),
+) -> list[GraphEvidence] | None:
+    return _bfs(
+        tuple(edge for edge in edges if edge.confidence is EvidenceConfidence.EXACT),
+        source,
+        target,
+        relations,
+        direction=direction,
+        max_depth=max_depth,
+        stop_nodes=stop_nodes,
+    )
 
 
-def _all_simple_paths(edges: tuple[GraphEvidence, ...], source: str, target: str, relations: frozenset[str]) -> tuple[list[GraphEvidence], ...]:
-    adj = _adjacency(edges, relations)
+def _all_simple_paths(
+    edges: tuple[GraphEvidence, ...],
+    source: str,
+    target: str,
+    relations: frozenset[str],
+    *,
+    direction: str = "FORWARD",
+    max_depth: int | None = None,
+    stop_nodes: frozenset[str] = frozenset(),
+) -> tuple[list[GraphEvidence], ...]:
+    adj = _adjacency(edges, relations, direction)
     found: list[list[GraphEvidence]] = []
     stack: list[tuple[str, list[GraphEvidence], frozenset[str]]] = [(source, [], frozenset({source}))]
     while stack:
         node, path, seen = stack.pop()
+        if max_depth is not None and len(path) >= max_depth:
+            continue
+        if node in stop_nodes:
+            continue
         for edge in reversed(adj.get(node, ())) :
-            if edge.target in seen:
+            next_node = _edge_to(edge, direction)
+            if next_node in seen:
                 continue
             next_path = path + [edge]
-            if edge.target == target:
+            if next_node == target:
                 found.append(next_path)
             else:
-                stack.append((edge.target, next_path, seen | {edge.target}))
+                stack.append((next_node, next_path, seen | {next_node}))
     return tuple(sorted(found, key=lambda p: tuple(e.id for e in p)))
 
 
@@ -270,8 +414,22 @@ def _path_exact(path: list[GraphEvidence]) -> bool:
     return all(edge.confidence is EvidenceConfidence.EXACT for edge in path)
 
 
-def _path_nodes(source: str, path: list[GraphEvidence]) -> tuple[str, ...]:
-    return tuple([source] + [edge.target for edge in path])
+def _path_nodes(source: str, path: list[GraphEvidence], direction: str = "FORWARD") -> tuple[str, ...]:
+    return tuple([source] + [_edge_to(edge, direction) for edge in path])
+
+
+def _path_start(path: list[GraphEvidence], direction: str) -> str:
+    if not path:
+        return ""
+    return _edge_from(path[0], direction)
+
+
+def _edge_from(edge: GraphEvidence, direction: str) -> str:
+    return edge.target if direction == "BACKWARD" else edge.source
+
+
+def _edge_to(edge: GraphEvidence, direction: str) -> str:
+    return edge.source if direction == "BACKWARD" else edge.target
 
 
 def _absence_key(source: object, target: object) -> str:

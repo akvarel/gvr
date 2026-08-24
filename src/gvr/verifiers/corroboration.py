@@ -21,6 +21,17 @@ _MESSAGES = {
     "PROVIDER_CLAIM_MISMATCH": "Provider observations do not verify the same claim fingerprint.",
     "PROVIDER_MALFORMED_OBSERVATION": "A provider observation is malformed and was treated as fail-closed UNKNOWN.",
     "PROVIDER_NO_OBSERVATIONS": "No provider observations were supplied.",
+    "HEURISTIC_ONLY_SUPPORT": "Provider observations are heuristic or unknown only and are not upgraded by repetition.",
+    "SOURCE_SNAPSHOT_MISMATCH": "Provider observations do not share one source snapshot.",
+    "CONFLICTING_GRAPH_EVIDENCE": "Independent provider families produced decisive conflicting graph verdicts.",
+    "MALFORMED_GRAPH_EVIDENCE": "A provider observation is malformed and was treated as fail-closed UNKNOWN.",
+}
+
+_LEGACY_ISSUE_ALIASES = {
+    "HEURISTIC_ONLY_SUPPORT": ("PROVIDER_ONLY_HEURISTIC",),
+    "SOURCE_SNAPSHOT_MISMATCH": ("PROVIDER_SNAPSHOT_MISMATCH",),
+    "CONFLICTING_GRAPH_EVIDENCE": ("PROVIDER_CONFLICT",),
+    "MALFORMED_GRAPH_EVIDENCE": ("PROVIDER_MALFORMED_OBSERVATION",),
 }
 
 
@@ -68,7 +79,7 @@ def reconcile_provider_observations(observations: Iterable[ProviderVerificationO
         else:
             malformed += 1
     if malformed:
-        issues.append(_issue("PROVIDER_MALFORMED_OBSERVATION", VerificationVerdict.UNKNOWN))
+        issues.extend(_issues("MALFORMED_GRAPH_EVIDENCE", VerificationVerdict.UNKNOWN))
     deduped = tuple({obs.identity: obs for obs in sorted(valid, key=lambda o: o.identity)}.values())
     if not deduped:
         return _final(VerificationVerdict.UNKNOWN, issues + [_issue("PROVIDER_NO_OBSERVATIONS", VerificationVerdict.UNKNOWN)], (), (), malformed)
@@ -78,7 +89,7 @@ def reconcile_provider_observations(observations: Iterable[ProviderVerificationO
     if len(claim_ids) != 1:
         issues.append(_issue("PROVIDER_CLAIM_MISMATCH", VerificationVerdict.UNKNOWN))
     if len(snapshot_groups) != 1:
-        issues.append(_issue("PROVIDER_SNAPSHOT_MISMATCH", VerificationVerdict.UNKNOWN))
+        issues.extend(_issues("SOURCE_SNAPSHOT_MISMATCH", VerificationVerdict.UNKNOWN))
 
     evidence_ids = _evidence_ids(deduped)
     provider_issues = _provider_issues(deduped)
@@ -90,7 +101,7 @@ def reconcile_provider_observations(observations: Iterable[ProviderVerificationO
     unknown_only = not pass_families and not fail_families
 
     if pass_families and fail_families:
-        issues.append(_issue("PROVIDER_CONFLICT", VerificationVerdict.UNKNOWN, evidence_ids))
+        issues.extend(_issues("CONFLICTING_GRAPH_EVIDENCE", VerificationVerdict.UNKNOWN, evidence_ids))
         verdict = VerificationVerdict.UNKNOWN
     elif hard_mismatch:
         verdict = VerificationVerdict.UNKNOWN
@@ -108,7 +119,7 @@ def reconcile_provider_observations(observations: Iterable[ProviderVerificationO
         verdict = VerificationVerdict.FAIL
     else:
         if unknown_only:
-            issues.append(_issue("PROVIDER_ONLY_HEURISTIC", VerificationVerdict.UNKNOWN, evidence_ids))
+            issues.extend(_issues("HEURISTIC_ONLY_SUPPORT", VerificationVerdict.UNKNOWN, evidence_ids))
         verdict = VerificationVerdict.UNKNOWN
 
     return _final(verdict, issues, evidence_ids, deduped, malformed, claim_ids=claim_ids, snapshot_groups=snapshot_groups)
@@ -126,7 +137,7 @@ def _is_hint_or_heuristic(report: VerificationReport) -> bool:
     codes = {issue.code for issue in report.issues}
     if report.verdict is VerificationVerdict.UNKNOWN:
         return True
-    return bool(codes & {"EDGE_NOT_EXACT", "NODE_NOT_EXACT", "INFERRED_HINT", "PROVIDER_ONLY_HEURISTIC"})
+    return bool(codes & {"EDGE_NOT_EXACT", "NODE_NOT_EXACT", "INFERRED_HINT", "PROVIDER_ONLY_HEURISTIC", "HEURISTIC_ONLY_SUPPORT"})
 
 
 def _provider_issues(observations: tuple[ProviderVerificationObservation, ...]) -> list[VerificationIssue]:
@@ -180,6 +191,12 @@ def _final(
 
 def _issue(code: str, verdict: VerificationVerdict, evidence_ids: tuple[str, ...] = ()) -> VerificationIssue:
     return VerificationIssue(code=code, message=_MESSAGES[code], verdict=verdict, evidence_ids=tuple(evidence_ids))
+
+
+def _issues(code: str, verdict: VerificationVerdict, evidence_ids: tuple[str, ...] = ()) -> list[VerificationIssue]:
+    return [_issue(code, verdict, evidence_ids)] + [
+        _issue(alias, verdict, evidence_ids) for alias in _LEGACY_ISSUE_ALIASES.get(code, ())
+    ]
 
 
 def _report_fingerprint(report: VerificationReport) -> str:

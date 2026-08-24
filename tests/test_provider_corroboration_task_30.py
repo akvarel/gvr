@@ -56,7 +56,7 @@ def test_proven_graphify_pass_plus_codeflow_heuristic_support_is_pass():
     ])
     assert result.verdict is VerificationVerdict.PASS
     assert result.evidence_ids == ("codeflow:e", "graphify:e")
-    assert {i.code for i in result.issues} >= {"PROVEN_PATH", "EDGE_NOT_EXACT", "PROVIDER_SINGLE_FAMILY_DECISIVE_PASS"}
+    assert {i.code for i in result.issues} >= {"PROVEN_GRAPH_PATH", "HEURISTIC_ONLY_SUPPORT", "PROVIDER_SINGLE_FAMILY_DECISIVE_PASS"}
     assert not any(i.code == "PROVIDER_CORROBORATED_PASS" for i in result.issues)
 
 
@@ -66,6 +66,7 @@ def test_heuristic_only_unknown_not_upgraded_by_repetition():
     result = reconcile_provider_observations([first, repeat])
     assert result.verdict is VerificationVerdict.UNKNOWN
     assert result.evidence_ids == ("h1",)
+    assert any(i.code == "HEURISTIC_ONLY_SUPPORT" for i in result.issues)
     assert any(i.code == "PROVIDER_ONLY_HEURISTIC" for i in result.issues)
 
 
@@ -86,7 +87,7 @@ def test_complete_no_path_plus_silence_is_pass():
         ProviderVerificationObservation("graphify", "graphify", "graphify", {"rev": "1"}, "claim:no-path", complete_absence),
     ])
     assert result.verdict is VerificationVerdict.PASS
-    assert [i.code for i in result.issues] == ["PROVEN_ABSENCE", "PROVIDER_SINGLE_FAMILY_DECISIVE_PASS"]
+    assert [i.code for i in result.issues] == ["COMPLETE_GRAPH_ABSENCE", "PROVEN_ABSENCE", "PROVIDER_SINGLE_FAMILY_DECISIVE_PASS"]
 
 
 def test_independent_decisive_pass_fail_conflict_unknown_preserves_evidence():
@@ -96,7 +97,7 @@ def test_independent_decisive_pass_fail_conflict_unknown_preserves_evidence():
     ])
     assert result.verdict is VerificationVerdict.UNKNOWN
     assert result.evidence_ids == ("f", "p")
-    assert [i.code for i in result.issues][-1] == "PROVIDER_CONFLICT"
+    assert [i.code for i in result.issues][-2:] == ["CONFLICTING_GRAPH_EVIDENCE", "PROVIDER_CONFLICT"]
 
 
 def test_two_independent_passes_are_corroborated():
@@ -127,6 +128,7 @@ def test_snapshot_mismatch_fails_closed_unknown():
         obs("ast", "ast", "ast", VerificationVerdict.PASS, "PROVEN_PATH", snapshot={"rev": "2"}, evidence_ids=("a",)),
     ])
     assert result.verdict is VerificationVerdict.UNKNOWN
+    assert any(i.code == "SOURCE_SNAPSHOT_MISMATCH" for i in result.issues)
     assert any(i.code == "PROVIDER_SNAPSHOT_MISMATCH" for i in result.issues)
     assert result.metadata["snapshot_groups"] == (("sha256:", ()),) or "snapshot_groups" in result.metadata
 
@@ -152,4 +154,5 @@ def test_claim_mismatch_and_malformed_observation_fail_closed():
     ])
     assert result.verdict is VerificationVerdict.UNKNOWN
     assert any(i.code == "PROVIDER_CLAIM_MISMATCH" for i in result.issues)
+    assert any(i.code == "MALFORMED_GRAPH_EVIDENCE" for i in result.issues)
     assert any(i.code == "PROVIDER_MALFORMED_OBSERVATION" for i in result.issues)
