@@ -24,6 +24,7 @@
 - **C. Query/path authority.** Data-flow reports and bundles now include the query-result evidence id alongside selected path or boundary evidence so ledger dependencies bind both the returned path and the exact query execution basis.
 - **D. Typed separation.** `SourceRevision`, `DataFlowQueryScope`, and `CompletenessCertificate` are separate authorities. Source revision is not folded into query semantic scope, and typed source revision mismatches fail closed.
 - **E. Provider independence.** CodeFlow and Graphify adapter family ids are sealed by the adapters. Reconciliation treats same-family decisive PASS/FAIL as `PROVIDER_FAMILY_CONTRADICTION`, not an independent provider conflict.
+- **Core anti-forgery follow-through.** The canonical observation encoder and decoder also bind `family_id` to `GraphEvidenceModel.provider`. Callers cannot bypass adapter sealing by constructing a low-level observation with an invented independent family.
 
 ## Final validation
 
@@ -38,7 +39,7 @@ python -m pytest tests/test_graphify_task28_adapter.py tests/test_data_flow_veri
 115 passed
 
 python -m pytest -q
-648 collected, passed (dots-only quiet output)
+648 passed in 32.09s
 
 python -m compileall -q src tests
 PASS
@@ -46,8 +47,11 @@ PASS
 git diff --check
 PASS
 
-python -m pip wheel . --no-deps -w "$JCODE_SCRATCH_DIR/gvr-task31-wheel"
-PASS, gvr-0.2.0-py3-none-any.whl sha256 fb575a5c4243533293b52c0cdbaf086d9b702fdd65aa818f4559e3b7c822a646
+python -m pip wheel . --no-deps -w "$JCODE_SCRATCH_DIR/gvr-task31-final-wheel.*"
+PASS, gvr-0.2.0-py3-none-any.whl sha256 74e0314966bfd716002b8c8c8c1183c01cfd1b39ac7feb66ae3d14876213b84e
+
+Installed-wheel smoke outside the source tree
+PASS: real CodeFlow fixture ingestion and strict Graphify content-addressed key validation
 
 python -m build --sdist --wheel --outdir "$JCODE_SCRATCH_DIR/gvr-task31-build"
 System package was not executable: /usr/bin/python: No module named build.__main__
