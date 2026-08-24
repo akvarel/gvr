@@ -15,11 +15,12 @@ You do not need to know AI research terms to read it. You do not need to know gr
 7. [Verification planning](VERIFICATION_PLANNING.md) — how exact contracts become bounded acquisition, atomic-check, and composition steps without execution.
 8. [Falsification](FALSIFICATION.md) — how explicit finite witness, counterexample, invariant, metamorphic, recomputation, and representation strategies challenge atomic claims without deciding truth.
 9. [Verification execution](VERIFICATION_EXECUTION.md) — how one exact complete plan runs against exact provider, falsification, and verifier runtime registries.
-10. [Durable storage](DURABLE_STORAGE.md) — how immutable evidence, explicit semantic slots, versioned dependency records, invalidation, audit observations, and safe schema migration survive restarts with the SQLite reference adapter.
-11. [Architecture](ARCHITECTURE.md) — how the current GVR pieces fit together.
-12. [CLI and JSON protocol](CLI_AND_PROTOCOL.md) — how another program can call GVR.
-13. [Code map](CODE_MAP.md) — where the main pieces live in the repository.
-14. [Design rules](DESIGN_RULES.md) — the safety rules GVR follows and why they exist.
+10. [Canonical code graph execution](CODE_GRAPH_EXECUTION.md) — how precomputed Graphify/CodeFlow snapshots become canonical observation evidence for code graph claims.
+11. [Durable storage](DURABLE_STORAGE.md) — how immutable evidence, explicit semantic slots, versioned dependency records, invalidation, audit observations, and safe schema migration survive restarts with the SQLite reference adapter.
+12. [Architecture](ARCHITECTURE.md) — how the current GVR pieces fit together.
+13. [CLI and JSON protocol](CLI_AND_PROTOCOL.md) — how another program can call GVR.
+14. [Code map](CODE_MAP.md) — where the main pieces live in the repository.
+15. [Design rules](DESIGN_RULES.md) — the safety rules GVR follows and why they exist.
 
 ## The shortest explanation
 

@@ -471,15 +471,14 @@ def test_v_close_reopen_replay_idempotency_then_one_provider_snapshot_advance_is
     assert replay.fingerprint == first.fingerprint
     assert replay.session.fingerprint == first.session.fingerprint
 
-    advanced_claim = path_claim(snapshot=SNAPSHOT_ADVANCED)
     codeflow_v2 = encode_codeflow_code_graph_observation_evidence(
         codeflow_path_snapshot(SNAPSHOT_ADVANCED),
         evidence_id="obs.codeflow.replay",
-        claim=advanced_claim,
+        claim=claim,
     )
     advanced = execute_verification_plan(
         execution_request(
-            advanced_claim,
+            claim,
             {"graphify.snapshot": (graphify, SNAPSHOT_PATH), "codeflow.snapshot": (codeflow_v2, SNAPSHOT_ADVANCED)},
         ),
         storage=reopened,

@@ -9,7 +9,9 @@ from ..code_graph import (
     GraphEvidenceKind,
     GraphEvidenceModel,
     GraphEvidenceModelError,
+    encode_code_graph_observation_evidence,
 )
+from ..model import Evidence
 
 
 def _items(value: Any) -> tuple[Mapping[str, Any], ...]:
@@ -110,4 +112,31 @@ def ingest_codeflow_graph(result: Mapping[str, Any]) -> GraphEvidenceModel:
         blockers=blockers,
         absence_subjects=absence_subjects,
         source_snapshot=dict(snapshot) if isinstance(snapshot, Mapping) else {},
+    )
+
+
+def encode_codeflow_code_graph_observation_evidence(
+    result: Mapping[str, Any],
+    *,
+    evidence_id: str,
+    claim: Any | None = None,
+    claim_fingerprint: str | None = None,
+    implementation_id: str = "codeflow",
+    family_id: str = "codeflow",
+    source_snapshot: Mapping[str, Any] | None = None,
+) -> Evidence:
+    """Encode a precomputed CodeFlow canonical graph snapshot for execution.
+
+    This adapter is the only place that understands CodeFlow's public snapshot
+    shape. The verifier runtime receives only canonical observation evidence.
+    """
+
+    return encode_code_graph_observation_evidence(
+        ingest_codeflow_graph(result),
+        evidence_id=evidence_id,
+        claim=claim,
+        claim_fingerprint=claim_fingerprint,
+        implementation_id=implementation_id,
+        family_id=family_id,
+        source_snapshot=source_snapshot,
     )

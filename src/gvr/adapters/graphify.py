@@ -10,6 +10,7 @@ from ..code_graph import (
     GraphEvidenceKind,
     GraphEvidenceModel,
     GraphEvidenceModelError,
+    encode_code_graph_observation_evidence,
 )
 from ..model import Evidence, VerificationVerdict
 
@@ -326,4 +327,31 @@ def ingest_traversal_graph(result: Mapping[str, Any]) -> GraphEvidenceModel:
             "complete_supported_search": result.get("complete_supported_search") is True,
             "query_bounds": dict(result.get("query_bounds") or {}) if isinstance(result.get("query_bounds"), Mapping) else {},
         },
+    )
+
+
+def encode_graphify_code_graph_observation_evidence(
+    result: Mapping[str, Any],
+    *,
+    evidence_id: str,
+    claim: Any | None = None,
+    claim_fingerprint: str | None = None,
+    implementation_id: str = "graphify",
+    family_id: str = "graphify",
+    source_snapshot: Mapping[str, Any] | None = None,
+) -> Evidence:
+    """Encode a precomputed Graphify traversal snapshot for execution.
+
+    Graphify-specific parsing and exactness classification stays in this adapter.
+    The execution runtime only decodes canonical provider observation evidence.
+    """
+
+    return encode_code_graph_observation_evidence(
+        ingest_traversal_graph(result),
+        evidence_id=evidence_id,
+        claim=claim,
+        claim_fingerprint=claim_fingerprint,
+        implementation_id=implementation_id,
+        family_id=family_id,
+        source_snapshot=source_snapshot,
     )

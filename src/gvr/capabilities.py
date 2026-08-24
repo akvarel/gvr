@@ -16,9 +16,11 @@ from .core import (
     GoalSatisfactionVerifier,
     PreconditionsVerifier,
 )
+from .code_graph import CODE_GRAPH_OBSERVATION_EVIDENCE_KIND
 from .session import COMPOSITE_CLAIM_VERIFIER
 from .software import FUNCTIONAL_REGRESSION_VERIFIER
 from .text_search import TEXT_SEARCH_VERIFIER
+from .verifiers.code_graph import CODE_GRAPH_VERIFIER, CodeGraphClaimKind
 from .verifiers.data_flow import DATA_FLOW_VERIFIER
 
 if TYPE_CHECKING:
@@ -662,6 +664,17 @@ BUILTIN_VERIFIER_CAPABILITY_REGISTRY = VerifierCapabilityRegistry((
         ),
         required_evidence_kinds=(),
         description="Checks captured Graphify traversal observations without reparsing source.",
+    ),
+    _builtin(
+        CODE_GRAPH_VERIFIER,
+        determinism=VerifierDeterminism.O1,
+        cost=VerifierCost.EXTERNAL,
+        bounds={"domain": "CANONICAL_PROVIDER_CODE_GRAPH_OBSERVATIONS", "scope": "DECLARED_CLAIM_AND_SNAPSHOT"},
+        coverage={"pass_requires": "DECISIVE_CANONICAL_OBSERVATION", "corroborated": "TWO_INDEPENDENT_PROVIDER_FAMILIES_WITHOUT_CONFLICT"},
+        claim_kinds=tuple(item.value for item in CodeGraphClaimKind),
+        accepted_evidence_kinds=(CODE_GRAPH_OBSERVATION_EVIDENCE_KIND,),
+        required_evidence_kinds=(CODE_GRAPH_OBSERVATION_EVIDENCE_KIND,),
+        description="Verifies canonical code graph claims from precomputed provider observations and reconciles independent provider families.",
     ),
     _builtin(
         COMPOSITE_CLAIM_VERIFIER,

@@ -907,6 +907,10 @@ def _evidence_from_document(document: Mapping[str, Any]) -> Evidence:
         raise StorageIntegrityError("stored evidence is missing required fields") from exc
 
 
+def _same_evidence_record(left: Evidence, right: Evidence) -> bool:
+    return _evidence_document(left) == _evidence_document(right)
+
+
 def _issue_document(issue: VerificationIssue) -> dict[str, Any]:
     return {
         "code": issue.code,
@@ -2381,7 +2385,10 @@ class SQLiteUnitOfWork:
                     artifact = self.get_evidence(
                         dependency.evidence_fingerprint
                     )
-                    if artifact.evidence != bundle_evidence[dependency.evidence_id]:
+                    if not _same_evidence_record(
+                        artifact.evidence,
+                        bundle_evidence[dependency.evidence_id],
+                    ):
                         raise StorageIntegrityError(
                             f"bundle evidence {dependency.evidence_id} does not "
                             "match an exact dependency artifact"
@@ -2402,7 +2409,7 @@ class SQLiteUnitOfWork:
                             )
                         slot = self._slot_version(slot.slot_id, slot.version)
                         artifact = self.get_evidence(slot.evidence_fingerprint)
-                        if artifact.evidence != evidence:
+                        if not _same_evidence_record(artifact.evidence, evidence):
                             raise StorageIntegrityError(
                                 f"bundle evidence {evidence.id} does not match exact slot artifact"
                             )
@@ -2417,7 +2424,7 @@ class SQLiteUnitOfWork:
                             name="bundle evidence artifact fingerprint",
                         )
                         artifact = self.get_evidence(fingerprint)
-                        if artifact.evidence != evidence:
+                        if not _same_evidence_record(artifact.evidence, evidence):
                             raise StorageIntegrityError(
                                 f"bundle evidence {evidence.id} does not match exact immutable artifact"
                             )
@@ -2590,9 +2597,9 @@ class SQLiteUnitOfWork:
                 "bundle record dependency document conflicts with exact links"
             )
         for dependency in dependencies:
-            if (
-                self.get_evidence(dependency.evidence_fingerprint).evidence
-                != bundle_evidence[dependency.evidence_id]
+            if not _same_evidence_record(
+                self.get_evidence(dependency.evidence_fingerprint).evidence,
+                bundle_evidence[dependency.evidence_id],
             ):
                 raise StorageIntegrityError(
                     "bundle record evidence artifact content is corrupt"
@@ -2640,7 +2647,7 @@ class SQLiteUnitOfWork:
                     "bundle evidence link fingerprint is corrupt"
                 )
             artifact = self.get_evidence(link["evidence_fingerprint"])
-            if artifact.evidence != evidence:
+            if not _same_evidence_record(artifact.evidence, evidence):
                 raise StorageIntegrityError(
                     "bundle evidence artifact content is corrupt"
                 )
@@ -3563,7 +3570,7 @@ class SQLiteUnitOfWork:
                 row["bundle_fingerprint"],
                 record_fingerprint=bundle_record_fingerprint,
             )
-            if stored_bundle.bundle.report != report:
+            if _report_document(stored_bundle.bundle.report) != _report_document(report):
                 raise StorageIntegrityError(
                     "claim report conflicts with exact stored bundle"
                 )
@@ -5680,10 +5687,12 @@ class SQLiteUnitOfWork:
                     matches = [
                         item
                         for item in candidates.get(evidence.id, ())
-                        if self.get_evidence(
-                            item.evidence_fingerprint
-                        ).evidence
-                        == evidence
+                        if _same_evidence_record(
+                            self.get_evidence(
+                                item.evidence_fingerprint
+                            ).evidence,
+                            evidence,
+                        )
                     ]
                     unique = {
                         _content_json(self._dependency_document(item)): item

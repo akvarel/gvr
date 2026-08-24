@@ -9,6 +9,8 @@ import pytest
 
 from gvr import (
     AtomicClaim,
+    CODE_GRAPH_OBSERVATION_EVIDENCE_KIND,
+    CODE_GRAPH_VERIFIER,
     COMPOSITE_CLAIM_VERIFIER,
     DATA_FLOW_VERIFIER,
     DataFlowClaim,
@@ -465,6 +467,7 @@ def test_builtin_snapshot_audits_all_runtime_verifier_contracts():
         "goal_satisfaction": (VerifierDeterminism.D0, VerifierCost.LOW),
         "text_search": (VerifierDeterminism.D0, VerifierCost.LOW),
         "functional_regression": (VerifierDeterminism.D1, VerifierCost.MEDIUM),
+        CODE_GRAPH_VERIFIER: (VerifierDeterminism.O1, VerifierCost.EXTERNAL),
         DATA_FLOW_VERIFIER: (VerifierDeterminism.O1, VerifierCost.EXTERNAL),
         COMPOSITE_CLAIM_VERIFIER: (
             VerifierDeterminism.D1,
@@ -472,7 +475,7 @@ def test_builtin_snapshot_audits_all_runtime_verifier_contracts():
         ),
     }
 
-    assert len(registry.list()) == 7
+    assert len(registry.list()) == 8
     with pytest.raises(UnknownVerifierCapabilityError, match="unknown verifier capability"):
         registry.lookup("registry", "1")
     assert {
@@ -482,14 +485,19 @@ def test_builtin_snapshot_audits_all_runtime_verifier_contracts():
     assert all(item.version == "1" for item in registry.list())
     assert all(item.side_effect_free for item in registry.list())
     assert all(item.authoritative for item in registry.list())
-    assert all(not item.required_evidence_kinds for item in registry.list())
+    assert all(
+        not item.required_evidence_kinds or item.verifier_id == CODE_GRAPH_VERIFIER
+        for item in registry.list()
+    )
 
     data_flow = registry.lookup(DATA_FLOW_VERIFIER, "1")
     assert data_flow.claim_kinds == ("CAN_FLOW_TO", "NO_SUPPORTED_PATH")
+    code_graph = registry.lookup(CODE_GRAPH_VERIFIER, "1")
+    assert code_graph.required_evidence_kinds == (CODE_GRAPH_OBSERVATION_EVIDENCE_KIND,)
     assert all(
         not item.claim_kinds and not item.accepted_evidence_kinds
         for item in registry.list()
-        if item.verifier_id != DATA_FLOW_VERIFIER
+        if item.verifier_id not in {CODE_GRAPH_VERIFIER, DATA_FLOW_VERIFIER}
     )
 
 

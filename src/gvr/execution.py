@@ -20,6 +20,11 @@ from .capabilities import (
     VerifierCapabilityRegistry,
     builtin_verifier_capability_registry,
 )
+from .code_graph import (
+    CODE_GRAPH_OBSERVATION_EVIDENCE_KIND,
+    CodeGraphObservationError,
+    decode_code_graph_observation_evidence,
+)
 from .falsification import (
     FalsificationDependency,
     FalsificationExecutionInput,
@@ -83,6 +88,17 @@ from .verifiers.data_flow import (
     DataFlowQueryScope,
     SUPPORTED_DATA_FLOW_RELATIONS,
     verify_data_flow_claim,
+)
+from .verifiers.code_graph import (
+    CODE_GRAPH_VERIFIER,
+    CodeGraphClaim,
+    CodeGraphClaimKind,
+    CodeGraphScope,
+    verify_code_graph_claim,
+)
+from .verifiers.corroboration import (
+    ProviderVerificationObservation,
+    reconcile_provider_observations,
 )
 
 
@@ -712,6 +728,151 @@ class _DataFlowVerifierRuntime:
         return verify_data_flow_claim(data_flow_claim, traversal)
 
 
+class _CodeGraphVerifierRuntime:
+    def __init__(self, capability: VerifierCapability) -> None:
+        self.verifier_id = capability.verifier_id
+        self.version = capability.version
+        self.capability = capability
+
+    def verify(self, verifier_input: VerifierExecutionInput) -> VerificationReport:
+        claim = verifier_input.claim
+        expected_claim_fingerprint = _claim_fingerprint(claim)
+        code_graph_claim = _code_graph_claim_from_atomic(claim)
+        observations: list[ProviderVerificationObservation | object] = []
+        for evidence in verifier_input.evidence:
+            if evidence.kind != CODE_GRAPH_OBSERVATION_EVIDENCE_KIND:
+                continue
+            try:
+                decoded = decode_code_graph_observation_evidence(evidence)
+                if decoded.claim_fingerprint != expected_claim_fingerprint:
+                    mismatch_report = VerificationReport(
+                        verdict=VerificationVerdict.UNKNOWN,
+                        verifier=CODE_GRAPH_VERIFIER,
+                        issues=(VerificationIssue(
+                            code="CLAIM_FINGERPRINT_MISMATCH",
+                            message="Provider observation claim identity does not match the atomic claim.",
+                            verdict=VerificationVerdict.UNKNOWN,
+                            evidence_ids=(evidence.id,),
+                        ),),
+                        evidence_ids=(evidence.id,),
+                    )
+                    observations.append(ProviderVerificationObservation(
+                        provider_id=decoded.provider_id,
+                        implementation_id=decoded.implementation_id,
+                        family_id=decoded.family_id,
+                        source_snapshot=decoded.graph_model.source_snapshot,
+                        claim_fingerprint=decoded.claim_fingerprint,
+                        report=mismatch_report,
+                    ))
+                    observations.append(ProviderVerificationObservation(
+                        provider_id="gvr.expected_claim",
+                        implementation_id="gvr.expected_claim",
+                        family_id="gvr.expected_claim",
+                        source_snapshot=decoded.graph_model.source_snapshot,
+                        claim_fingerprint=expected_claim_fingerprint,
+                        report=VerificationReport(
+                            verdict=VerificationVerdict.UNKNOWN,
+                            verifier=CODE_GRAPH_VERIFIER,
+                        ),
+                    ))
+                    continue
+                provider_report = verify_code_graph_claim(
+                    code_graph_claim,
+                    decoded.graph_model,
+                )
+                provider_report = _provider_report_with_outer_evidence(
+                    provider_report,
+                    evidence.id,
+                )
+                observations.append(ProviderVerificationObservation(
+                    provider_id=decoded.provider_id,
+                    implementation_id=decoded.implementation_id,
+                    family_id=decoded.family_id,
+                    source_snapshot=decoded.graph_model.source_snapshot,
+                    claim_fingerprint=decoded.claim_fingerprint,
+                    report=provider_report,
+                    metadata={
+                        "evidence_id": evidence.id,
+                        "graph_model_fingerprint": decoded.graph_model_fingerprint,
+                    },
+                ))
+            except (CodeGraphObservationError, ValueError):
+                observations.append(object())
+        reconciled = reconcile_provider_observations(observations)
+        metadata = dict(reconciled.metadata)
+        metadata["expected_claim_fingerprint"] = expected_claim_fingerprint
+        return VerificationReport(
+            verdict=reconciled.verdict,
+            verifier=CODE_GRAPH_VERIFIER,
+            issues=reconciled.issues,
+            evidence_ids=reconciled.evidence_ids,
+            metadata=metadata,
+        )
+
+
+def _code_graph_claim_from_atomic(claim: AtomicClaim) -> CodeGraphClaim:
+    spec = claim.spec
+    scope_data = spec.get("scope", claim.scope)
+    if not isinstance(scope_data, Mapping):
+        raise ValueError("code graph claim scope must be a mapping")
+    scope = CodeGraphScope(
+        snapshot=scope_data.get("snapshot", {}),
+        relations=frozenset(str(item) for item in scope_data.get("relations", ())),
+    )
+    relations = spec.get("relations", ())
+    return CodeGraphClaim(
+        kind=CodeGraphClaimKind(claim.claim_kind),
+        node=(None if spec.get("node") is None else str(spec.get("node"))),
+        source=(None if spec.get("source") is None else str(spec.get("source"))),
+        target=(None if spec.get("target") is None else str(spec.get("target"))),
+        through=(None if spec.get("through") is None else str(spec.get("through"))),
+        max_depth=(
+            None
+            if spec.get("max_depth") is None
+            else int(spec.get("max_depth"))
+        ),
+        relations=frozenset(str(item) for item in relations),
+        scope=scope,
+        evidence_namespace=str(spec.get("evidence_namespace", "default")),
+    )
+
+
+def _provider_report_with_outer_evidence(
+    report: VerificationReport,
+    evidence_id: str,
+) -> VerificationReport:
+    has_inner_evidence = bool(report.evidence_ids) or any(
+        issue.evidence_ids for issue in report.issues
+    )
+    use_outer_evidence = report.verdict in (
+        VerificationVerdict.PASS,
+        VerificationVerdict.FAIL,
+    ) or has_inner_evidence
+    mapped_ids = (evidence_id,) if use_outer_evidence else ()
+    mapped_issues = tuple(
+        VerificationIssue(
+            code=issue.code,
+            message=issue.message,
+            verdict=issue.verdict,
+            evidence_ids=(evidence_id,) if issue.evidence_ids or report.verdict in (
+                VerificationVerdict.PASS,
+                VerificationVerdict.FAIL,
+            ) else (),
+        )
+        for issue in report.issues
+    )
+    metadata = dict(report.metadata)
+    metadata["canonical_graph_evidence_ids"] = report.evidence_ids
+    metadata["provider_observation_evidence_id"] = evidence_id
+    return VerificationReport(
+        verdict=report.verdict,
+        verifier=report.verifier,
+        issues=mapped_issues,
+        evidence_ids=mapped_ids,
+        metadata=metadata,
+    )
+
+
 def builtin_verifier_runtime_registry(
     capability_registry: VerifierCapabilityRegistry | None = None,
 ) -> VerifierRuntimeRegistry:
@@ -736,6 +897,10 @@ def builtin_verifier_runtime_registry(
         if capability.verifier_id == DATA_FLOW_VERIFIER:
             runtimes[(capability.verifier_id, capability.version)] = (
                 _DataFlowVerifierRuntime(capability)
+            )
+        elif capability.verifier_id == CODE_GRAPH_VERIFIER:
+            runtimes[(capability.verifier_id, capability.version)] = (
+                _CodeGraphVerifierRuntime(capability)
             )
     return VerifierRuntimeRegistry(
         capability_registry=registry,

@@ -16,16 +16,26 @@ from .core import (
 )
 from .canonical import canonical_fingerprint, canonical_json
 from .code_graph import (
+    CODE_GRAPH_OBSERVATION_EVIDENCE_KIND,
+    CODE_GRAPH_OBSERVATION_FINGERPRINT_FORMAT,
+    CODE_GRAPH_OBSERVATION_KIND,
+    CODE_GRAPH_OBSERVATION_SCHEMA_VERSION,
     GRAPH_EVIDENCE_FINGERPRINT_FORMAT,
     GRAPH_MODEL_FINGERPRINT_FORMAT,
+    CodeGraphObservationError,
+    CodeGraphProviderObservation,
     EvidenceConfidence,
     GraphBlocker,
     GraphEvidence,
     GraphEvidenceKind,
     GraphEvidenceModel,
     GraphEvidenceModelError,
+    claim_fingerprint_for_observation,
+    decode_code_graph_observation_evidence,
+    encode_code_graph_observation_evidence,
+    graph_model_from_dict,
 )
-from .adapters.codeflow import ingest_codeflow_graph
+from .adapters.codeflow import ingest_codeflow_graph, encode_codeflow_code_graph_observation_evidence
 from .capabilities import (
     BUILTIN_VERIFIER_CAPABILITY_REGISTRY,
     VERIFIER_CAPABILITY_FINGERPRINT_FORMAT,
@@ -150,7 +160,7 @@ from .model import (
     VerificationVerdict,
     combine_verdicts,
 )
-from .adapters.graphify import GraphifyTraversalEvidence, ingest_traversal_graph, ingest_traversal_result
+from .adapters.graphify import GraphifyTraversalEvidence, encode_graphify_code_graph_observation_evidence, ingest_traversal_graph, ingest_traversal_result
 from .evidence_providers import (
     AUDIT_OBSERVATION_FINGERPRINT_FORMAT,
     AUDIT_OBSERVATION_KIND,
@@ -297,6 +307,13 @@ from .sqlite_storage import (
     SQLiteStorage,
     SQLiteUnitOfWork,
 )
+from .verifiers.code_graph import (
+    CODE_GRAPH_VERIFIER,
+    CodeGraphClaim,
+    CodeGraphClaimKind,
+    CodeGraphScope,
+    verify_code_graph_claim,
+)
 from .verifiers.data_flow import (
     BLOCKING_RESOLUTIONS,
     COMPLETE_COVERAGE,
@@ -322,6 +339,15 @@ __all__ = [
     "envelope", "evaluate_predicate", "evaluate_text_search", "simulate",
     "stable_fingerprint", "evidence_semantic_fingerprint",
     "GraphifyTraversalEvidence", "ingest_traversal_graph", "ingest_traversal_result",
+    "encode_graphify_code_graph_observation_evidence",
+    "encode_codeflow_code_graph_observation_evidence",
+    "CODE_GRAPH_OBSERVATION_EVIDENCE_KIND", "CODE_GRAPH_OBSERVATION_KIND",
+    "CODE_GRAPH_OBSERVATION_SCHEMA_VERSION", "CODE_GRAPH_OBSERVATION_FINGERPRINT_FORMAT",
+    "CodeGraphObservationError", "CodeGraphProviderObservation",
+    "claim_fingerprint_for_observation", "decode_code_graph_observation_evidence",
+    "encode_code_graph_observation_evidence", "graph_model_from_dict",
+    "CODE_GRAPH_VERIFIER", "CodeGraphClaim", "CodeGraphClaimKind",
+    "CodeGraphScope", "verify_code_graph_claim",
     "BLOCKING_RESOLUTIONS", "COMPLETE_COVERAGE", "DATA_FLOW_VERIFIER",
     "SUPPORTED_DATA_FLOW_RELATIONS", "DataFlowClaim", "DataFlowClaimKind",
     "DataFlowQueryScope", "build_query_result_evidence", "verify_data_flow_claim",
