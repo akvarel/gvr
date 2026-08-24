@@ -10,6 +10,11 @@ from .data_flow import (
     verify_data_flow_claim,
     verify_data_flow_claim_bundle,
 )
+from .corroboration import (
+    PROVIDER_CORROBORATION_VERIFIER,
+    ProviderVerificationObservation,
+    reconcile_provider_observations,
+)
 
 __all__ = [
     "BLOCKING_RESOLUTIONS",
@@ -22,4 +27,7 @@ __all__ = [
     "build_query_result_evidence",
     "verify_data_flow_claim",
     "verify_data_flow_claim_bundle",
+    "PROVIDER_CORROBORATION_VERIFIER",
+    "ProviderVerificationObservation",
+    "reconcile_provider_observations",
 ]

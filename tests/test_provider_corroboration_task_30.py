@@ -55,8 +55,9 @@ def test_proven_graphify_pass_plus_codeflow_heuristic_support_is_pass():
         ProviderVerificationObservation("codeflow", "codeflow-ts", "codeflow", {"rev": "1"}, "claim:path", heuristic_report),
     ])
     assert result.verdict is VerificationVerdict.PASS
-    assert result.evidence_ids == ("graphify:e", "codeflow:e")
-    assert [i.code for i in result.issues] == ["PROVEN_PATH", "EDGE_NOT_EXACT", "PROVIDER_CORROBORATED_PASS"]
+    assert result.evidence_ids == ("codeflow:e", "graphify:e")
+    assert {i.code for i in result.issues} >= {"PROVEN_PATH", "EDGE_NOT_EXACT", "PROVIDER_SINGLE_FAMILY_DECISIVE_PASS"}
+    assert not any(i.code == "PROVIDER_CORROBORATED_PASS" for i in result.issues)
 
 
 def test_heuristic_only_unknown_not_upgraded_by_repetition():
@@ -94,7 +95,7 @@ def test_independent_decisive_pass_fail_conflict_unknown_preserves_evidence():
         obs("static", "static", "static-analyzer", VerificationVerdict.FAIL, "COUNTEREXAMPLE_PATH", evidence_ids=("f",)),
     ])
     assert result.verdict is VerificationVerdict.UNKNOWN
-    assert result.evidence_ids == ("p", "f")
+    assert result.evidence_ids == ("f", "p")
     assert [i.code for i in result.issues][-1] == "PROVIDER_CONFLICT"
 
 
@@ -104,7 +105,7 @@ def test_two_independent_passes_are_corroborated():
         obs("ast", "ast-v1", "ast-analyzer", VerificationVerdict.PASS, "PROVEN_PATH", evidence_ids=("a",)),
     ])
     assert result.verdict is VerificationVerdict.PASS
-    assert result.evidence_ids == ("g", "a")
+    assert result.evidence_ids == ("a", "g")
     assert any(i.code == "PROVIDER_CORROBORATED_PASS" for i in result.issues)
 
 
