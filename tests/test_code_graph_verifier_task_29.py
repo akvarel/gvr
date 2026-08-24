@@ -1,3 +1,5 @@
+from dataclasses import FrozenInstanceError
+
 import pytest
 
 from gvr import VerificationVerdict
@@ -45,6 +47,156 @@ def _claim(kind, **kw):
 
 def _codes(report):
     return {issue.code for issue in report.issues}
+
+
+def test_task29_contract_scope_fields_are_immutable_and_canonicalized():
+    scope = CodeGraphScope(
+        snapshot={"id": "s1"},
+        relations={"REF", "CALL"},
+        direction="backward",
+        evidence_namespace="contract-ns",
+        max_depth=2,
+        stop_nodes={"Stop", "Boundary"},
+    )
+
+    assert scope.direction == "BACKWARD"
+    assert scope.relations == frozenset({"CALL", "REF"})
+    assert scope.evidence_namespace == "contract-ns"
+    assert scope.max_depth == 2
+    assert scope.stop_nodes == frozenset({"Boundary", "Stop"})
+    with pytest.raises(FrozenInstanceError):
+        scope.direction = "FORWARD"
+
+
+def test_task29_contract_claim_level_aliases_merge_only_when_not_conflicting_with_scope():
+    scope = CodeGraphScope(
+        snapshot={"id": "s1"},
+        relations={"CALL"},
+        evidence_namespace="scope-ns",
+        max_depth=3,
+    )
+    claim = CodeGraphClaim(
+        CodeGraphClaimKind.PATH_EXISTS,
+        source="A",
+        target="B",
+        scope=scope,
+        relations={"CALL"},
+        evidence_namespace="scope-ns",
+        max_depth=3,
+    )
+
+    assert claim.scope is scope
+    assert claim.relations == frozenset({"CALL"})
+    assert claim.evidence_namespace == "scope-ns"
+    assert claim.max_depth == 3
+
+    with pytest.raises(ValueError, match="relations.*conflict"):
+        CodeGraphClaim(
+            CodeGraphClaimKind.PATH_EXISTS,
+            source="A",
+            target="B",
+            scope=scope,
+            relations={"REF"},
+            evidence_namespace="scope-ns",
+            max_depth=3,
+        )
+    with pytest.raises(ValueError, match="evidence_namespace.*conflict"):
+        CodeGraphClaim(
+            CodeGraphClaimKind.PATH_EXISTS,
+            source="A",
+            target="B",
+            scope=scope,
+            relations={"CALL"},
+            evidence_namespace="alias-ns",
+            max_depth=3,
+        )
+    with pytest.raises(ValueError, match="max_depth.*conflict"):
+        CodeGraphClaim(
+            CodeGraphClaimKind.PATH_EXISTS,
+            source="A",
+            target="B",
+            scope=scope,
+            relations={"CALL"},
+            evidence_namespace="scope-ns",
+            max_depth=2,
+        )
+
+
+def test_task29_contract_traversal_honors_direction_relation_depth_and_stop_nodes():
+    model = _model(
+        [_node(x) for x in "ABCD"],
+        [_edge("A", "B"), _edge("B", "C"), _edge("C", "D"), _edge("D", "A", "REF")],
+    )
+
+    backward = verify_code_graph_claim(
+        CodeGraphClaim(
+            CodeGraphClaimKind.PATH_EXISTS,
+            source="D",
+            target="B",
+            scope=CodeGraphScope(snapshot={"id": "s1"}, relations={"CALL"}, direction="BACKWARD"),
+            evidence_namespace="ns",
+        ),
+        model,
+    )
+    assert backward.verdict is VerificationVerdict.PASS
+    assert backward.evidence_ids == ("edge:C:CALL:D", "edge:B:CALL:C")
+    assert backward.metadata["canonical_path"] == ("D", "C", "B")
+
+    depth_limited = verify_code_graph_claim(
+        CodeGraphClaim(
+            CodeGraphClaimKind.PATH_EXISTS,
+            source="A",
+            target="C",
+            scope=CodeGraphScope(snapshot={"id": "s1"}, relations={"CALL"}, max_depth=1),
+            evidence_namespace="ns",
+        ),
+        model,
+    )
+    assert depth_limited.verdict is VerificationVerdict.UNKNOWN
+    assert "INCOMPLETE_GRAPH_SEARCH" in _codes(depth_limited)
+
+    stopped = verify_code_graph_claim(
+        CodeGraphClaim(
+            CodeGraphClaimKind.PATH_EXISTS,
+            source="A",
+            target="C",
+            scope=CodeGraphScope(snapshot={"id": "s1"}, relations={"CALL"}, stop_nodes={"B"}),
+            evidence_namespace="ns",
+        ),
+        model,
+    )
+    assert stopped.verdict is VerificationVerdict.UNKNOWN
+    assert "INCOMPLETE_GRAPH_SEARCH" in _codes(stopped)
+
+    relation_filtered = verify_code_graph_claim(
+        CodeGraphClaim(
+            CodeGraphClaimKind.PATH_EXISTS,
+            source="D",
+            target="A",
+            scope=CodeGraphScope(snapshot={"id": "s1"}, relations={"REF"}),
+            evidence_namespace="ns",
+        ),
+        model,
+    )
+    assert relation_filtered.verdict is VerificationVerdict.PASS
+    assert relation_filtered.evidence_ids == ("edge:D:REF:A",)
+
+
+def test_task29_contract_public_reports_use_required_issue_codes():
+    exact = _model([_node("A"), _node("B")], [_edge("A", "B")], absence=("B->A",))
+    heuristic = _model([_node("A"), _node("B")], [_edge("A", "B", confidence=EvidenceConfidence.HEURISTIC)])
+    blocked = _model(
+        [_node("A")],
+        [],
+        blockers=(GraphBlocker("b:unsupported", "UNSUPPORTED_RELATION", "graph", {"relation": "ALIEN"}),),
+    )
+
+    assert "PROVEN_GRAPH_EDGE" in _codes(verify_code_graph_claim(_claim(CodeGraphClaimKind.EDGE_EXISTS, source="A", target="B"), exact))
+    assert "PROVEN_GRAPH_PATH" in _codes(verify_code_graph_claim(_claim(CodeGraphClaimKind.PATH_EXISTS, source="A", target="B"), exact))
+    assert "COMPLETE_GRAPH_ABSENCE" in _codes(verify_code_graph_claim(_claim(CodeGraphClaimKind.NO_PATH, source="B", target="A"), exact))
+    assert "HEURISTIC_ONLY_SUPPORT" in _codes(verify_code_graph_claim(_claim(CodeGraphClaimKind.PATH_EXISTS, source="A", target="B"), heuristic))
+    assert "UNSUPPORTED_RELATION" in _codes(verify_code_graph_claim(_claim(CodeGraphClaimKind.PATH_EXISTS, source="A", target="B", relations={"ALIEN"}), blocked))
+    assert "SOURCE_SNAPSHOT_MISMATCH" in _codes(verify_code_graph_claim(_claim(CodeGraphClaimKind.NODE_EXISTS, node="A"), _model([_node("A")], snapshot="s2")))
 
 
 def test_node_exists_edge_exists_path_exists_no_path_and_absence_truth_table():
