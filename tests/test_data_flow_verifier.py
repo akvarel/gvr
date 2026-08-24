@@ -182,11 +182,14 @@ def _codes(report) -> set[str]:
 def test_exact_proven_complete_path_passes_can_flow_to_with_exact_dependencies():
     ab = _evidence("A", "B")
     bc = _evidence("B", "C")
-    report = verify_data_flow_claim(_claim(), _result([_path(ab, bc)]))
+    claim = _claim()
+    result = _result([_path(ab, bc)])
+    report = verify_data_flow_claim(claim, result)
+    query_evidence = build_query_result_evidence(claim, result)
 
     assert report.verdict is VerificationVerdict.PASS
     assert report.verifier == DATA_FLOW_VERIFIER
-    assert report.evidence_ids == tuple(sorted((ab["key"], bc["key"])))
+    assert report.evidence_ids == tuple(sorted((ab["key"], bc["key"], query_evidence.id)))
     assert report.metadata["selected_path_identity"] == [ab["key"], bc["key"]]
     assert report.metadata["graphify"]["complete_supported_search"] is True
 
@@ -308,10 +311,11 @@ def test_blocking_boundary_prevents_absence_proof_and_is_exposed_as_evidence():
     ingested = ingest_traversal_result(result)
 
     assert report.verdict is VerificationVerdict.UNKNOWN
-    assert report.evidence_ids == ("bnd:ambiguous-call",)
+    assert report.metadata["query_evidence_id"] in report.evidence_ids
+    assert set(report.evidence_ids) == {"bnd:ambiguous-call", report.metadata["query_evidence_id"]}
     assert "BLOCKING_BOUNDARY" in _codes(report)
     assert [item.id for item in ingested.boundary_evidence] == ["bnd:ambiguous-call"]
-    assert [item.id for item in ingested.evidence] == list(report.evidence_ids)
+    assert [item.id for item in ingested.evidence] == ["bnd:ambiguous-call"]
 
 
 def test_unsupported_relation_inside_fake_path_is_rejected():
@@ -586,11 +590,12 @@ def test_boundary_requires_its_portable_boundary_evidence_key():
 
 def test_no_supported_path_fails_when_proven_path_exists():
     exact = _evidence("A", "C")
-    report = verify_data_flow_claim(
-        _claim(DataFlowClaimKind.NO_SUPPORTED_PATH), _result([_path(exact)])
-    )
+    claim = _claim(DataFlowClaimKind.NO_SUPPORTED_PATH)
+    result = _result([_path(exact)])
+    report = verify_data_flow_claim(claim, result)
+    query_evidence = build_query_result_evidence(claim, result)
     assert report.verdict is VerificationVerdict.FAIL
-    assert report.evidence_ids == (exact["key"],)
+    assert report.evidence_ids == tuple(sorted((exact["key"], query_evidence.id)))
 
 
 def test_library_api_normalizes_a_valid_string_claim_kind():
@@ -602,8 +607,10 @@ def test_library_api_normalizes_a_valid_string_claim_kind():
 def test_positive_claim_recorded_in_ledger_becomes_stale_after_evidence_mutation_or_removal():
     exact = _evidence("A", "C")
     result = _result([_path(exact)])
-    report = verify_data_flow_claim(_claim(), result)
-    evidence = ingest_traversal_result(result).evidence
+    claim = _claim()
+    report = verify_data_flow_claim(claim, result)
+    query_evidence = build_query_result_evidence(claim, result)
+    evidence = (*ingest_traversal_result(result).evidence, query_evidence)
 
     for mutate in ("replace", "remove"):
         ledger = ClaimLedger()
@@ -738,7 +745,8 @@ def test_version_1_wire_operation_preserves_auditable_fields():
     report = out["payload"]
     assert report["verdict"] == "PASS"
     assert report["verifier"] == DATA_FLOW_VERIFIER
-    assert report["evidence_ids"] == [exact["key"]]
+    assert exact["key"] in report["evidence_ids"]
+    assert any(evidence_id.startswith("gvrq:") for evidence_id in report["evidence_ids"])
     assert report["metadata"]["claim_kind"] == "CAN_FLOW_TO"
     assert report["metadata"]["start"] == "A"
     assert report["metadata"]["target"] == "C"

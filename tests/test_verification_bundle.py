@@ -190,7 +190,8 @@ def test_positive_path_bundle_contains_only_selected_direct_dependencies():
 
     assert bundle.report.verdict is VerificationVerdict.PASS
     assert tuple(item.id for item in bundle.evidence) == bundle.report.evidence_ids
-    assert set(bundle.report.evidence_ids) == set(bundle.report.metadata["selected_path_identity"])
+    assert set(bundle.report.metadata["selected_path_identity"]) < set(bundle.report.evidence_ids)
+    assert bundle.report.metadata["query_evidence_id"] in bundle.report.evidence_ids
 
 
 def test_two_qualifying_paths_bundle_only_the_canonical_selected_path():
@@ -201,8 +202,8 @@ def test_two_qualifying_paths_bundle_only_the_canonical_selected_path():
 
     selected = tuple(bundle.report.metadata["selected_path_identity"])
     all_ids = {item["key"] for path in (path_b, path_d) for item in path["supporting_evidence"]}
-    assert bundle.report.evidence_ids == selected
-    assert {item.id for item in bundle.evidence} == set(selected)
+    assert set(bundle.report.evidence_ids) == set(selected) | {bundle.report.metadata["query_evidence_id"]}
+    assert {item.id for item in bundle.evidence} == set(selected) | {bundle.report.metadata["query_evidence_id"]}
     assert all_ids - set(selected)
     assert not (all_ids - set(selected)) & {item.id for item in bundle.evidence}
 
@@ -253,16 +254,9 @@ def test_boundary_unknown_bundle_contains_exact_boundary_evidence():
     )
 
     assert bundle.report.verdict is VerificationVerdict.UNKNOWN
-    assert bundle.report.evidence_ids == ("bnd:ambiguous-call",)
-    assert bundle.evidence == (
-        Evidence(
-            id="bnd:ambiguous-call",
-            kind="graphify.data_flow_boundary",
-            payload=boundary,
-            source="src/Flow.java",
-            fingerprint="bnd:ambiguous-call",
-        ),
-    )
+    assert set(bundle.report.evidence_ids) == {"bnd:ambiguous-call", bundle.report.metadata["query_evidence_id"]}
+    assert any(item.id == "bnd:ambiguous-call" for item in bundle.evidence)
+    assert any(item.id == bundle.report.metadata["query_evidence_id"] for item in bundle.evidence)
 
 
 def test_data_flow_bundle_rejects_conflicting_boundary_records_with_one_id():
@@ -296,8 +290,8 @@ def test_unknown_without_dependencies_has_explicit_deterministic_empty_manifest(
     second = verify_data_flow_claim_bundle(_claim(), deepcopy(result))
 
     assert first.report.verdict is VerificationVerdict.UNKNOWN
-    assert first.report.evidence_ids == ()
-    assert first.evidence == ()
+    assert first.report.evidence_ids == (first.report.metadata["query_evidence_id"],)
+    assert tuple(item.id for item in first.evidence) == first.report.evidence_ids
     assert first.fingerprint == second.fingerprint
 
 

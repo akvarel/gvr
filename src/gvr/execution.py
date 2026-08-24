@@ -86,6 +86,7 @@ from .verifiers.data_flow import (
     DataFlowClaim,
     DataFlowClaimKind,
     DataFlowQueryScope,
+    SourceRevision,
     SUPPORTED_DATA_FLOW_RELATIONS,
     verify_data_flow_claim,
 )
@@ -709,6 +710,11 @@ class _DataFlowVerifierRuntime:
                 None
                 if spec.get("source_context") is None
                 else str(spec.get("source_context"))
+            ),
+            source_revision=(
+                None
+                if not isinstance(spec.get("source_revision"), Mapping)
+                else SourceRevision(**dict(spec["source_revision"]))
             ),
         )
         query_records = tuple(

@@ -12,6 +12,7 @@ from ..code_graph import (
     GraphEvidenceModelError,
     encode_code_graph_observation_evidence,
 )
+from ..graphify_contract import validate_graphify_df_evidence
 from ..model import Evidence, VerificationVerdict
 
 
@@ -25,6 +26,7 @@ _SUPPORTED_DATA_FLOW_RELATIONS = frozenset({
     "TRANSFORMED_BY",
     "WRITTEN_TO",
 })
+_ADAPTER_FAMILY_ID = "graphify"
 
 
 @dataclass(frozen=True)
@@ -145,10 +147,12 @@ def ingest_traversal_result(result: Mapping[str, Any]) -> GraphifyTraversalEvide
 
 
 def _require_df_key(item: Mapping[str, Any]) -> str:
-    key = str(item.get("key") or "")
-    if not key.startswith("df:") or len(key) <= 3:
-        raise GraphEvidenceModelError("Graphify traversal evidence requires a public df key")
-    return key
+    return validate_graphify_df_evidence(item)
+
+
+def _require_adapter_family(family_id: str) -> None:
+    if family_id != _ADAPTER_FAMILY_ID:
+        raise ValueError("Graphify provider family is adapter-sealed")
 
 
 def _node_id(value: str) -> str:
@@ -346,6 +350,7 @@ def encode_graphify_code_graph_observation_evidence(
     The execution runtime only decodes canonical provider observation evidence.
     """
 
+    _require_adapter_family(family_id)
     return encode_code_graph_observation_evidence(
         ingest_traversal_graph(result),
         evidence_id=evidence_id,

@@ -16,6 +16,7 @@ _MESSAGES = {
     "PROVIDER_SINGLE_FAMILY_DECISIVE_PASS": "One provider family produced a decisive PASS without independent corroboration.",
     "PROVIDER_SINGLE_FAMILY_DECISIVE_FAIL": "One provider family produced a decisive FAIL without independent corroboration.",
     "PROVIDER_CONFLICT": "Independent provider families produced decisive conflicting verdicts.",
+    "PROVIDER_FAMILY_CONTRADICTION": "One provider family produced contradictory decisive verdicts and cannot count as independent corroboration.",
     "PROVIDER_ONLY_HEURISTIC": "Provider observations are heuristic or unknown only and are not upgraded by repetition.",
     "PROVIDER_SNAPSHOT_MISMATCH": "Provider observations do not share one source snapshot.",
     "PROVIDER_CLAIM_MISMATCH": "Provider observations do not verify the same claim fingerprint.",
@@ -98,9 +99,13 @@ def reconcile_provider_observations(observations: Iterable[ProviderVerificationO
     hard_mismatch = len(claim_ids) != 1 or len(snapshot_groups) != 1 or malformed
     pass_families = _decisive_families(deduped, VerificationVerdict.PASS)
     fail_families = _decisive_families(deduped, VerificationVerdict.FAIL)
+    contradictory_families = tuple(sorted(pass_families & fail_families))
     unknown_only = not pass_families and not fail_families
 
-    if pass_families and fail_families:
+    if contradictory_families:
+        issues.append(_issue("PROVIDER_FAMILY_CONTRADICTION", VerificationVerdict.UNKNOWN, evidence_ids))
+        verdict = VerificationVerdict.UNKNOWN
+    elif pass_families and fail_families:
         issues.extend(_issues("CONFLICTING_GRAPH_EVIDENCE", VerificationVerdict.UNKNOWN, evidence_ids))
         verdict = VerificationVerdict.UNKNOWN
     elif hard_mismatch:
