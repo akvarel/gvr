@@ -150,7 +150,7 @@ from .model import (
     VerificationVerdict,
     combine_verdicts,
 )
-from .adapters.graphify import GraphifyTraversalEvidence, ingest_traversal_result
+from .adapters.graphify import GraphifyTraversalEvidence, ingest_traversal_graph, ingest_traversal_result
 from .evidence_providers import (
     AUDIT_OBSERVATION_FINGERPRINT_FORMAT,
     AUDIT_OBSERVATION_KIND,
@@ -321,7 +321,7 @@ __all__ = [
     "VerifierRegistry", "combine_verdicts", "decode_markers", "default_registry",
     "envelope", "evaluate_predicate", "evaluate_text_search", "simulate",
     "stable_fingerprint", "evidence_semantic_fingerprint",
-    "GraphifyTraversalEvidence", "ingest_traversal_result",
+    "GraphifyTraversalEvidence", "ingest_traversal_graph", "ingest_traversal_result",
     "BLOCKING_RESOLUTIONS", "COMPLETE_COVERAGE", "DATA_FLOW_VERIFIER",
     "SUPPORTED_DATA_FLOW_RELATIONS", "DataFlowClaim", "DataFlowClaimKind",
     "DataFlowQueryScope", "build_query_result_evidence", "verify_data_flow_claim",
