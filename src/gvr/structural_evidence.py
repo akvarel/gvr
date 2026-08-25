@@ -36,6 +36,14 @@ class GraphifyStructuralEvidenceError(ValueError):
 
 
 def _canonical_value(value: Any) -> Any:
+    """Build Graphify's JSON-transport canonical value tree.
+
+    The producer's fingerprint contract is defined over JSON-transportable
+    values.  ``ingest_graphify_structural_evidence_v2`` therefore rejects
+    Python-only values before calling this compatibility implementation.  The
+    coercive branches remain here so the public fingerprint helpers preserve
+    the producer's reference-vector behavior for typed values.
+    """
     if isinstance(value, Mapping):
         items = [[str(key), _canonical_value(value[key])] for key in value]
         items.sort(key=lambda pair: pair[0].encode("utf-8"))
@@ -141,19 +149,33 @@ def _validate_hash(value: Any, name: str) -> str:
 
 
 def _boundary_key(blocker: Mapping[str, Any]) -> str:
+    details = blocker.get("details")
+    details = details if isinstance(details, Mapping) else {}
+
+    def public_value(*names: str) -> Any:
+        for name in names:
+            value = blocker.get(name)
+            if value not in (None, ""):
+                return value
+        for name in names:
+            value = details.get(name)
+            if value not in (None, ""):
+                return value
+        return ""
+
     fields = [
-        ("sf", blocker.get("canonical_caller_file", "")),
-        ("loc", blocker.get("caller_location", "")),
-        ("kind", blocker.get("diagnostic_kind", "")),
-        ("cap", blocker.get("capability", "")),
-        ("framework", blocker.get("framework", "")),
-        ("res", blocker.get("resolution", "")),
-        ("method", blocker.get("method", "")),
-        ("arity", str(blocker.get("arity") or 0)),
-        ("rfqn", blocker.get("receiver_fqn", "")),
-        ("repo", blocker.get("repository_fqn", "")),
-        ("entity", blocker.get("entity_fqn", "")),
-        ("reason", blocker.get("reason", "")),
+        ("sf", public_value("canonical_caller_file")),
+        ("loc", public_value("caller_location", "callerLocation")),
+        ("kind", public_value("diagnostic_kind", "diagnosticKind", "kind")),
+        ("cap", public_value("capability")),
+        ("framework", public_value("framework")),
+        ("res", public_value("resolution")),
+        ("method", public_value("method")),
+        ("arity", str(public_value("arity") or 0)),
+        ("rfqn", public_value("receiver_fqn", "receiverFqn")),
+        ("repo", public_value("repository_fqn", "repositoryFqn")),
+        ("entity", public_value("entity_fqn", "entityFqn")),
+        ("reason", public_value("reason")),
     ]
     canonical = json.dumps(sorted((str(k), str(v)) for k, v in fields), sort_keys=True, separators=(",", ":"))
     return "bnd:" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()
@@ -276,6 +298,8 @@ class GraphifyStructuralEvidenceV2:
             "query_validity": coverage["query_validity"],
             "start_node_found": coverage["start_node_found"],
             "target_node_found": coverage["target_node_found"],
+            "visited_count": coverage["visited_count"],
+            "expanded_count": coverage["expanded_count"],
             "query_bounds": bounds,
             "rejected_relations": list(coverage["rejected_relations"]),
             "encountered_partial_evidence": coverage["encountered_partial_evidence"],
@@ -335,6 +359,27 @@ def _validate_query(query: Mapping[str, Any]) -> dict[str, Any]:
     return result
 
 
+def _assert_json_transport(value: Any, name: str = "snapshot") -> None:
+    """Reject values that cannot occur in a JSON snapshot transport."""
+    if value is None or isinstance(value, (str, bool, int)):
+        return
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise GraphifyStructuralEvidenceError(f"{name} contains a non-finite JSON number")
+        return
+    if isinstance(value, Mapping):
+        for key, child in value.items():
+            if not isinstance(key, str):
+                raise GraphifyStructuralEvidenceError(f"{name} contains a non-string JSON object key")
+            _assert_json_transport(child, f"{name}.{key}")
+        return
+    if isinstance(value, list):
+        for index, child in enumerate(value):
+            _assert_json_transport(child, f"{name}[{index}]")
+        return
+    raise GraphifyStructuralEvidenceError(f"{name} contains a non-JSON value")
+
+
 def _validate_coverage(coverage: Mapping[str, Any]) -> dict[str, Any]:
     result = deepcopy(dict(coverage))
     for key in ("complete_supported_search", "truncated", "query_validity", "start_node_found", "encountered_partial_evidence", "encountered_unknown_evidence", "encountered_may_evidence"):
@@ -365,6 +410,7 @@ def ingest_graphify_structural_evidence_v2(
     """Parse one complete v2 document; all authority-bearing inputs stay bound."""
     if not isinstance(document, Mapping):
         raise GraphifyStructuralEvidenceError("snapshot document must be a mapping")
+    _assert_json_transport(document)
     if any(value is not None for value in (source_revision, source_snapshot, query_scope, traversal)):
         raise GraphifyStructuralEvidenceError("caller authority or traversal overrides are forbidden for v2 snapshots")
     required = {"schema_version", "format", "provider_id", "analyzer_revision", "source_revision_scope", "analysis_binding", "query", "coverage", "facts", "paths", "blockers", "fingerprint"}
@@ -391,7 +437,7 @@ def ingest_graphify_structural_evidence_v2(
         item = _require_mapping(path, "path")
         identity = tuple(str(key) for key in _sequence(item.get("path_identity"), "path.path_identity"))
         supporting = tuple(str(key) for key in _sequence(item.get("supporting_evidence_keys"), "path.supporting_evidence_keys"))
-        if identity != supporting or any(not _DF_RE.fullmatch(key) for key in identity):
+        if not identity or identity != supporting or any(not _DF_RE.fullmatch(key) for key in identity):
             raise GraphifyStructuralEvidenceError("path identity must exactly match ordered df evidence keys")
         for key in ("exactness", "receiver_confidence", "coverage"):
             _require_string(item.get(key), f"path.{key}")

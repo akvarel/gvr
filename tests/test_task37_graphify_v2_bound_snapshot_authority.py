@@ -208,3 +208,36 @@ def test_task37_29_wheel_api_surface_is_importable() -> None:
 
 def test_task37_30_full_regression_contract_has_no_verdict_fields() -> None:
     assert not ({"PASS", "FAIL", "VERIFIED"} & set(valid().to_dict()))
+
+
+def test_task37_review_boundary_key_uses_producer_details_fallback() -> None:
+    doc = document()
+    blocker = doc["blockers"][0]
+    blocker["details"].update({
+        "repository_fqn": "acme.Repository",
+        "entity_fqn": "acme.Entity",
+    })
+    blocker["key"] = "bnd:5a1213cc82d21143a7389422282539aac2706f5f3a29559bc0f009e633c05771"
+    assert valid(reseal(doc)).blockers[0]["key"] == blocker["key"]
+
+
+def test_task37_review_projection_preserves_native_traversal_accounting() -> None:
+    snapshot = valid()
+    traversal = snapshot.to_gvr_traversal_dict()
+    assert traversal["visited_count"] == snapshot.coverage["visited_count"]
+    assert traversal["expanded_count"] == snapshot.coverage["expanded_count"]
+
+
+def test_task37_review_empty_path_fails_as_contract_error() -> None:
+    doc = document()
+    doc["paths"][0]["path_identity"] = []
+    doc["paths"][0]["supporting_evidence_keys"] = []
+    with pytest.raises(GraphifyStructuralEvidenceError):
+        valid(reseal(doc))
+
+
+def test_task37_review_ingestion_is_json_transport_only() -> None:
+    doc = document()
+    doc["query"]["stop_nodes"] = ("tuple-is-not-json",)
+    with pytest.raises(GraphifyStructuralEvidenceError, match="non-JSON"):
+        valid(reseal(doc))
