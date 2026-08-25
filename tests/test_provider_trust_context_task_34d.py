@@ -247,6 +247,29 @@ def test_task34d_rotated_context_replay_fails_closed() -> None:
     _decode_rejecting_forgery(evidence, ProviderTrustContext.host_runtime("runtime"))
 
 
+def test_task34d_graph_model_fingerprint_mismatch_precedes_origin_trust() -> None:
+    context = ProviderTrustContext.host_runtime("runtime")
+    with context.activate():
+        evidence = _built_in_evidence("graphify")
+    payload = dict(evidence.payload)
+    payload["graph_model_fingerprint"] = "0" * 64
+    tampered = replace(evidence, payload=payload)
+    with context.activate(), pytest.raises(CodeGraphObservationError, match="graph model fingerprint"):
+        decode_code_graph_observation_evidence(tampered)
+
+
+def test_task34d_provider_origin_signature_mismatch_fails_closed() -> None:
+    context = ProviderTrustContext.host_runtime("runtime")
+    with context.activate():
+        evidence = _built_in_evidence("codeflow")
+    payload = dict(evidence.payload)
+    origin = dict(payload["provider_origin"])
+    origin["seal"] = "0" * 64
+    payload["provider_origin"] = origin
+    with context.activate(), pytest.raises(CodeGraphObservationError, match="seal"):
+        decode_code_graph_observation_evidence(replace(evidence, payload=payload))
+
+
 def test_task34d_sqlite_same_context_verified_and_new_context_rejected(tmp_path: Path) -> None:
     context = ProviderTrustContext.host_runtime("runtime")
     with context.activate():
