@@ -6,11 +6,11 @@ from typing import Any, Mapping
 
 from .canonical import canonical_fingerprint
 from .provider_independence import (
-    BUILTIN_PROVIDER_IMPLEMENTATION_REGISTRY,
-    ProviderImplementationRegistry,
-    ProviderOriginAttestation,
-    ProviderOriginAuthority,
+    ProviderOriginAssertion,
+    ValidatedProviderOrigin,
     VerifiedIndependenceFamily,
+    _unverified_assertion,
+    _validate_recorded_provider_origin,
 )
 from .model import Evidence, VerificationVerdict
 
@@ -486,7 +486,13 @@ class CodeGraphProviderObservation:
     graph_model: GraphEvidenceModel
     graph_model_fingerprint: str
     independence: VerifiedIndependenceFamily
-    origin_attestation: ProviderOriginAttestation
+    origin_assertion: ProviderOriginAssertion
+    validated_origin: ValidatedProviderOrigin | None
+
+    @property
+    def origin_attestation(self) -> ValidatedProviderOrigin | ProviderOriginAssertion:
+        """Compatibility view that prefers the validated, non-serializable origin."""
+        return self.validated_origin or self.origin_assertion
 
     @property
     def provider_identity(self) -> ProviderImplementationIdentity:
@@ -526,13 +532,10 @@ def encode_code_graph_observation_evidence(
     implementation_id: str | None = None,
     family_id: str | None = None,
     source_snapshot: Mapping[str, Any] | None = None,
-    provider_registry: ProviderImplementationRegistry | None = None,
-    provider_authority: ProviderOriginAuthority | None = None,
 ) -> Evidence:
     return _encode_code_graph_observation_evidence(
         graph_model, evidence_id=evidence_id, claim=claim, claim_fingerprint=claim_fingerprint,
         implementation_id=implementation_id, family_id=family_id, source_snapshot=source_snapshot,
-        provider_registry=provider_registry, provider_authority=provider_authority,
     )
 
 
@@ -545,9 +548,7 @@ def _encode_code_graph_observation_evidence(
     implementation_id: str | None = None,
     family_id: str | None = None,
     source_snapshot: Mapping[str, Any] | None = None,
-    provider_registry: ProviderImplementationRegistry | None = None,
-    provider_authority: ProviderOriginAuthority | None = None,
-    _adapter_origin: ProviderOriginAttestation | None = None,
+    _validated_origin: ProviderOriginAssertion | None = None,
 ) -> Evidence:
     """Encode a canonical provider graph snapshot as one GVR evidence record.
 
@@ -565,8 +566,7 @@ def _encode_code_graph_observation_evidence(
             raise CodeGraphObservationError("claim or claim_fingerprint is required")
         claim_fingerprint = claim_fingerprint_for_observation(claim)
     identity = graph_model.provider_identity
-    registry = provider_registry or BUILTIN_PROVIDER_IMPLEMENTATION_REGISTRY
-    origin = _adapter_origin or registry.attest(identity, authority=provider_authority)
+    origin = _validated_origin or _unverified_assertion(identity)
     independence = origin.family
     provider_id = identity.provider_id
     if not provider_id:
@@ -608,8 +608,6 @@ def _encode_code_graph_observation_evidence(
 
 def decode_code_graph_observation_evidence(
     evidence: Evidence,
-    *,
-    provider_registry: ProviderImplementationRegistry | None = None,
 ) -> CodeGraphProviderObservation:
     """Decode canonical provider-observation evidence without provider parsing."""
 
@@ -652,15 +650,9 @@ def decode_code_graph_observation_evidence(
     family_id = _required_string(payload, "family_id")
     if provider_id != graph_model.provider:
         raise CodeGraphObservationError("code graph observation provider does not match graph model provider")
-    registry = provider_registry or BUILTIN_PROVIDER_IMPLEMENTATION_REGISTRY
     recorded_origin = _mapping(payload.get("provider_origin", {}), "provider_origin")
     try:
-        if str(recorded_origin.get("configuration_identity", "")) == "untrusted":
-            origin = registry.attest(graph_model.provider_identity)
-            if _snapshot(recorded_origin) != _snapshot(origin.to_dict()):
-                raise ValueError("unverified provider origin mismatch")
-        else:
-            origin = registry.validate(graph_model.provider_identity, recorded_origin)
+        origin, validated_origin = _validate_recorded_provider_origin(graph_model.provider_identity, recorded_origin)
     except ValueError as exc:
         raise CodeGraphObservationError(str(exc)) from exc
     independence = origin.family
@@ -676,7 +668,8 @@ def decode_code_graph_observation_evidence(
         graph_model=graph_model,
         graph_model_fingerprint=graph_model.fingerprint,
         independence=independence,
-        origin_attestation=origin,
+        origin_assertion=origin,
+        validated_origin=validated_origin,
     )
 
 

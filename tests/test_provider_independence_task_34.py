@@ -6,16 +6,17 @@ from pathlib import Path
 from gvr import (
     IndependenceTrustState,
     ProviderImplementationIdentity,
+    ProviderImplementationRegistration,
     ProviderImplementationRegistry,
-    ProviderOriginAuthority,
+    ProviderTrustContext,
     SQLiteStorage,
     VerifiedIndependenceFamily,
     builtin_provider_implementation_registry,
     decode_code_graph_observation_evidence,
     encode_code_graph_observation_evidence,
 )
-from gvr.provider_independence import _attest_builtin_provider_origin
 from gvr.code_graph import GraphEvidenceModel
+from gvr.provider_independence import _attest_active_builtin_provider_origin
 from gvr.model import VerificationIssue, VerificationReport, VerificationVerdict
 from gvr.verifiers.corroboration import ProviderVerificationObservation, reconcile_provider_observations
 
@@ -29,15 +30,14 @@ def report(verdict: VerificationVerdict, evidence_id: str) -> VerificationReport
     )
 
 
-def fixture_registry() -> tuple[ProviderOriginAuthority, ProviderImplementationRegistry]:
-    authority = ProviderOriginAuthority.host_runtime("task34-test-runtime")
-    registry = ProviderImplementationRegistry.host_runtime(authority).with_registration(
-        implementation_id="task34-deterministic-provider",
-        provider_kind="task34-test",
-        family_id="task34-independent",
-        authority=authority,
+def fixture_registry() -> tuple[ProviderTrustContext, ProviderImplementationRegistry]:
+    context = ProviderTrustContext.host_runtime(
+        "task34-test-runtime",
+        registrations=(ProviderImplementationRegistration(
+            "task34-deterministic-provider", "task34-test", "task34-independent"
+        ),),
     )
-    return authority, registry
+    return context, context.registry
 
 
 def identity(provider_id: str, implementation_id: str, family_id: str, *, kind: str = "low-level") -> ProviderImplementationIdentity:
@@ -60,15 +60,22 @@ def observation(
     registry: ProviderImplementationRegistry | None = None,
     revision: str = "rev1",
     kind: str = "low-level",
-    authority: ProviderOriginAuthority | None = None,
+    authority: ProviderTrustContext | None = None,
 ) -> ProviderVerificationObservation:
     provider_identity = identity(provider_id, implementation_id, family_id, kind=kind)
-    selected = registry or builtin_provider_implementation_registry()
-    origin = (
-        _attest_builtin_provider_origin(provider_identity, adapter_kind=kind)
-        if kind in {"graphify", "codeflow"}
-        else selected.attest(provider_identity, authority=authority)
-    )
+    origin = None
+    if kind in {"graphify", "codeflow"} or authority is not None:
+        context = authority or ProviderTrustContext.host_runtime("task34-builtins")
+        graph = GraphEvidenceModel(provider_identity=provider_identity)
+        with context.activate():
+            if kind in {"graphify", "codeflow"}:
+                assertion = _attest_active_builtin_provider_origin(provider_identity, adapter_kind=kind)
+                origin = context.validate(provider_identity, assertion.to_dict())
+            else:
+                encoded = context.encode_code_graph_observation_evidence(
+                    graph, evidence_id=evidence_id, claim_fingerprint="claim"
+                )
+                origin = decode_code_graph_observation_evidence(encoded).validated_origin
     return ProviderVerificationObservation(
         provider_id=provider_id,
         implementation_id=implementation_id,
@@ -187,20 +194,18 @@ def test_task34_reorder_duplicates_and_transport_labels_do_not_change_fingerprin
 def test_task34_sqlite_reopen_preserves_verified_resolution(tmp_path: Path) -> None:
     authority, registry = fixture_registry()
     graph = GraphEvidenceModel(provider_identity=identity("fixture-display", "task34-deterministic-provider", "caller-label", kind="task34-test"))
-    evidence = encode_code_graph_observation_evidence(
-        graph,
-        evidence_id="task34.sqlite",
-        claim_fingerprint="claim",
-        provider_registry=registry,
-        provider_authority=authority,
-    )
-    decoded = decode_code_graph_observation_evidence(evidence, provider_registry=registry)
+    with authority.activate():
+        evidence = authority.encode_code_graph_observation_evidence(
+            graph, evidence_id="task34.sqlite", claim_fingerprint="claim"
+        )
+        decoded = decode_code_graph_observation_evidence(evidence)
     assert decoded.independence.trust_state is IndependenceTrustState.VERIFIED
     assert decoded.independence.family_id == "task34-independent"
 
     path = tmp_path / "task34.sqlite3"
     stored = SQLiteStorage(path).put_evidence(evidence, slot_id="task34-slot")
     replayed = SQLiteStorage(path).get_evidence(stored.fingerprint).evidence
-    decoded_replay = decode_code_graph_observation_evidence(replayed, provider_registry=registry)
+    with authority.activate():
+        decoded_replay = decode_code_graph_observation_evidence(replayed)
     assert decoded_replay.independence == decoded.independence
     assert replayed.fingerprint == evidence.fingerprint

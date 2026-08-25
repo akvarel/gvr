@@ -83,7 +83,7 @@ def test_task34c_old_public_deterministic_key_cannot_forge_offline() -> None:
     unsigned = dict(origin)
     unsigned.pop("seal")
     old_key = hashlib.sha256(b"gvr.provider-origin.builtin-adapter-authority.v1").digest()
-    origin["seal"] = hmac.new(old_key, canonical_json(unsigned, fingerprint_format="gvr.provider_origin_attestation.v1").encode(), hashlib.sha256).hexdigest()
+    origin["seal"] = hmac.new(old_key, canonical_json(unsigned, fingerprint_format="gvr.provider_origin_assertion.v2").encode(), hashlib.sha256).hexdigest()
     payload["provider_origin"] = origin
     with context.activate(), pytest.raises(CodeGraphObservationError, match="seal"):
         decode_code_graph_observation_evidence(replace(evidence, payload=payload))
@@ -110,14 +110,14 @@ def test_task34c_generic_encoder_is_unverified_even_inside_active_context() -> N
     assert decoded.independence.trust_state is IndependenceTrustState.UNVERIFIED
 
 
-def test_task34c_graphify_requires_active_context() -> None:
-    with pytest.raises(RuntimeError, match="ProviderTrustContext"):
-        encode_graphify_code_graph_observation_evidence(_graphify_result(), evidence_id="g", claim_fingerprint="claim")
+def test_task34c_graphify_without_active_context_is_unverified() -> None:
+    evidence = encode_graphify_code_graph_observation_evidence(_graphify_result(), evidence_id="g", claim_fingerprint="claim")
+    assert decode_code_graph_observation_evidence(evidence).independence.trust_state is IndependenceTrustState.UNVERIFIED
 
 
-def test_task34c_codeflow_requires_active_context() -> None:
-    with pytest.raises(RuntimeError, match="ProviderTrustContext"):
-        encode_codeflow_code_graph_observation_evidence(_codeflow_result(), evidence_id="c", claim_fingerprint="claim")
+def test_task34c_codeflow_without_active_context_is_unverified() -> None:
+    evidence = encode_codeflow_code_graph_observation_evidence(_codeflow_result(), evidence_id="c", claim_fingerprint="claim")
+    assert decode_code_graph_observation_evidence(evidence).independence.trust_state is IndependenceTrustState.UNVERIFIED
 
 
 def test_task34c_real_graphify_adapter_is_verified_under_active_context() -> None:

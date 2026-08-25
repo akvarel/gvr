@@ -18,7 +18,7 @@ from ..code_graph import (
     SourceRevisionIdentity,
     _encode_code_graph_observation_evidence,
 )
-from ..provider_independence import _attest_builtin_provider_origin
+from ..provider_independence import _attest_active_builtin_provider_origin
 from ..model import Evidence
 
 
@@ -317,13 +317,13 @@ def encode_codeflow_code_graph_observation_evidence(
             absence_subjects=(),
         ),
     )
-    origin = _attest_builtin_provider_origin(graph.provider_identity, adapter_kind="codeflow")
+    origin = _attest_active_builtin_provider_origin(graph.provider_identity, adapter_kind="codeflow")
     return _encode_code_graph_observation_evidence(
         graph,
         evidence_id=evidence_id,
         claim=claim,
         claim_fingerprint=claim_fingerprint,
-        _adapter_origin=origin,
+        _validated_origin=origin,
     )
 
 

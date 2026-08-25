@@ -9,8 +9,9 @@ from gvr import (
     GraphEvidenceModel,
     IndependenceTrustState,
     ProviderImplementationIdentity,
+    ProviderImplementationRegistration,
     ProviderImplementationRegistry,
-    ProviderOriginAuthority,
+    ProviderTrustContext,
     ProviderVerificationObservation,
     VerificationIssue,
     VerificationReport,
@@ -51,14 +52,21 @@ def _observation(*, identity: ProviderImplementationIdentity, verdict: Verificat
 
 
 def _host_registry(configuration_identity: str = "runtime-config-v1"):
-    authority = ProviderOriginAuthority.host_runtime(configuration_identity)
-    registry = ProviderImplementationRegistry.host_runtime(authority).with_registration(
-        implementation_id="custom-impl",
-        provider_kind="custom-kind",
-        family_id="custom-family",
-        authority=authority,
+    context = ProviderTrustContext.host_runtime(
+        configuration_identity,
+        registrations=(ProviderImplementationRegistration("custom-impl", "custom-kind", "custom-family"),),
     )
-    return authority, registry
+    return context, context.registry
+
+
+def _trusted_custom(context: ProviderTrustContext, *, evidence_id: str = "custom"):
+    with context.activate():
+        evidence = context.encode_code_graph_observation_evidence(
+            _graph(_identity(implementation="custom-impl", family="caller", kind="custom-kind")),
+            evidence_id=evidence_id,
+            claim_fingerprint="claim",
+        )
+        return evidence, decode_code_graph_observation_evidence(evidence)
 
 
 def _graph(identity: ProviderImplementationIdentity) -> GraphEvidenceModel:
@@ -132,14 +140,18 @@ def test_task34b_custom_per_observation_registry_cannot_upgrade() -> None:
 
 
 def test_task34b_builtin_graphify_adapter_origin_is_verified() -> None:
-    evidence = encode_graphify_code_graph_observation_evidence(_graphify_result(), evidence_id="g", claim_fingerprint="claim")
-    decoded = decode_code_graph_observation_evidence(evidence)
+    context = ProviderTrustContext.host_runtime("runtime")
+    with context.activate():
+        evidence = encode_graphify_code_graph_observation_evidence(_graphify_result(), evidence_id="g", claim_fingerprint="claim")
+        decoded = decode_code_graph_observation_evidence(evidence)
     assert decoded.independence == VerifiedIndependenceFamily("graphify", ("graphify",), IndependenceTrustState.VERIFIED)
 
 
 def test_task34b_builtin_codeflow_adapter_origin_is_verified() -> None:
-    evidence = encode_codeflow_code_graph_observation_evidence(_codeflow_result(), evidence_id="c", claim_fingerprint="claim")
-    decoded = decode_code_graph_observation_evidence(evidence)
+    context = ProviderTrustContext.host_runtime("runtime")
+    with context.activate():
+        evidence = encode_codeflow_code_graph_observation_evidence(_codeflow_result(), evidence_id="c", claim_fingerprint="claim")
+        decoded = decode_code_graph_observation_evidence(evidence)
     assert decoded.independence == VerifiedIndependenceFamily("codeflow", ("codeflow",), IndependenceTrustState.VERIFIED)
 
 
@@ -154,60 +166,61 @@ def test_task34b_low_level_encoder_cannot_claim_builtin_codeflow_origin() -> Non
 
 
 def test_task34b_host_authorized_custom_provider_resolves_verified() -> None:
-    authority, registry = _host_registry()
-    attestation = registry.attest(_identity(implementation="custom-impl", family="caller", kind="custom-kind"), authority=authority)
-    assert attestation.family.trust_state is IndependenceTrustState.VERIFIED
-    assert attestation.family.family_id == "custom-family"
+    context, _ = _host_registry()
+    _, decoded = _trusted_custom(context)
+    assert decoded.independence.trust_state is IndependenceTrustState.VERIFIED
+    assert decoded.independence.family_id == "custom-family"
 
 
 def test_task34b_wrong_host_authority_cannot_register_custom_provider() -> None:
-    authority, registry = _host_registry()
-    other = ProviderOriginAuthority.host_runtime("other-config")
-    with pytest.raises(ValueError, match="authority"):
-        registry.with_registration(implementation_id="other", provider_kind="custom-kind", family_id="other-family", authority=other)
+    context, _ = _host_registry()
+    other = ProviderTrustContext.host_runtime("other-config")
+    with context.activate():
+        evidence = context.encode_code_graph_observation_evidence(_graph(_identity(implementation="custom-impl", family="caller", kind="custom-kind")), evidence_id="custom", claim_fingerprint="claim")
+    with other.activate(), pytest.raises(CodeGraphObservationError):
+        decode_code_graph_observation_evidence(evidence)
 
 
 def test_task34b_custom_registry_configuration_identity_is_serialized() -> None:
-    authority, registry = _host_registry()
-    evidence = encode_code_graph_observation_evidence(
-        _graph(_identity(implementation="custom-impl", family="caller", kind="custom-kind")),
-        evidence_id="custom", claim_fingerprint="claim", provider_registry=registry, provider_authority=authority,
-    )
+    context, registry = _host_registry()
+    evidence, _ = _trusted_custom(context)
     assert evidence.payload["provider_origin"]["configuration_identity"] == "runtime-config-v1"
     assert evidence.payload["provider_origin"]["registry_fingerprint"] == registry.fingerprint
 
 
 def test_task34b_custom_registry_decode_requires_same_runtime_configuration() -> None:
-    authority, registry = _host_registry()
-    evidence = encode_code_graph_observation_evidence(_graph(_identity(implementation="custom-impl", family="caller", kind="custom-kind")), evidence_id="custom", claim_fingerprint="claim", provider_registry=registry, provider_authority=authority)
-    _, other_registry = _host_registry("runtime-config-v2")
-    with pytest.raises(CodeGraphObservationError, match="configuration identity"):
-        decode_code_graph_observation_evidence(evidence, provider_registry=other_registry)
+    context, _ = _host_registry()
+    evidence, _ = _trusted_custom(context)
+    other, _ = _host_registry("runtime-config-v2")
+    with other.activate(), pytest.raises(CodeGraphObservationError, match="configuration identity"):
+        decode_code_graph_observation_evidence(evidence)
 
 
 def test_task34b_custom_registry_decode_requires_registry_fingerprint_match() -> None:
-    authority, registry = _host_registry()
-    evidence = encode_code_graph_observation_evidence(_graph(_identity(implementation="custom-impl", family="caller", kind="custom-kind")), evidence_id="custom", claim_fingerprint="claim", provider_registry=registry, provider_authority=authority)
-    changed = registry.with_registration(implementation_id="second", provider_kind="custom-kind", family_id="second-family", authority=authority)
-    with pytest.raises(CodeGraphObservationError, match="registry fingerprint"):
-        decode_code_graph_observation_evidence(evidence, provider_registry=changed)
+    context, _ = _host_registry()
+    evidence, _ = _trusted_custom(context)
+    changed = ProviderTrustContext.host_runtime("runtime-config-v1", registrations=(
+        ProviderImplementationRegistration("custom-impl", "custom-kind", "custom-family"),
+        ProviderImplementationRegistration("second", "custom-kind", "second-family"),
+    ))
+    with changed.activate(), pytest.raises(CodeGraphObservationError, match="registry fingerprint"):
+        decode_code_graph_observation_evidence(evidence)
 
 
 def test_task34b_custom_registry_replay_with_exact_configuration_succeeds() -> None:
-    authority, registry = _host_registry()
-    evidence = encode_code_graph_observation_evidence(_graph(_identity(implementation="custom-impl", family="caller", kind="custom-kind")), evidence_id="custom", claim_fingerprint="claim", provider_registry=registry, provider_authority=authority)
-    decoded = decode_code_graph_observation_evidence(evidence, provider_registry=registry)
+    context, registry = _host_registry()
+    evidence, decoded = _trusted_custom(context)
     assert decoded.independence.family_id == "custom-family"
-    assert decoded.origin_attestation.registry_fingerprint == registry.fingerprint
+    assert decoded.origin_assertion.registry_fingerprint == registry.fingerprint
 
 
 def test_task34b_recorded_origin_tampering_fails_decode() -> None:
-    authority, registry = _host_registry()
-    evidence = encode_code_graph_observation_evidence(_graph(_identity(implementation="custom-impl", family="caller", kind="custom-kind")), evidence_id="custom", claim_fingerprint="claim", provider_registry=registry, provider_authority=authority)
+    context, _ = _host_registry()
+    evidence, _ = _trusted_custom(context)
     payload = dict(evidence.payload)
     payload["provider_origin"] = {**payload["provider_origin"], "configuration_identity": "forged"}
-    with pytest.raises(CodeGraphObservationError):
-        decode_code_graph_observation_evidence(replace(evidence, payload=payload), provider_registry=registry)
+    with context.activate(), pytest.raises(CodeGraphObservationError):
+        decode_code_graph_observation_evidence(replace(evidence, payload=payload))
 
 
 def test_task34b_direct_reconciliation_fail_closed_without_attestation() -> None:
@@ -219,11 +232,13 @@ def test_task34b_direct_reconciliation_fail_closed_without_attestation() -> None
 
 
 def test_task34b_direct_reconciliation_accepts_host_attested_custom_origin() -> None:
-    authority, registry = _host_registry()
+    context, _ = _host_registry()
     custom_identity = _identity(implementation="custom-impl", family="caller", kind="custom-kind")
-    custom = registry.attest(custom_identity, authority=authority)
-    builtin_evidence = encode_graphify_code_graph_observation_evidence(_graphify_result(), evidence_id="g", claim_fingerprint="claim")
-    builtin = decode_code_graph_observation_evidence(builtin_evidence).origin_attestation
+    with context.activate():
+        custom_evidence = context.encode_code_graph_observation_evidence(_graph(custom_identity), evidence_id="c", claim_fingerprint="claim")
+        custom = decode_code_graph_observation_evidence(custom_evidence).validated_origin
+        builtin_evidence = encode_graphify_code_graph_observation_evidence(_graphify_result(), evidence_id="g", claim_fingerprint="claim")
+        builtin = decode_code_graph_observation_evidence(builtin_evidence).validated_origin
     result = reconcile_provider_observations((
         _observation(identity=ProviderImplementationIdentity("graphify", "graphify", "graphify", provider_kind="graphify"), verdict=VerificationVerdict.PASS, evidence_id="g", attestation=builtin),
         _observation(identity=custom_identity, verdict=VerificationVerdict.PASS, evidence_id="c", attestation=custom),
@@ -239,9 +254,11 @@ def test_task34b_truth_authority_remains_orthogonal_to_unverified_origin() -> No
 
 
 def test_task34b_verified_origin_does_not_upgrade_heuristic_truth() -> None:
-    evidence = encode_codeflow_code_graph_observation_evidence(_codeflow_result(), evidence_id="c", claim_fingerprint="claim")
-    decoded = decode_code_graph_observation_evidence(evidence)
-    heuristic = _observation(identity=decoded.provider_identity, verdict=VerificationVerdict.UNKNOWN, evidence_id="c", attestation=decoded.origin_attestation)
+    context = ProviderTrustContext.host_runtime("runtime")
+    with context.activate():
+        evidence = encode_codeflow_code_graph_observation_evidence(_codeflow_result(), evidence_id="c", claim_fingerprint="claim")
+        decoded = decode_code_graph_observation_evidence(evidence)
+    heuristic = _observation(identity=decoded.provider_identity, verdict=VerificationVerdict.UNKNOWN, evidence_id="c", attestation=decoded.validated_origin)
     result = reconcile_provider_observations((heuristic,))
     assert result.verdict is VerificationVerdict.UNKNOWN
     assert "PROVIDER_CORROBORATED_PASS" not in {issue.code for issue in result.issues}

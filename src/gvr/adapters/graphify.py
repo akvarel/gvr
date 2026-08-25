@@ -17,7 +17,7 @@ from ..code_graph import (
     SourceRevisionIdentity,
     _encode_code_graph_observation_evidence,
 )
-from ..provider_independence import _attest_builtin_provider_origin
+from ..provider_independence import _attest_active_builtin_provider_origin
 from ..graphify_contract import (
     validate_graphify_df_evidence,
     validate_graphify_envelope_authority,
@@ -380,13 +380,13 @@ def encode_graphify_code_graph_observation_evidence(
             absence_subjects=graph.absence_subjects,
         ),
     )
-    origin = _attest_builtin_provider_origin(graph.provider_identity, adapter_kind="graphify")
+    origin = _attest_active_builtin_provider_origin(graph.provider_identity, adapter_kind="graphify")
     return _encode_code_graph_observation_evidence(
         graph,
         evidence_id=evidence_id,
         claim=claim,
         claim_fingerprint=claim_fingerprint,
-        _adapter_origin=origin,
+        _validated_origin=origin,
     )
 
 

@@ -5,7 +5,7 @@ from typing import Any, Iterable, Mapping
 
 from ..canonical import canonical_fingerprint
 from ..model import VerificationIssue, VerificationReport, VerificationVerdict
-from ..provider_independence import IndependenceTrustState, ProviderOriginAttestation, VerifiedIndependenceFamily
+from ..provider_independence import IndependenceTrustState, ValidatedProviderOrigin, VerifiedIndependenceFamily
 
 PROVIDER_CORROBORATION_VERIFIER = "gvr.provider_corroboration.v1"
 PROVIDER_CORROBORATION_FINGERPRINT_FORMAT = "gvr.provider_corroboration.report.v1"
@@ -47,7 +47,7 @@ class ProviderVerificationObservation:
     report: VerificationReport
     metadata: Mapping[str, Any] = field(default_factory=dict)
     independence: VerifiedIndependenceFamily | None = None
-    origin_attestation: ProviderOriginAttestation | None = None
+    origin_attestation: ValidatedProviderOrigin | None = None
 
     def __post_init__(self) -> None:
         if not self.provider_id or not self.implementation_id or not self.family_id or not self.claim_fingerprint:
@@ -57,8 +57,8 @@ class ProviderVerificationObservation:
         object.__setattr__(self, "source_snapshot", _stable(self.source_snapshot))
         object.__setattr__(self, "metadata", _stable(self.metadata))
         if self.origin_attestation is not None:
-            if not isinstance(self.origin_attestation, ProviderOriginAttestation):
-                raise ValueError("provider observation origin attestation must be sealed")
+            if not isinstance(self.origin_attestation, ValidatedProviderOrigin):
+                raise ValueError("provider observation requires a validated origin")
             if self.independence is not None and self.independence != self.origin_attestation.family:
                 raise ValueError("provider observation independence conflicts with origin attestation")
             object.__setattr__(self, "independence", self.origin_attestation.family)

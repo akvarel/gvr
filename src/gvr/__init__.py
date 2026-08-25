@@ -21,8 +21,9 @@ from .provider_independence import (
     IndependenceTrustState,
     ProviderImplementationRegistration,
     ProviderImplementationRegistry,
-    ProviderOriginAttestation,
-    ProviderOriginAuthority,
+    ProviderOriginAssertion,
+    ProviderTrustContext,
+    ValidatedProviderOrigin,
     VerifiedIndependenceFamily,
     builtin_provider_implementation_registry,
 )

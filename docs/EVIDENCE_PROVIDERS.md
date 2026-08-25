@@ -201,3 +201,17 @@ The response kind is `evidence_provider_capability_registry` and currently conta
 `gvr.adapters.codeflow.ingest_codeflow_graph()` accepts an already-captured CodeFlow graph-like mapping and normalizes it into the provider-independent `gvr.code_graph.GraphEvidenceModel`. The adapter is deterministic and side-effect-free: it does not execute Node, install dependencies, access the network, open source files, or reparse code.
 
 Epistemic semantics are conservative. CodeFlow call and reference edges are recorded as `HEURISTIC`; architecture edges are `INFERRED_HINT`; absence observations never become complete proof and return `UNKNOWN`; unsupported or truncated scopes must be represented as explicit blockers. The canonical model keeps semantic and exact identities as separate fingerprints. Native duplicate IDs are accepted only when identical; conflicting duplicates fail closed.
+
+## Provider origin trust context (Task 34c)
+
+Provider independence is runtime trust, not a property of public provider labels. A host creates `ProviderTrustContext.host_runtime(configuration_identity, registrations=...)` and activates it with a context manager for the exact lifetime in which trusted provider assertions may be issued or replayed.
+
+The generic `encode_code_graph_observation_evidence()` function always emits `UNVERIFIED`. It has no registry, authority, adapter-origin, or key parameter. Built-in Graphify and CodeFlow adapters can emit a sealed `ProviderOriginAssertion` only while a context is active and only through their private adapter capability. Registered custom providers use the active context's encoding method. Canonical decode verifies the assertion against the active context's configuration identity, exact registry fingerprint, random runtime-key identity, HMAC, provider kind, implementation, and family before returning a non-serializable `ValidatedProviderOrigin`. Direct reconciliation accepts only that validated object.
+
+Serialized verified assertions fail closed outside an active context and under a rotated key, different configuration, changed registry, or altered assertion. SQLite persistence stores the assertion, not runtime trust. Reopening and decoding succeeds only under the same still-owned context.
+
+### Threat boundary
+
+The context prevents offline forgery by evidence producers that know GVR source code, public constants, serialized evidence, labels, and the former deterministic built-in key. Runtime keys are random and never accepted through public encode/decode arguments.
+
+This mechanism is not a sandbox against malicious code already executing in the trusted host process. Python code in that process can inspect objects or invoke private implementation details. Untrusted plugins and evidence producers must run outside the process that owns `ProviderTrustContext`.
