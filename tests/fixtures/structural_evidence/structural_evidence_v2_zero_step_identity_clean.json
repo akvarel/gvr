@@ -1,0 +1,95 @@
+{
+  "analysis_binding": {
+    "binding_fingerprint": "sha256:c6238174b1e3ffa693d70ed3f1a565ed96eae23543a7289eae261ce4d6ac8e2b",
+    "index_fingerprint": "sha256:f03b4b6849abc74cc53516d23301f15148469174c7fb912fc87d87887e14f3fd",
+    "source_scope_fingerprint": "5d922a8d4c98207df5e584a82589c6cce6a3590a254a1b3a423768d8b9d0b87e",
+    "traversal_fingerprint": "sha256:b4902daae4760017b6b3b9129c44f5f262abe107fa462f1ffad58497417dc85f"
+  },
+  "analyzer_revision": "graphifyy/0.9.48",
+  "blockers": [],
+  "coverage": {
+    "complete_supported_search": true,
+    "encountered_may_evidence": false,
+    "encountered_partial_evidence": false,
+    "encountered_unknown_evidence": false,
+    "expanded_count": 0,
+    "input_resolution": "RESOLVED",
+    "query_bounds": {
+      "direction": "FORWARD",
+      "effective_allowed_relations": [
+        "FLOWS_TO",
+        "PASSED_AS_ARGUMENT",
+        "READ_FROM",
+        "RETURNED_AS",
+        "TRANSFORMED_BY",
+        "WRITTEN_TO"
+      ],
+      "max_depth": 6,
+      "max_expansions": 2000,
+      "max_paths": 50,
+      "rejected_relations": [],
+      "requested_allowed_relations": [
+        "FLOWS_TO",
+        "PASSED_AS_ARGUMENT",
+        "READ_FROM",
+        "RETURNED_AS",
+        "TRANSFORMED_BY",
+        "WRITTEN_TO"
+      ],
+      "stop_nodes": []
+    },
+    "query_validity": true,
+    "rejected_relations": [],
+    "search_coverage": "COMPLETE_FOR_SUPPORTED_CONSTRUCT",
+    "start_node_found": true,
+    "target_node_found": true,
+    "termination_reason": "COMPLETE",
+    "truncated": false,
+    "visited_count": 1
+  },
+  "facts": [],
+  "fingerprint": "ef744d8641573288fcb188523662128518568a1ca44f31b660669253d82d44fe",
+  "format": "graphify.structural_evidence.v2",
+  "paths": [
+    {
+      "coverage": "COMPLETE_FOR_SUPPORTED_CONSTRUCT",
+      "exactness": "EXACT_FOR_RETURNED_PATH",
+      "path_identity": [],
+      "receiver_confidence": "PROVEN",
+      "supporting_evidence_keys": []
+    }
+  ],
+  "provider_id": "graphify",
+  "query": {
+    "direction": "FORWARD",
+    "effective_allowed_relations": [
+      "FLOWS_TO",
+      "PASSED_AS_ARGUMENT",
+      "READ_FROM",
+      "RETURNED_AS",
+      "TRANSFORMED_BY",
+      "WRITTEN_TO"
+    ],
+    "max_depth": 6,
+    "max_expansions": 2000,
+    "max_paths": 50,
+    "rejected_relations": [],
+    "requested_allowed_relations": [
+      "FLOWS_TO",
+      "PASSED_AS_ARGUMENT",
+      "READ_FROM",
+      "RETURNED_AS",
+      "TRANSFORMED_BY",
+      "WRITTEN_TO"
+    ],
+    "start": "src_acme_pipeline_data_value_pipeline_run_value_parameter_in_51_53",
+    "stop_nodes": [],
+    "target": "src_acme_pipeline_data_value_pipeline_run_value_parameter_in_51_53"
+  },
+  "schema_version": 2,
+  "source_revision_scope": {
+    "provider_id": "graphify",
+    "source_class": "git.commit",
+    "source_revision": "35cf74e79d671f982988988922f3a1659ed6ee60"
+  }
+}

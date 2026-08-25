@@ -8,6 +8,7 @@ pass.
 """
 from __future__ import annotations
 
+from copy import deepcopy
 import json
 import os
 from pathlib import Path
@@ -325,6 +326,109 @@ def main() -> int:
     check("mismatch-precedence-source-revision",
           revision_report.verdict is gvr.VerificationVerdict.UNKNOWN
           and any(issue.code == "SOURCE_REVISION_MISMATCH" for issue in revision_report.issues))
+
+    # ---- Task37c: genuine producer zero-step identity vectors ----
+
+    clean_fixture = Path(os.environ["GVR_TASK37C_CLEAN_FIXTURE"])
+    boundary_fixture = Path(os.environ["GVR_TASK37C_BOUNDARY_FIXTURE"])
+    clean_doc = json.loads(clean_fixture.read_text(encoding="utf-8"))
+    boundary_doc = json.loads(boundary_fixture.read_text(encoding="utf-8"))
+
+    def dataflow_verdict(traversal: dict) -> tuple[str, set]:
+        from gvr.verifiers.data_flow import (
+            DataFlowClaim,
+            DataFlowClaimKind,
+            DataFlowQueryScope,
+            verify_data_flow_claim,
+        )
+
+        bounds = traversal["query_bounds"]
+        claim = DataFlowClaim(
+            kind=DataFlowClaimKind.CAN_FLOW_TO,
+            start=str(traversal["start"]),
+            target=str(traversal["start"]),
+            scope=DataFlowQueryScope(
+                direction=traversal["direction"],
+                effective_allowed_relations=frozenset(bounds["effective_allowed_relations"]),
+                stop_nodes=frozenset(bounds["stop_nodes"]),
+            ),
+            evidence_namespace="task37c-matrix",
+        )
+        report = verify_data_flow_claim(claim, traversal)
+        return report.verdict.name, {issue.code for issue in report.issues}
+
+    # Both producer-valid vectors parse and replay deterministically.
+    clean_snapshot = ingest_graphify_structural_evidence_v2(clean_doc)
+    clean_replay = ingest_graphify_structural_evidence_v2(clean_snapshot.to_dict())
+    check("task37c-clean-vector-parses", clean_replay.fingerprint == clean_doc["fingerprint"])
+    boundary_snapshot = ingest_graphify_structural_evidence_v2(boundary_doc)
+    boundary_replay = ingest_graphify_structural_evidence_v2(boundary_snapshot.to_dict())
+    check("task37c-boundary-vector-parses", boundary_replay.fingerprint == boundary_doc["fingerprint"])
+
+    # Clean identity may be decisive positive.
+    clean_traversal = clean_snapshot.to_gvr_traversal_dict()
+    clean_authority = validate_graphify_envelope_authority(clean_traversal)
+    check("task37c-clean-identity-decisive-positive",
+          clean_authority.positive_authorized is True and clean_authority.negative_authorized is False)
+
+    # Boundary identity parses but stays non-decisive UNKNOWN, never malformed.
+    boundary_traversal = boundary_snapshot.to_gvr_traversal_dict()
+    boundary_authority = validate_graphify_envelope_authority(boundary_traversal)
+    check("task37c-boundary-identity-non-decisive",
+          boundary_authority.positive_authorized is False and boundary_authority.negative_authorized is False)
+    verdict_name, codes = dataflow_verdict(boundary_traversal)
+    check("task37c-boundary-identity-unknown-verdict",
+          verdict_name == "UNKNOWN" and "BLOCKING_BOUNDARY" in codes
+          and "MALFORMED_TRAVERSAL" not in codes and "MALFORMED_PATH" not in codes,
+          f"{verdict_name} {codes}")
+
+    # Mixed zero+nonzero paths are rejected at the parser.
+    donor = json.loads(fixture.read_text(encoding="utf-8"))
+    proven_fact = next(item for item in donor["facts"] if item["receiver_confidence"] == "PROVEN")
+    proven_fact["path_identity"] = [[proven_fact["key"]]]
+    mixed = json.loads(json.dumps(clean_doc))
+    mixed["facts"] = [proven_fact]
+    mixed["paths"] = [
+        {
+            "path_identity": [],
+            "supporting_evidence_keys": [],
+            "exactness": "EXACT_FOR_RETURNED_PATH",
+            "receiver_confidence": "PROVEN",
+            "coverage": "COMPLETE_FOR_SUPPORTED_CONSTRUCT",
+        },
+        {
+            "path_identity": [proven_fact["key"]],
+            "supporting_evidence_keys": [proven_fact["key"]],
+            "exactness": "EXACT_FOR_RETURNED_PATH",
+            "receiver_confidence": "PROVEN",
+            "coverage": "COMPLETE_FOR_SUPPORTED_CONSTRUCT",
+        },
+    ]
+    mixed["fingerprint"] = graphify_structural_evidence_fingerprint(mixed)
+    expect_raises(
+        GraphifyStructuralEvidenceError,
+        lambda: ingest_graphify_structural_evidence_v2(mixed),
+        "task37c-mixed-zero-nonzero-paths-rejected",
+    )
+
+    # Duplicate zero identity paths stay rejected over a genuine vector.
+    duplicate_zeros = json.loads(json.dumps(clean_doc))
+    duplicate_zeros["paths"].append(deepcopy(duplicate_zeros["paths"][0]))
+    duplicate_zeros["fingerprint"] = graphify_structural_evidence_fingerprint(duplicate_zeros)
+    expect_raises(
+        GraphifyStructuralEvidenceError,
+        lambda: ingest_graphify_structural_evidence_v2(duplicate_zeros),
+        "task37c-duplicate-zero-paths-rejected",
+    )
+
+    # Boundary tamper with a stale seal fails closed on the installed wheel.
+    tampered = json.loads(json.dumps(boundary_doc))
+    tampered["coverage"]["complete_supported_search"] = True
+    expect_raises(
+        GraphifyStructuralEvidenceError,
+        lambda: ingest_graphify_structural_evidence_v2(tampered),
+        "task37c-boundary-tamper-rejected",
+    )
 
     if failures:
         print("MATRIX FAILED:", failures)

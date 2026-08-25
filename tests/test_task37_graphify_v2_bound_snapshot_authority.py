@@ -461,6 +461,8 @@ def test_task37_29_installed_wheel_attack_replay_matrix(tmp_path: Path) -> None:
 
     env = {key: value for key, value in os.environ.items() if key != "PYTHONPATH"}
     env["GVR_TASK37B_FIXTURE"] = str(FIXTURE.resolve())
+    env["GVR_TASK37C_CLEAN_FIXTURE"] = str((FIXTURE.parent / "structural_evidence_v2_zero_step_identity_clean.json").resolve())
+    env["GVR_TASK37C_BOUNDARY_FIXTURE"] = str((FIXTURE.parent / "structural_evidence_v2_zero_step_identity_boundary.json").resolve())
     matrix = subprocess.run(
         [str(venv_python), str(WHEEL_MATRIX_SCRIPT.resolve())],
         capture_output=True,

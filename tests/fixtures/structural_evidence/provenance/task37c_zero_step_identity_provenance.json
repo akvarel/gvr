@@ -1,0 +1,36 @@
+{
+  "analyzer_revision": "graphifyy/0.9.48",
+  "authenticity": "Documents are direct producer output; no field was mutated or resealed.",
+  "generator": "gen_vectors.py (this directory)",
+  "pipeline": [
+    "derive_git_source_authority(repo)",
+    "build_bound_structural_index(authority, rglob('*.java'), cache_root)",
+    "run_bound_data_flow_query(index, DataFlowQuery(start=s, target=s, max_depth=6))",
+    "build_structural_evidence_snapshot(analysis)",
+    "StructuralEvidenceSnapshot.to_dict()"
+  ],
+  "producer_checkout": "/sharedssd/git/graphify",
+  "producer_head": "529ade498158a86e6607138b1c3e717874553294",
+  "producer_head_dirty": false,
+  "producer_repository": "git@github.com:akvarel/graphify.git",
+  "vectors": {
+    "boundary": {
+      "boundary_keys": [
+        "bnd:43c8a4164e7ab5e47228a3718a19405f922391f706b6e73588ccc1d6a68298ae",
+        "bnd:9bd20a8c6151fb0dcbb1f3a2ee4e76903be4f341779bdf79c6f94ba70d8a3197"
+      ],
+      "file": "structural_evidence_v2_zero_step_identity_boundary.json",
+      "fingerprint": "0623ecc71e2771550b8af3cabd11340797c0f02595222488bef72ab91f73948b",
+      "fixture_source_sha256": "7162ffeb5b599c6d87090cd75cb938f6e4c5f7457f00b2f9acba3629c784598c",
+      "query_start_node": "src_acme_pipeline_data_value_pipeline_run_value_parameter_in_51_53",
+      "source_revision": "474dc8a20d5deb93fab6030eee487bf894bb5491"
+    },
+    "clean": {
+      "file": "structural_evidence_v2_zero_step_identity_clean.json",
+      "fingerprint": "ef744d8641573288fcb188523662128518568a1ca44f31b660669253d82d44fe",
+      "fixture_source_sha256": "85b944c9872326c4e2945c5b6a5b28e92b1df6e37e5ab55d1840e33f3aa675b6",
+      "query_start_node": "src_acme_pipeline_data_value_pipeline_run_value_parameter_in_51_53",
+      "source_revision": "35cf74e79d671f982988988922f3a1659ed6ee60"
+    }
+  }
+}

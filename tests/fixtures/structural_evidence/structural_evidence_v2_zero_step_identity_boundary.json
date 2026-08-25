@@ -1,0 +1,178 @@
+{
+  "analysis_binding": {
+    "binding_fingerprint": "sha256:6b6fa21029d1aea5b8e936507228850eaff56b2226e4e82ef4aebf4192b43bf8",
+    "index_fingerprint": "sha256:ad531a1b0bb2e27e7d0bdc7ef6f0b86a52759f7f9858fed7dae0304c8601adce",
+    "source_scope_fingerprint": "5a6ae3a58fdeb64b9a853f755bd3ea74b4d0e9b0b3f697d9132c7f72cd45ea20",
+    "traversal_fingerprint": "sha256:4df40c68d6250ffe04a053a85e425a72b975da294fc20571ea44e793b1feed50"
+  },
+  "analyzer_revision": "graphifyy/0.9.48",
+  "blockers": [
+    {
+      "arity": 0,
+      "caller_location": "L3:C61:91-100",
+      "candidate_count": 0,
+      "canonical_caller_file": "src/acme/Pipeline.java",
+      "capability": "cross_file_data_flow",
+      "details": {
+        "arity": 0,
+        "boundary_evidence_key": "bnd:43c8a4164e7ab5e47228a3718a19405f922391f706b6e73588ccc1d6a68298ae",
+        "caller_location": "L3:C61:91-100",
+        "candidate_count": 0,
+        "canonical_caller_file": "src/acme/Pipeline.java",
+        "capability": "cross_file_data_flow",
+        "diagnostic_evidence_key": "diag:src_acme_pipeline_cross_file_data_flow_value_0_l3_c61_91_100",
+        "diagnostic_kind": "cross_file_resolution",
+        "diagnostic_node_id": "src_acme_pipeline_cross_file_data_flow_value_0_l3_c61_91_100",
+        "entity_fqn": "",
+        "framework": "",
+        "import_context": "same_package",
+        "mapping_target": "",
+        "method": "value",
+        "reason": "callee_unresolved",
+        "receiver": "Result",
+        "receiver_confidence": "MAY",
+        "receiver_fqn": "acme.Result",
+        "repository_fqn": "",
+        "resolution": "UNRESOLVED",
+        "type": "boundary_event"
+      },
+      "diagnostic_key": "diag:src_acme_pipeline_cross_file_data_flow_value_0_l3_c61_91_100",
+      "diagnostic_kind": "cross_file_resolution",
+      "framework": "",
+      "import_context": "same_package",
+      "key": "bnd:43c8a4164e7ab5e47228a3718a19405f922391f706b6e73588ccc1d6a68298ae",
+      "method": "value",
+      "reason": "callee_unresolved",
+      "reason_code": "callee_unresolved",
+      "receiver_confidence": "MAY",
+      "receiver_fqn": "acme.Result",
+      "resolution": "UNRESOLVED"
+    },
+    {
+      "arity": 1,
+      "caller_location": "L3:C38:68-82",
+      "candidate_count": 0,
+      "canonical_caller_file": "src/acme/Pipeline.java",
+      "capability": "cross_file_data_flow",
+      "details": {
+        "arity": 1,
+        "boundary_evidence_key": "bnd:9bd20a8c6151fb0dcbb1f3a2ee4e76903be4f341779bdf79c6f94ba70d8a3197",
+        "caller_location": "L3:C38:68-82",
+        "candidate_count": 0,
+        "canonical_caller_file": "src/acme/Pipeline.java",
+        "capability": "cross_file_data_flow",
+        "diagnostic_evidence_key": "diag:src_acme_pipeline_cross_file_data_flow_result_1_l3_c38_68_82",
+        "diagnostic_kind": "cross_file_resolution",
+        "diagnostic_node_id": "src_acme_pipeline_cross_file_data_flow_result_1_l3_c38_68_82",
+        "entity_fqn": "",
+        "framework": "",
+        "import_context": "same_package",
+        "mapping_target": "",
+        "method": "Result",
+        "reason": "callee_unresolved",
+        "receiver": "Result",
+        "receiver_confidence": "PROVEN",
+        "receiver_fqn": "acme.Result",
+        "repository_fqn": "",
+        "resolution": "UNRESOLVED",
+        "type": "boundary_event"
+      },
+      "diagnostic_key": "diag:src_acme_pipeline_cross_file_data_flow_result_1_l3_c38_68_82",
+      "diagnostic_kind": "cross_file_resolution",
+      "framework": "",
+      "import_context": "same_package",
+      "key": "bnd:9bd20a8c6151fb0dcbb1f3a2ee4e76903be4f341779bdf79c6f94ba70d8a3197",
+      "method": "Result",
+      "reason": "callee_unresolved",
+      "reason_code": "callee_unresolved",
+      "receiver_confidence": "PROVEN",
+      "receiver_fqn": "acme.Result",
+      "resolution": "UNRESOLVED"
+    }
+  ],
+  "coverage": {
+    "complete_supported_search": false,
+    "encountered_may_evidence": false,
+    "encountered_partial_evidence": false,
+    "encountered_unknown_evidence": false,
+    "expanded_count": 0,
+    "input_resolution": "RESOLVED",
+    "query_bounds": {
+      "direction": "FORWARD",
+      "effective_allowed_relations": [
+        "FLOWS_TO",
+        "PASSED_AS_ARGUMENT",
+        "READ_FROM",
+        "RETURNED_AS",
+        "TRANSFORMED_BY",
+        "WRITTEN_TO"
+      ],
+      "max_depth": 6,
+      "max_expansions": 2000,
+      "max_paths": 50,
+      "rejected_relations": [],
+      "requested_allowed_relations": [
+        "FLOWS_TO",
+        "PASSED_AS_ARGUMENT",
+        "READ_FROM",
+        "RETURNED_AS",
+        "TRANSFORMED_BY",
+        "WRITTEN_TO"
+      ],
+      "stop_nodes": []
+    },
+    "query_validity": true,
+    "rejected_relations": [],
+    "search_coverage": "PARTIAL",
+    "start_node_found": true,
+    "target_node_found": true,
+    "termination_reason": "COMPLETE",
+    "truncated": false,
+    "visited_count": 1
+  },
+  "facts": [],
+  "fingerprint": "0623ecc71e2771550b8af3cabd11340797c0f02595222488bef72ab91f73948b",
+  "format": "graphify.structural_evidence.v2",
+  "paths": [
+    {
+      "coverage": "COMPLETE_FOR_SUPPORTED_CONSTRUCT",
+      "exactness": "EXACT_FOR_RETURNED_PATH",
+      "path_identity": [],
+      "receiver_confidence": "PROVEN",
+      "supporting_evidence_keys": []
+    }
+  ],
+  "provider_id": "graphify",
+  "query": {
+    "direction": "FORWARD",
+    "effective_allowed_relations": [
+      "FLOWS_TO",
+      "PASSED_AS_ARGUMENT",
+      "READ_FROM",
+      "RETURNED_AS",
+      "TRANSFORMED_BY",
+      "WRITTEN_TO"
+    ],
+    "max_depth": 6,
+    "max_expansions": 2000,
+    "max_paths": 50,
+    "rejected_relations": [],
+    "requested_allowed_relations": [
+      "FLOWS_TO",
+      "PASSED_AS_ARGUMENT",
+      "READ_FROM",
+      "RETURNED_AS",
+      "TRANSFORMED_BY",
+      "WRITTEN_TO"
+    ],
+    "start": "src_acme_pipeline_data_value_pipeline_run_value_parameter_in_51_53",
+    "stop_nodes": [],
+    "target": "src_acme_pipeline_data_value_pipeline_run_value_parameter_in_51_53"
+  },
+  "schema_version": 2,
+  "source_revision_scope": {
+    "provider_id": "graphify",
+    "source_class": "git.commit",
+    "source_revision": "474dc8a20d5deb93fab6030eee487bf894bb5491"
+  }
+}
