@@ -5,6 +5,11 @@ from enum import Enum
 from typing import Any, Mapping
 
 from .canonical import canonical_fingerprint
+from .provider_independence import (
+    BUILTIN_PROVIDER_IMPLEMENTATION_REGISTRY,
+    ProviderImplementationRegistry,
+    VerifiedIndependenceFamily,
+)
 from .model import Evidence, VerificationVerdict
 
 GRAPH_EVIDENCE_FINGERPRINT_FORMAT = "gvr.code_graph.evidence.v1"
@@ -226,22 +231,29 @@ class ProviderImplementationIdentity:
     provider_id: str
     implementation_id: str
     family_id: str
+    implementation_revision: str = "unspecified"
+    provider_kind: str = "low-level"
 
     def __post_init__(self) -> None:
         if not self.provider_id or not self.implementation_id or not self.family_id:
             raise GraphEvidenceModelError("provider identity fields must be non-empty")
-        if str(self.family_id) != str(self.provider_id):
-            raise GraphEvidenceModelError("provider family must be sealed to provider_id")
         object.__setattr__(self, "provider_id", str(self.provider_id))
         object.__setattr__(self, "implementation_id", str(self.implementation_id))
         object.__setattr__(self, "family_id", str(self.family_id))
+        object.__setattr__(self, "implementation_revision", str(self.implementation_revision))
+        object.__setattr__(self, "provider_kind", str(self.provider_kind))
 
     def to_dict(self) -> dict[str, str]:
-        return {
+        value = {
             "provider_id": self.provider_id,
             "implementation_id": self.implementation_id,
             "family_id": self.family_id,
         }
+        if self.implementation_revision != "unspecified":
+            value["implementation_revision"] = self.implementation_revision
+        if self.provider_kind != "low-level":
+            value["provider_kind"] = self.provider_kind
+        return value
 
 
 @dataclass(frozen=True)
@@ -471,6 +483,7 @@ class CodeGraphProviderObservation:
     claim_fingerprint: str
     graph_model: GraphEvidenceModel
     graph_model_fingerprint: str
+    independence: VerifiedIndependenceFamily
 
     @property
     def provider_identity(self) -> ProviderImplementationIdentity:
@@ -510,6 +523,7 @@ def encode_code_graph_observation_evidence(
     implementation_id: str | None = None,
     family_id: str | None = None,
     source_snapshot: Mapping[str, Any] | None = None,
+    provider_registry: ProviderImplementationRegistry | None = None,
 ) -> Evidence:
     """Encode a canonical provider graph snapshot as one GVR evidence record.
 
@@ -527,6 +541,8 @@ def encode_code_graph_observation_evidence(
             raise CodeGraphObservationError("claim or claim_fingerprint is required")
         claim_fingerprint = claim_fingerprint_for_observation(claim)
     identity = graph_model.provider_identity
+    registry = provider_registry or BUILTIN_PROVIDER_IMPLEMENTATION_REGISTRY
+    independence = registry.resolve(identity)
     provider_id = identity.provider_id
     if not provider_id:
         raise CodeGraphObservationError("graph model provider is required")
@@ -542,6 +558,7 @@ def encode_code_graph_observation_evidence(
         "provider_id": provider_id,
         "implementation_id": identity.implementation_id,
         "family_id": identity.family_id,
+        "independence": independence.to_dict(),
         "claim_fingerprint": str(claim_fingerprint),
         "typed_authority": graph_model._typed_authority,
         "source_snapshot": graph_model.source_snapshot,
@@ -563,7 +580,11 @@ def encode_code_graph_observation_evidence(
     )
 
 
-def decode_code_graph_observation_evidence(evidence: Evidence) -> CodeGraphProviderObservation:
+def decode_code_graph_observation_evidence(
+    evidence: Evidence,
+    *,
+    provider_registry: ProviderImplementationRegistry | None = None,
+) -> CodeGraphProviderObservation:
     """Decode canonical provider-observation evidence without provider parsing."""
 
     if not isinstance(evidence, Evidence):
@@ -597,16 +618,19 @@ def decode_code_graph_observation_evidence(evidence: Evidence) -> CodeGraphProvi
         raise CodeGraphObservationError("code graph observation graph model fingerprint mismatch")
     if _mapping(payload.get("source_revision", {}), "source_revision") != graph_model.source_revision.to_dict():
         raise CodeGraphObservationError("code graph observation source revision mismatch")
-    if _mapping(payload.get("query_scope", {}), "query_scope") != graph_model.query_scope.to_dict():
+    if _snapshot(_mapping(payload.get("query_scope", {}), "query_scope")) != _snapshot(graph_model.query_scope.to_dict()):
         raise CodeGraphObservationError("code graph observation query scope mismatch")
-    if _mapping(payload.get("coverage", {}), "coverage") != graph_model.coverage.to_dict():
+    if _snapshot(_mapping(payload.get("coverage", {}), "coverage")) != _snapshot(graph_model.coverage.to_dict()):
         raise CodeGraphObservationError("code graph observation coverage mismatch")
     provider_id = _required_string(payload, "provider_id")
     family_id = _required_string(payload, "family_id")
     if provider_id != graph_model.provider:
         raise CodeGraphObservationError("code graph observation provider does not match graph model provider")
-    if family_id != provider_id:
-        raise CodeGraphObservationError("code graph observation provider family is not adapter-sealed")
+    registry = provider_registry or BUILTIN_PROVIDER_IMPLEMENTATION_REGISTRY
+    independence = registry.resolve(graph_model.provider_identity)
+    recorded_independence = _mapping(payload.get("independence", {}), "independence")
+    if _snapshot(recorded_independence) != _snapshot(independence.to_dict()):
+        raise CodeGraphObservationError("code graph observation independence resolution mismatch")
     return CodeGraphProviderObservation(
         evidence_id=evidence.id,
         provider_id=provider_id,
@@ -615,6 +639,7 @@ def decode_code_graph_observation_evidence(evidence: Evidence) -> CodeGraphProvi
         claim_fingerprint=_required_string(payload, "claim_fingerprint"),
         graph_model=graph_model,
         graph_model_fingerprint=graph_model.fingerprint,
+        independence=independence,
     )
 
 
@@ -635,6 +660,8 @@ def graph_model_from_dict(document: Mapping[str, Any]) -> GraphEvidenceModel:
                 _required_string(provider, "provider_id"),
                 _required_string(provider, "implementation_id"),
                 _required_string(provider, "family_id"),
+                str(provider.get("implementation_revision", "unspecified")),
+                str(provider.get("provider_kind", "low-level")),
             ),
             source_revision=SourceRevisionIdentity(
                 _required_string(revision, "repository"),

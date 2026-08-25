@@ -17,9 +17,10 @@ from gvr import (
     verify_data_flow_claim,
 )
 from gvr.code_graph import GraphEvidenceModelError
-from gvr.code_graph import CodeGraphObservationError, GraphEvidenceModel, encode_code_graph_observation_evidence
+from gvr.code_graph import CodeGraphObservationError, GraphEvidenceModel, ProviderImplementationIdentity, encode_code_graph_observation_evidence
 from gvr.graphify_contract import expected_graphify_df_key, validate_graphify_df_evidence
 from gvr.verifiers.corroboration import ProviderVerificationObservation, reconcile_provider_observations
+from gvr.provider_independence import builtin_provider_implementation_registry
 from gvr.model import VerificationIssue, VerificationReport
 from gvr.verifiers.data_flow import SourceRevision
 
@@ -118,6 +119,7 @@ def provider_report(verdict, code, evidence_ids=()):
 
 
 def provider_obs(provider, impl, family, verdict, code):
+    identity = ProviderImplementationIdentity(provider, impl, family, provider_kind="graphify")
     return ProviderVerificationObservation(
         provider_id=provider,
         implementation_id=impl,
@@ -125,6 +127,7 @@ def provider_obs(provider, impl, family, verdict, code):
         source_snapshot={"rev": "1"},
         claim_fingerprint="claim",
         report=provider_report(verdict, code, (provider,)),
+        independence=builtin_provider_implementation_registry().resolve(identity),
     )
 
 

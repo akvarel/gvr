@@ -97,7 +97,7 @@ def test_independent_decisive_pass_fail_conflict_unknown_preserves_evidence():
     ])
     assert result.verdict is VerificationVerdict.UNKNOWN
     assert result.evidence_ids == ("f", "p")
-    assert [i.code for i in result.issues][-2:] == ["CONFLICTING_GRAPH_EVIDENCE", "PROVIDER_CONFLICT"]
+    assert "PROVIDER_CONFLICT" not in {i.code for i in result.issues}
 
 
 def test_two_independent_passes_are_corroborated():
@@ -107,7 +107,8 @@ def test_two_independent_passes_are_corroborated():
     ])
     assert result.verdict is VerificationVerdict.PASS
     assert result.evidence_ids == ("a", "g")
-    assert any(i.code == "PROVIDER_CORROBORATED_PASS" for i in result.issues)
+    assert not any(i.code == "PROVIDER_CORROBORATED_PASS" for i in result.issues)
+    assert result.metadata["verified_independence_families"] == ()
 
 
 def test_duplicates_and_reordering_are_fingerprint_invariant():

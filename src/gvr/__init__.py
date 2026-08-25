@@ -15,6 +15,15 @@ from .core import (
     simulate,
 )
 from .canonical import canonical_fingerprint, canonical_json
+from .provider_independence import (
+    BUILTIN_PROVIDER_IMPLEMENTATION_REGISTRY,
+    PROVIDER_IMPLEMENTATION_REGISTRY_FINGERPRINT_FORMAT,
+    IndependenceTrustState,
+    ProviderImplementationRegistration,
+    ProviderImplementationRegistry,
+    VerifiedIndependenceFamily,
+    builtin_provider_implementation_registry,
+)
 from .code_graph import (
     CODE_GRAPH_OBSERVATION_EVIDENCE_KIND,
     CODE_GRAPH_OBSERVATION_FINGERPRINT_FORMAT,
@@ -358,6 +367,11 @@ __all__ = [
     "CodeGraphScope", "verify_code_graph_claim", "verify_code_graph_observation",
     "CoverageCertificate", "GraphFacts", "GraphQueryScope",
     "ProviderImplementationIdentity", "SourceRevisionIdentity",
+    "IndependenceTrustState", "VerifiedIndependenceFamily",
+    "ProviderImplementationRegistration", "ProviderImplementationRegistry",
+    "BUILTIN_PROVIDER_IMPLEMENTATION_REGISTRY",
+    "PROVIDER_IMPLEMENTATION_REGISTRY_FINGERPRINT_FORMAT",
+    "builtin_provider_implementation_registry",
     "BLOCKING_RESOLUTIONS", "COMPLETE_COVERAGE", "DATA_FLOW_VERIFIER",
     "SUPPORTED_DATA_FLOW_RELATIONS", "DataFlowClaim", "DataFlowClaimKind",
     "DataFlowQueryScope", "SourceRevision", "CompletenessCertificate",

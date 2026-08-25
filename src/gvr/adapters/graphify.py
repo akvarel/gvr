@@ -366,7 +366,9 @@ def encode_graphify_code_graph_observation_evidence(
     query_scope = _graphify_query_scope(result)
     coverage = _graphify_coverage(result)
     graph = GraphEvidenceModel(
-        provider_identity=ProviderImplementationIdentity("graphify", implementation_id, "graphify"),
+        provider_identity=ProviderImplementationIdentity(
+            "graphify", implementation_id, "graphify", provider_kind="graphify"
+        ),
         source_revision=revision,
         query_scope=query_scope,
         coverage=coverage,

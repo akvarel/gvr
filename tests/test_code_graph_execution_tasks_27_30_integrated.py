@@ -536,7 +536,8 @@ def test_iv_independent_decisive_pass_fail_conflict_is_unknown(tmp_path: Path) -
 
     assert report.verdict is VerificationVerdict.UNKNOWN
     assert report.evidence_ids == ("obs.exact.fail", "obs.exact.pass")
-    assert {"PATH_ABSENT", "PROVEN_PATH", "PROVIDER_CONFLICT"} <= issue_codes(report)
+    assert {"PATH_ABSENT", "PROVEN_PATH"} <= issue_codes(report)
+    assert "PROVIDER_CONFLICT" not in issue_codes(report)
 
 
 def test_v_close_reopen_replay_idempotency_then_one_provider_snapshot_advance_isolated_invalidation(tmp_path: Path) -> None:
@@ -702,5 +703,5 @@ def test_ix_same_provider_family_pass_fail_contradiction_is_not_independent_sqli
     report = root_report(result, claim.claim_id)
 
     assert report.verdict is VerificationVerdict.UNKNOWN
-    assert "PROVIDER_FAMILY_CONTRADICTION" in issue_codes(report)
+    assert "PROVIDER_FAMILY_CONTRADICTION" not in issue_codes(report)
     assert "PROVIDER_CONFLICT" not in issue_codes(report)

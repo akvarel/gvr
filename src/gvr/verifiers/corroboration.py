@@ -5,6 +5,7 @@ from typing import Any, Iterable, Mapping
 
 from ..canonical import canonical_fingerprint
 from ..model import VerificationIssue, VerificationReport, VerificationVerdict
+from ..provider_independence import IndependenceTrustState, VerifiedIndependenceFamily
 
 PROVIDER_CORROBORATION_VERIFIER = "gvr.provider_corroboration.v1"
 PROVIDER_CORROBORATION_FINGERPRINT_FORMAT = "gvr.provider_corroboration.report.v1"
@@ -45,6 +46,7 @@ class ProviderVerificationObservation:
     claim_fingerprint: str
     report: VerificationReport
     metadata: Mapping[str, Any] = field(default_factory=dict)
+    independence: VerifiedIndependenceFamily | None = None
 
     def __post_init__(self) -> None:
         if not self.provider_id or not self.implementation_id or not self.family_id or not self.claim_fingerprint:
@@ -53,6 +55,14 @@ class ProviderVerificationObservation:
             raise ValueError("provider observation report must be a VerificationReport")
         object.__setattr__(self, "source_snapshot", _stable(self.source_snapshot))
         object.__setattr__(self, "metadata", _stable(self.metadata))
+        if self.independence is None:
+            object.__setattr__(
+                self,
+                "independence",
+                VerifiedIndependenceFamily(self.family_id, (), IndependenceTrustState.UNVERIFIED),
+            )
+        elif not isinstance(self.independence, VerifiedIndependenceFamily):
+            raise ValueError("provider observation independence must be registry-resolved")
 
     @property
     def snapshot_fingerprint(self) -> str:
@@ -60,12 +70,17 @@ class ProviderVerificationObservation:
 
     @property
     def identity(self) -> tuple[str, str, str, str, str, str]:
+        independence_key = (
+            self.independence.family_id
+            if self.independence.trust_state is IndependenceTrustState.VERIFIED
+            else f"UNVERIFIED:{self.family_id}:{self.provider_id}"
+        )
         return (
             self.claim_fingerprint,
             self.snapshot_fingerprint,
-            self.family_id,
+            independence_key,
             self.implementation_id,
-            self.provider_id,
+            "" if self.independence.trust_state is IndependenceTrustState.VERIFIED else self.provider_id,
             _report_fingerprint(self.report),
         )
 
@@ -102,13 +117,16 @@ def reconcile_provider_observations(observations: Iterable[ProviderVerificationO
     contradictory_families = tuple(sorted(pass_families & fail_families))
     unknown_only = not pass_families and not fail_families
 
-    if contradictory_families:
+    decisive_pass = _has_decisive(deduped, VerificationVerdict.PASS)
+    decisive_fail = _has_decisive(deduped, VerificationVerdict.FAIL)
+
+    if hard_mismatch:
+        verdict = VerificationVerdict.UNKNOWN
+    elif contradictory_families:
         issues.append(_issue("PROVIDER_FAMILY_CONTRADICTION", VerificationVerdict.UNKNOWN, evidence_ids))
         verdict = VerificationVerdict.UNKNOWN
     elif pass_families and fail_families:
         issues.extend(_issues("CONFLICTING_GRAPH_EVIDENCE", VerificationVerdict.UNKNOWN, evidence_ids))
-        verdict = VerificationVerdict.UNKNOWN
-    elif hard_mismatch:
         verdict = VerificationVerdict.UNKNOWN
     elif len(pass_families) >= 2:
         issues.append(_issue("PROVIDER_CORROBORATED_PASS", VerificationVerdict.PASS, evidence_ids))
@@ -116,10 +134,12 @@ def reconcile_provider_observations(observations: Iterable[ProviderVerificationO
     elif len(fail_families) >= 2:
         issues.append(_issue("PROVIDER_CORROBORATED_FAIL", VerificationVerdict.FAIL, evidence_ids))
         verdict = VerificationVerdict.FAIL
-    elif pass_families:
+    elif decisive_pass and decisive_fail:
+        verdict = VerificationVerdict.UNKNOWN
+    elif decisive_pass:
         issues.append(_issue("PROVIDER_SINGLE_FAMILY_DECISIVE_PASS", VerificationVerdict.PASS, evidence_ids))
         verdict = VerificationVerdict.PASS
-    elif fail_families:
+    elif decisive_fail:
         issues.append(_issue("PROVIDER_SINGLE_FAMILY_DECISIVE_FAIL", VerificationVerdict.FAIL, evidence_ids))
         verdict = VerificationVerdict.FAIL
     else:
@@ -133,9 +153,17 @@ def reconcile_provider_observations(observations: Iterable[ProviderVerificationO
 def _decisive_families(observations: tuple[ProviderVerificationObservation, ...], verdict: VerificationVerdict) -> frozenset[str]:
     families: set[str] = set()
     for obs in observations:
-        if obs.report.verdict is verdict and not _is_hint_or_heuristic(obs.report):
-            families.add(obs.family_id)
+        if (
+            obs.report.verdict is verdict
+            and not _is_hint_or_heuristic(obs.report)
+            and obs.independence.trust_state is IndependenceTrustState.VERIFIED
+        ):
+            families.add(obs.independence.family_id)
     return frozenset(families)
+
+
+def _has_decisive(observations: tuple[ProviderVerificationObservation, ...], verdict: VerificationVerdict) -> bool:
+    return any(obs.report.verdict is verdict and not _is_hint_or_heuristic(obs.report) for obs in observations)
 
 
 def _is_hint_or_heuristic(report: VerificationReport) -> bool:
@@ -187,9 +215,31 @@ def _final(
         "claim_fingerprints": claim_ids,
         "snapshot_groups": snapshot_groups,
         "providers": tuple((o.provider_id, o.implementation_id, o.family_id, o.report.verdict.value) for o in observations),
+        "verified_independence_families": tuple(sorted({
+            o.independence.family_id
+            for o in observations
+            if o.independence.trust_state is IndependenceTrustState.VERIFIED
+        })),
+        "unverified_provider_labels": tuple(sorted({
+            o.family_id
+            for o in observations
+            if o.independence.trust_state is IndependenceTrustState.UNVERIFIED
+        })),
         "malformed_observations": malformed,
     }
-    fp_payload = {"verdict": verdict.value, "issues": [(i.code, i.verdict.value, i.evidence_ids) for i in issues], "evidence_ids": evidence_ids, "metadata": metadata}
+    fp_metadata = {
+        "claim_fingerprints": claim_ids,
+        "snapshot_fingerprints": tuple(group[0] for group in snapshot_groups),
+        "observations": tuple(sorted((
+            o.independence.trust_state.value,
+            o.independence.family_id,
+            o.implementation_id,
+            o.report.verdict.value,
+            _report_fingerprint(o.report),
+        ) for o in observations)),
+        "malformed_observations": malformed,
+    }
+    fp_payload = {"verdict": verdict.value, "issues": [(i.code, i.verdict.value, i.evidence_ids) for i in issues], "evidence_ids": evidence_ids, "metadata": fp_metadata}
     metadata["fingerprint"] = canonical_fingerprint(fp_payload, fingerprint_format=PROVIDER_CORROBORATION_FINGERPRINT_FORMAT)
     return VerificationReport(verdict=verdict, verifier=PROVIDER_CORROBORATION_VERIFIER, issues=tuple(issues), evidence_ids=evidence_ids, metadata=metadata)
 

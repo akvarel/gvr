@@ -772,6 +772,7 @@ class _CodeGraphVerifierRuntime:
                         source_snapshot=decoded.graph_model.source_snapshot,
                         claim_fingerprint=decoded.claim_fingerprint,
                         report=mismatch_report,
+                        independence=decoded.independence,
                     ))
                     observations.append(ProviderVerificationObservation(
                         provider_id="gvr.expected_claim",
@@ -800,6 +801,7 @@ class _CodeGraphVerifierRuntime:
                     source_snapshot=decoded.graph_model.source_snapshot,
                     claim_fingerprint=decoded.claim_fingerprint,
                     report=provider_report,
+                    independence=decoded.independence,
                     metadata={
                         "evidence_id": evidence.id,
                         "graph_model_fingerprint": decoded.graph_model_fingerprint,

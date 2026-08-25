@@ -297,7 +297,9 @@ def encode_codeflow_code_graph_observation_evidence(
     if any(item != scopes[0] for item in scopes[1:]):
         raise GraphEvidenceModelError("CodeFlow query scope conflict")
     graph = GraphEvidenceModel(
-        provider_identity=ProviderImplementationIdentity("codeflow", implementation_id, "codeflow"),
+        provider_identity=ProviderImplementationIdentity(
+            "codeflow", implementation_id, "codeflow", provider_kind="codeflow"
+        ),
         source_revision=revisions[0],
         query_scope=scopes[0],
         coverage=CoverageCertificate(
