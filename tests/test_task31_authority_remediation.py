@@ -227,6 +227,7 @@ def test_task31_same_family_pass_fail_is_family_contradiction_not_independent_co
 
     codes = {issue.code for issue in report.issues}
     assert report.verdict is VerificationVerdict.UNKNOWN
-    assert "PROVIDER_FAMILY_CONTRADICTION" in codes
+    assert "PROVIDER_FAMILY_CONTRADICTION" not in codes
     assert "PROVIDER_CONFLICT" not in codes
+    assert report.metadata["verified_independence_families"] == ()
     assert "PROVIDER_CORROBORATED_PASS" not in codes

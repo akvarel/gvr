@@ -7,12 +7,14 @@ from gvr import (
     IndependenceTrustState,
     ProviderImplementationIdentity,
     ProviderImplementationRegistry,
+    ProviderOriginAuthority,
     SQLiteStorage,
     VerifiedIndependenceFamily,
     builtin_provider_implementation_registry,
     decode_code_graph_observation_evidence,
     encode_code_graph_observation_evidence,
 )
+from gvr.provider_independence import _attest_builtin_provider_origin
 from gvr.code_graph import GraphEvidenceModel
 from gvr.model import VerificationIssue, VerificationReport, VerificationVerdict
 from gvr.verifiers.corroboration import ProviderVerificationObservation, reconcile_provider_observations
@@ -27,16 +29,15 @@ def report(verdict: VerificationVerdict, evidence_id: str) -> VerificationReport
     )
 
 
-def fixture_registry() -> ProviderImplementationRegistry:
-    return builtin_provider_implementation_registry().with_registration(
+def fixture_registry() -> tuple[ProviderOriginAuthority, ProviderImplementationRegistry]:
+    authority = ProviderOriginAuthority.host_runtime("task34-test-runtime")
+    registry = ProviderImplementationRegistry.host_runtime(authority).with_registration(
         implementation_id="task34-deterministic-provider",
         provider_kind="task34-test",
-        family=VerifiedIndependenceFamily(
-            family_id="task34-independent",
-            implementation_ids=("task34-deterministic-provider",),
-            trust_state=IndependenceTrustState.VERIFIED,
-        ),
+        family_id="task34-independent",
+        authority=authority,
     )
+    return authority, registry
 
 
 def identity(provider_id: str, implementation_id: str, family_id: str, *, kind: str = "low-level") -> ProviderImplementationIdentity:
@@ -59,9 +60,15 @@ def observation(
     registry: ProviderImplementationRegistry | None = None,
     revision: str = "rev1",
     kind: str = "low-level",
+    authority: ProviderOriginAuthority | None = None,
 ) -> ProviderVerificationObservation:
     provider_identity = identity(provider_id, implementation_id, family_id, kind=kind)
-    resolution = (registry or builtin_provider_implementation_registry()).resolve(provider_identity)
+    selected = registry or builtin_provider_implementation_registry()
+    origin = (
+        _attest_builtin_provider_origin(provider_identity, adapter_kind=kind)
+        if kind in {"graphify", "codeflow"}
+        else selected.attest(provider_identity, authority=authority)
+    )
     return ProviderVerificationObservation(
         provider_id=provider_id,
         implementation_id=implementation_id,
@@ -69,7 +76,7 @@ def observation(
         source_snapshot={"repository": "repo", "revision": revision, "scope": "A->B"},
         claim_fingerprint="claim",
         report=report(verdict, evidence_id),
-        independence=resolution,
+        origin_attestation=origin,
     )
 
 
@@ -121,10 +128,10 @@ def test_task34_unregistered_distinct_family_strings_never_corroborate() -> None
 
 
 def test_task34_genuinely_registered_graphify_and_fixture_provider_corroborate() -> None:
-    registry = fixture_registry()
+    authority, registry = fixture_registry()
     result = reconcile_provider_observations([
         observation("graphify-display", "graphify", "forged", VerificationVerdict.PASS, "g", registry=registry, kind="graphify"),
-        observation("fixture-display", "task34-deterministic-provider", "forged-too", VerificationVerdict.PASS, "f", registry=registry, kind="task34-test"),
+        observation("fixture-display", "task34-deterministic-provider", "forged-too", VerificationVerdict.PASS, "f", registry=registry, kind="task34-test", authority=authority),
     ])
     assert result.verdict is VerificationVerdict.PASS
     assert result.metadata["verified_independence_families"] == ("graphify", "task34-independent")
@@ -143,10 +150,10 @@ def test_task34_same_verified_family_pass_fail_is_intra_family_unknown() -> None
 
 
 def test_task34_distinct_verified_families_pass_fail_is_cross_provider_unknown() -> None:
-    registry = fixture_registry()
+    authority, registry = fixture_registry()
     result = reconcile_provider_observations([
         observation("g", "graphify", "a", VerificationVerdict.PASS, "p", registry=registry, kind="graphify"),
-        observation("f", "task34-deterministic-provider", "b", VerificationVerdict.FAIL, "f", registry=registry, kind="task34-test"),
+        observation("f", "task34-deterministic-provider", "b", VerificationVerdict.FAIL, "f", registry=registry, kind="task34-test", authority=authority),
     ])
     assert result.verdict is VerificationVerdict.UNKNOWN
     assert "PROVIDER_CONFLICT" in codes(result)
@@ -154,10 +161,10 @@ def test_task34_distinct_verified_families_pass_fail_is_cross_provider_unknown()
 
 
 def test_task34_revision_mismatch_precedes_cross_provider_conflict() -> None:
-    registry = fixture_registry()
+    authority, registry = fixture_registry()
     result = reconcile_provider_observations([
         observation("g", "graphify", "a", VerificationVerdict.PASS, "p", registry=registry, kind="graphify", revision="rev1"),
-        observation("f", "task34-deterministic-provider", "b", VerificationVerdict.FAIL, "f", registry=registry, kind="task34-test", revision="rev2"),
+        observation("f", "task34-deterministic-provider", "b", VerificationVerdict.FAIL, "f", registry=registry, kind="task34-test", revision="rev2", authority=authority),
     ])
     assert result.verdict is VerificationVerdict.UNKNOWN
     assert "PROVIDER_SNAPSHOT_MISMATCH" in codes(result)
@@ -165,10 +172,10 @@ def test_task34_revision_mismatch_precedes_cross_provider_conflict() -> None:
 
 
 def test_task34_reorder_duplicates_and_transport_labels_do_not_change_fingerprint() -> None:
-    registry = fixture_registry()
+    authority, registry = fixture_registry()
     observations = [
         observation("display-g", "graphify", "caller-a", VerificationVerdict.PASS, "g", registry=registry, kind="graphify"),
-        observation("display-f", "task34-deterministic-provider", "caller-b", VerificationVerdict.PASS, "f", registry=registry, kind="task34-test"),
+        observation("display-f", "task34-deterministic-provider", "caller-b", VerificationVerdict.PASS, "f", registry=registry, kind="task34-test", authority=authority),
     ]
     first = reconcile_provider_observations(observations + [observations[0]])
     relabeled = [replace(observations[0], provider_id="other-display", family_id="other-label"), observations[1]]
@@ -178,13 +185,14 @@ def test_task34_reorder_duplicates_and_transport_labels_do_not_change_fingerprin
 
 
 def test_task34_sqlite_reopen_preserves_verified_resolution(tmp_path: Path) -> None:
-    registry = fixture_registry()
+    authority, registry = fixture_registry()
     graph = GraphEvidenceModel(provider_identity=identity("fixture-display", "task34-deterministic-provider", "caller-label", kind="task34-test"))
     evidence = encode_code_graph_observation_evidence(
         graph,
         evidence_id="task34.sqlite",
         claim_fingerprint="claim",
         provider_registry=registry,
+        provider_authority=authority,
     )
     decoded = decode_code_graph_observation_evidence(evidence, provider_registry=registry)
     assert decoded.independence.trust_state is IndependenceTrustState.VERIFIED

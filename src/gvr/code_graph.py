@@ -8,6 +8,8 @@ from .canonical import canonical_fingerprint
 from .provider_independence import (
     BUILTIN_PROVIDER_IMPLEMENTATION_REGISTRY,
     ProviderImplementationRegistry,
+    ProviderOriginAttestation,
+    ProviderOriginAuthority,
     VerifiedIndependenceFamily,
 )
 from .model import Evidence, VerificationVerdict
@@ -484,6 +486,7 @@ class CodeGraphProviderObservation:
     graph_model: GraphEvidenceModel
     graph_model_fingerprint: str
     independence: VerifiedIndependenceFamily
+    origin_attestation: ProviderOriginAttestation
 
     @property
     def provider_identity(self) -> ProviderImplementationIdentity:
@@ -524,6 +527,27 @@ def encode_code_graph_observation_evidence(
     family_id: str | None = None,
     source_snapshot: Mapping[str, Any] | None = None,
     provider_registry: ProviderImplementationRegistry | None = None,
+    provider_authority: ProviderOriginAuthority | None = None,
+) -> Evidence:
+    return _encode_code_graph_observation_evidence(
+        graph_model, evidence_id=evidence_id, claim=claim, claim_fingerprint=claim_fingerprint,
+        implementation_id=implementation_id, family_id=family_id, source_snapshot=source_snapshot,
+        provider_registry=provider_registry, provider_authority=provider_authority,
+    )
+
+
+def _encode_code_graph_observation_evidence(
+    graph_model: GraphEvidenceModel,
+    *,
+    evidence_id: str,
+    claim: Any | None = None,
+    claim_fingerprint: str | None = None,
+    implementation_id: str | None = None,
+    family_id: str | None = None,
+    source_snapshot: Mapping[str, Any] | None = None,
+    provider_registry: ProviderImplementationRegistry | None = None,
+    provider_authority: ProviderOriginAuthority | None = None,
+    _adapter_origin: ProviderOriginAttestation | None = None,
 ) -> Evidence:
     """Encode a canonical provider graph snapshot as one GVR evidence record.
 
@@ -542,7 +566,8 @@ def encode_code_graph_observation_evidence(
         claim_fingerprint = claim_fingerprint_for_observation(claim)
     identity = graph_model.provider_identity
     registry = provider_registry or BUILTIN_PROVIDER_IMPLEMENTATION_REGISTRY
-    independence = registry.resolve(identity)
+    origin = _adapter_origin or registry.attest(identity, authority=provider_authority)
+    independence = origin.family
     provider_id = identity.provider_id
     if not provider_id:
         raise CodeGraphObservationError("graph model provider is required")
@@ -559,6 +584,7 @@ def encode_code_graph_observation_evidence(
         "implementation_id": identity.implementation_id,
         "family_id": identity.family_id,
         "independence": independence.to_dict(),
+        "provider_origin": origin.to_dict(),
         "claim_fingerprint": str(claim_fingerprint),
         "typed_authority": graph_model._typed_authority,
         "source_snapshot": graph_model.source_snapshot,
@@ -627,7 +653,17 @@ def decode_code_graph_observation_evidence(
     if provider_id != graph_model.provider:
         raise CodeGraphObservationError("code graph observation provider does not match graph model provider")
     registry = provider_registry or BUILTIN_PROVIDER_IMPLEMENTATION_REGISTRY
-    independence = registry.resolve(graph_model.provider_identity)
+    recorded_origin = _mapping(payload.get("provider_origin", {}), "provider_origin")
+    try:
+        if str(recorded_origin.get("configuration_identity", "")) == "untrusted":
+            origin = registry.attest(graph_model.provider_identity)
+            if _snapshot(recorded_origin) != _snapshot(origin.to_dict()):
+                raise ValueError("unverified provider origin mismatch")
+        else:
+            origin = registry.validate(graph_model.provider_identity, recorded_origin)
+    except ValueError as exc:
+        raise CodeGraphObservationError(str(exc)) from exc
+    independence = origin.family
     recorded_independence = _mapping(payload.get("independence", {}), "independence")
     if _snapshot(recorded_independence) != _snapshot(independence.to_dict()):
         raise CodeGraphObservationError("code graph observation independence resolution mismatch")
@@ -640,6 +676,7 @@ def decode_code_graph_observation_evidence(
         graph_model=graph_model,
         graph_model_fingerprint=graph_model.fingerprint,
         independence=independence,
+        origin_attestation=origin,
     )
 
 

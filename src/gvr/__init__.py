@@ -21,9 +21,12 @@ from .provider_independence import (
     IndependenceTrustState,
     ProviderImplementationRegistration,
     ProviderImplementationRegistry,
+    ProviderOriginAttestation,
+    ProviderOriginAuthority,
     VerifiedIndependenceFamily,
     builtin_provider_implementation_registry,
 )
+from .verifiers.corroboration import ProviderVerificationObservation, reconcile_provider_observations
 from .code_graph import (
     CODE_GRAPH_OBSERVATION_EVIDENCE_KIND,
     CODE_GRAPH_OBSERVATION_FINGERPRINT_FORMAT,
