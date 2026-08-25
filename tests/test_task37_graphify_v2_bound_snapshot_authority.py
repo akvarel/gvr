@@ -437,6 +437,13 @@ def test_task37_29_installed_wheel_attack_replay_matrix(tmp_path: Path) -> None:
         text=True,
     )
     if build.returncode != 0:
+        # Minimal interpreters may lack setuptools; retry with pip's isolated build env.
+        build = subprocess.run(
+            [sys.executable, "-m", "pip", "wheel", "--no-deps", "-w", str(wheel_dir), str(repo_root)],
+            capture_output=True,
+            text=True,
+        )
+    if build.returncode != 0:
         pytest.fail("wheel build failed:\n" + (build.stderr or build.stdout)[-2000:])
     wheels = list(wheel_dir.glob("gvr-*.whl"))
     assert len(wheels) == 1, wheels
