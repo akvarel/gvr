@@ -3,20 +3,31 @@ from __future__ import annotations
 
 from copy import deepcopy
 import json
+import os
 from pathlib import Path
+import subprocess
+import sys
+from typing import Any
 
 import pytest
 
 from gvr import (
+    CODE_GRAPH_VERIFIER,
+    AtomicClaim,
     CodeGraphObservationError,
     IndependenceTrustState,
     ProviderTrustContext,
+    SQLiteStorage,
+    SourceRevisionIdentity,
+    VerificationExecutionTermination,
     VerificationVerdict,
     decode_code_graph_observation_evidence,
+    execute_verification_plan,
 )
 from gvr.adapters.graphify import (
     encode_graphify_structural_evidence_v2_observation_evidence,
 )
+from gvr.graphify_contract import validate_graphify_envelope_authority
 from gvr.structural_evidence import (
     GraphifyStructuralEvidenceError,
     GraphifyStructuralEvidenceV2,
@@ -25,8 +36,21 @@ from gvr.structural_evidence import (
     graphify_structural_evidence_fingerprint,
     ingest_graphify_structural_evidence_v2,
 )
+from gvr.verifiers.code_graph import CodeGraphClaimKind
+
+from test_code_graph_execution_tasks_27_30_integrated import (
+    SNAPSHOT_PATH,
+    codeflow_path_snapshot,
+    encode_codeflow_code_graph_observation_evidence,
+    execution_request,
+    path_claim,
+    root_report,
+    typed_query_scope,
+    typed_revision,
+)
 
 FIXTURE = Path(__file__).parent / "fixtures" / "structural_evidence" / "structural_evidence_snapshot.json"
+WHEEL_MATRIX_SCRIPT = Path(__file__).parent / "task37b_installed_wheel_matrix.py"
 
 
 def document() -> dict:
@@ -40,6 +64,108 @@ def reseal(doc: dict) -> dict:
 
 def valid(doc: dict | None = None) -> GraphifyStructuralEvidenceV2:
     return ingest_graphify_structural_evidence_v2(doc or document())
+
+
+def issue_codes(report) -> set[str]:
+    return {issue.code for issue in report.issues}
+
+
+_TARGET_NODE = "src_acme_pipeline_data_value_pipeline_transform_value_return_return"
+
+
+def targeted_document() -> dict:
+    """Fixture snapshot re-bound to a concrete point-to-point question."""
+    doc = document()
+    doc["query"]["target"] = _TARGET_NODE
+    doc["coverage"]["target_node_found"] = True
+    return reseal(doc)
+
+
+def identity_document() -> dict:
+    """Producer-valid zero-step identity result: start == target with one empty path."""
+    doc = document()
+    doc["query"]["target"] = doc["query"]["start"]
+    doc["facts"] = []
+    doc["blockers"] = []
+    doc["paths"] = [{
+        "path_identity": [],
+        "supporting_evidence_keys": [],
+        "exactness": "EXACT_FOR_RETURNED_PATH",
+        "receiver_confidence": "PROVEN",
+        "coverage": "COMPLETE_FOR_SUPPORTED_CONSTRUCT",
+    }]
+    doc["coverage"].update({
+        "complete_supported_search": True,
+        "search_coverage": "COMPLETE_FOR_SUPPORTED_CONSTRUCT",
+        "termination_reason": "COMPLETE",
+        "truncated": False,
+        "input_resolution": "RESOLVED",
+        "query_validity": True,
+        "start_node_found": True,
+        "target_node_found": True,
+        "visited_count": 1,
+        "expanded_count": 0,
+        "encountered_partial_evidence": False,
+        "encountered_unknown_evidence": False,
+        "encountered_may_evidence": False,
+    })
+    return reseal(doc)
+
+
+def unresolved_zero_depth_document() -> dict:
+    """Producer-valid max_depth == 0 state: zero-depth never traverses."""
+    doc = document()
+    doc["query"]["max_depth"] = 0
+    doc["query"]["target"] = "unreached-target-node"
+    doc["facts"] = []
+    doc["paths"] = []
+    doc["blockers"] = []
+    doc["coverage"].update({
+        "complete_supported_search": False,
+        "search_coverage": "UNKNOWN",
+        "termination_reason": "TARGET_NODE_NOT_FOUND",
+        "truncated": False,
+        "input_resolution": "TARGET_NODE_NOT_FOUND",
+        "query_validity": True,
+        "start_node_found": True,
+        "target_node_found": False,
+        "visited_count": 0,
+        "expanded_count": 0,
+        "encountered_partial_evidence": False,
+        "encountered_unknown_evidence": False,
+        "encountered_may_evidence": False,
+    })
+    return reseal(doc)
+
+
+def v2_claim(
+    claim_id: str = "task37-v2-path",
+    *,
+    revision: str | None = None,
+    relations: list[str] | None = None,
+) -> AtomicClaim:
+    query = document()["query"]
+    bounds = document()["coverage"]["query_bounds"]
+    return AtomicClaim(
+        claim_id=claim_id,
+        claim_kind=CodeGraphClaimKind.PATH_EXISTS.value,
+        verifier=CODE_GRAPH_VERIFIER,
+        spec={
+            "source": f"graphify:node:{query['start']}",
+            "target": f"graphify:node:{_TARGET_NODE}",
+            "relations": list(relations if relations is not None else bounds["effective_allowed_relations"]),
+            "scope": {
+                "snapshot": {
+                    "repository": "graphify",
+                    "revision": revision or document()["source_revision_scope"]["source_revision"],
+                },
+                "direction": query["direction"],
+                "max_depth": bounds["max_depth"],
+                "max_paths": bounds["max_paths"],
+                "max_expansions": bounds["max_expansions"],
+            },
+        },
+    )
 
 
 def test_task37_01_real_fixture_parses_and_preserves_full_authority() -> None:
@@ -175,24 +301,121 @@ def test_task37_23_trusted_graphify_v2_adapter_is_verified_once() -> None:
     assert decoded.independence.family_id == "graphify"
 
 
-def test_task37_24_codeflow_path_is_unchanged_and_non_decisive() -> None:
-    assert True  # covered by the accepted Task34d suite; this gate must not alter it.
+def test_task37_24_real_codeflow_observation_stays_non_decisive(tmp_path: Path) -> None:
+    """Task27 CodeFlow semantics stay intact: a heuristic CodeFlow observation alone never decides."""
+    claim = path_claim("cg-task37-codeflow")
+    codeflow = encode_codeflow_code_graph_observation_evidence(
+        codeflow_path_snapshot(),
+        evidence_id="obs.codeflow.task37",
+        claim=claim,
+        source_revision=typed_revision(SNAPSHOT_PATH),
+        query_scope=typed_query_scope(claim),
+    )
+    result = execute_verification_plan(
+        execution_request(claim, {"codeflow.snapshot": (codeflow, SNAPSHOT_PATH)}),
+        storage=SQLiteStorage(tmp_path / "task37-codeflow.sqlite3"),
+    )
+    report = root_report(result, claim.claim_id)
+
+    assert result.termination is VerificationExecutionTermination.COMPLETE
+    assert report.verdict is VerificationVerdict.UNKNOWN
+    assert report.evidence_ids == ("obs.codeflow.task37",)
+    assert {"EDGE_NOT_EXACT", "PROVIDER_ONLY_HEURISTIC"} <= issue_codes(report)
 
 
-def test_task37_25_sqlite_replay_preserves_full_v2_metadata(tmp_path: Path) -> None:
-    snapshot = valid()
-    assert snapshot.to_dict()["source_revision_scope"] == document()["source_revision_scope"]
-    assert snapshot.to_dict()["analysis_binding"] == document()["analysis_binding"]
+def test_task37_25_sqlite_close_reopen_preserves_full_v2_authority_metadata(tmp_path: Path) -> None:
+    doc = document()
+    evidence = encode_graphify_structural_evidence_v2_observation_evidence(
+        doc, evidence_id="obs.task37.sqlite", claim_fingerprint="claim"
+    )
+    before = decode_code_graph_observation_evidence(evidence)
+
+    store_path = tmp_path / "task37.sqlite3"
+    store = SQLiteStorage(store_path)
+    stored = store.put_evidence(evidence)
+    reopened = SQLiteStorage(store_path)
+    roundtrip = reopened.get_evidence(stored.fingerprint)
+
+    after = decode_code_graph_observation_evidence(roundtrip.evidence)
+    metadata_after = after.graph_model.authority_metadata
+    assert metadata_after["format"] == "graphify.structural_evidence.v2"
+    assert metadata_after["source_revision_scope"] == doc["source_revision_scope"]
+    assert metadata_after["analysis_binding"] == doc["analysis_binding"]
+    assert metadata_after["snapshot_fingerprint"] == before.graph_model.authority_metadata["snapshot_fingerprint"]
+    # The typed model normalizes lists to tuples in metadata; content must round-trip intact.
+    assert json.loads(json.dumps(metadata_after["snapshot"])) == doc
+    assert metadata_after["snapshot_fingerprint"] == before.graph_model.authority_metadata["snapshot_fingerprint"]
+    assert after.independence.trust_state is IndependenceTrustState.UNVERIFIED
 
 
-def test_task37_26_executor_observation_has_exact_claim_source_and_scope() -> None:
-    snapshot = valid()
-    assert snapshot.query["start"] == document()["query"]["start"]
-    assert snapshot.query["target"] == document()["query"]["target"]
+def test_task37_26_integrated_executor_binds_exact_claim_source_and_scope(tmp_path: Path) -> None:
+    doc = targeted_document()
+    # One trust context seals the origin; the same context must stay active to decode and execute.
+    context = ProviderTrustContext.host_runtime("gvr.builtin_provider_adapters.v1")
+    with context.activate():
+        claim = v2_claim()
+        evidence = encode_graphify_structural_evidence_v2_observation_evidence(
+            doc, evidence_id="obs.task37.executor", claim=claim
+        )
+        decoded = decode_code_graph_observation_evidence(evidence)
+        assert decoded.independence.trust_state is IndependenceTrustState.VERIFIED
+        claim = v2_claim()
+        result = execute_verification_plan(
+            execution_request(claim, {"graphify.snapshot": (evidence, doc)}),
+            storage=SQLiteStorage(tmp_path / "task37-executor.sqlite3"),
+        )
+        decoded = decode_code_graph_observation_evidence(evidence)
+        assert decoded.independence.trust_state is IndependenceTrustState.VERIFIED
+        result = execute_verification_plan(
+            execution_request(claim, {"graphify.snapshot": (evidence, doc)}),
+            storage=SQLiteStorage(tmp_path / "task37-executor.sqlite3"),
+        )
+    assert decoded.graph_model.source_revision == SourceRevisionIdentity(
+        "graphify", doc["source_revision_scope"]["source_revision"]
+    )
+    assert decoded.graph_model.query_scope.start == f"graphify:node:{doc['query']['start']}"
+    assert decoded.graph_model.query_scope.target == f"graphify:node:{doc['query']['target']}"
+    report = root_report(result, claim.claim_id)
+    assert result.termination is VerificationExecutionTermination.COMPLETE
+    codes = issue_codes(report)
+    assert "SOURCE_REVISION_MISMATCH" not in codes
+    assert "GRAPH_QUERY_SCOPE_MISMATCH" not in codes
+    # The fixture carries MAY evidence, so the executor stays non-decisive on content grounds.
+    assert report.verdict is VerificationVerdict.UNKNOWN
+    assert "HEURISTIC_ONLY_SUPPORT" in codes
 
 
-def test_task37_27_claim_scope_precedence_is_not_replaced_by_provider_origin() -> None:
-    assert True  # existing execution precedence remains the single authority.
+def test_task37_27_claim_scope_precedence_beats_verified_provider_origin(tmp_path: Path) -> None:
+    """VERIFIED provider origin cannot reconcile a claim bound to a different revision or scope."""
+    doc = targeted_document()
+    context = ProviderTrustContext.host_runtime("gvr.builtin_provider_adapters.v1")
+    with context.activate():
+        wrong_claim = v2_claim("task37-wrong-revision", revision="f" * 40)
+        narrow_claim = v2_claim("task37-narrow-scope", relations=["FLOWS_TO"])
+        revision_evidence = encode_graphify_structural_evidence_v2_observation_evidence(
+            doc, evidence_id="obs.task37.precedence.revision", claim=wrong_claim
+        )
+        scope_evidence = encode_graphify_structural_evidence_v2_observation_evidence(
+            doc, evidence_id="obs.task37.precedence.scope", claim=narrow_claim
+        )
+        assert decode_code_graph_observation_evidence(revision_evidence).independence.trust_state is IndependenceTrustState.VERIFIED
+
+        wrong_revision = execute_verification_plan(
+            execution_request(wrong_claim, {"graphify.snapshot": (revision_evidence, doc)}),
+            storage=SQLiteStorage(tmp_path / "task37-revision.sqlite3"),
+        )
+        narrower_scope = execute_verification_plan(
+            execution_request(narrow_claim, {"graphify.snapshot": (scope_evidence, doc)}),
+            storage=SQLiteStorage(tmp_path / "task37-scope.sqlite3"),
+        )
+
+    revision_report = root_report(wrong_revision, "task37-wrong-revision")
+    assert revision_report.verdict is VerificationVerdict.UNKNOWN
+    assert "SOURCE_REVISION_MISMATCH" in issue_codes(revision_report)
+
+    scope_report = root_report(narrower_scope, "task37-narrow-scope")
+    assert scope_report.verdict is VerificationVerdict.UNKNOWN
+    assert "GRAPH_QUERY_SCOPE_MISMATCH" in issue_codes(scope_report)
 
 
 def test_task37_28_reference_vectors_match_graphify_canonicalization() -> None:
@@ -202,8 +425,47 @@ def test_task37_28_reference_vectors_match_graphify_canonicalization() -> None:
     assert graphify_structural_evidence_fingerprint(doc) == doc["fingerprint"]
 
 
-def test_task37_29_wheel_api_surface_is_importable() -> None:
-    assert GraphifyStructuralEvidenceV2.__name__ == "GraphifyStructuralEvidenceV2"
+def test_task37_29_installed_wheel_attack_replay_matrix(tmp_path: Path) -> None:
+    """Build the wheel, install it into a fresh interpreter, and replay the full attack matrix there."""
+    repo_root = Path(__file__).resolve().parents[1]
+    wheel_dir = tmp_path / "wheel"
+    build = subprocess.run(
+        [sys.executable, "-m", "pip", "wheel", "--no-deps", "--no-build-isolation", "-w", str(wheel_dir), str(repo_root)],
+        capture_output=True,
+        text=True,
+    )
+    if build.returncode != 0:
+        pytest.fail("wheel build failed:\n" + (build.stderr or build.stdout)[-2000:])
+    wheels = list(wheel_dir.glob("gvr-*.whl"))
+    assert len(wheels) == 1, wheels
+
+    venv_dir = tmp_path / "venv"
+    created = subprocess.run([sys.executable, "-m", "venv", str(venv_dir)], capture_output=True, text=True)
+    assert created.returncode == 0, created.stderr
+    venv_python = venv_dir / "bin" / "python"
+    installed = subprocess.run(
+        [str(venv_python), "-m", "pip", "install", "--no-deps", str(wheels[0])],
+        capture_output=True,
+        text=True,
+    )
+    assert installed.returncode == 0, installed.stderr
+
+    env = {key: value for key, value in os.environ.items() if key != "PYTHONPATH"}
+    env["GVR_TASK37B_FIXTURE"] = str(FIXTURE.resolve())
+    matrix = subprocess.run(
+        [str(venv_python), str(WHEEL_MATRIX_SCRIPT.resolve())],
+        capture_output=True,
+        text=True,
+        cwd=str(tmp_path),
+        env=env,
+    )
+    assert matrix.returncode == 0, (
+        "installed-wheel attack/replay matrix failed\nSTDOUT:\n"
+        + matrix.stdout
+        + "\nSTDERR:\n"
+        + matrix.stderr
+    )
+    assert "MATRIX OK" in matrix.stdout
 
 
 def test_task37_30_full_regression_contract_has_no_verdict_fields() -> None:
@@ -241,3 +503,106 @@ def test_task37_review_ingestion_is_json_transport_only() -> None:
     doc["query"]["stop_nodes"] = ("tuple-is-not-json",)
     with pytest.raises(GraphifyStructuralEvidenceError, match="non-JSON"):
         valid(reseal(doc))
+
+
+def test_task37b_producer_zero_step_identity_path_is_accepted_and_authoritative() -> None:
+    snapshot = valid(identity_document())
+    traversal = snapshot.to_gvr_traversal_dict()
+    assert [path["path_identity"] for path in traversal["paths"]] == [[]]
+    assert traversal["complete_supported_search"] is True
+    authority = validate_graphify_envelope_authority(traversal)
+    assert authority.positive_authorized is True
+    assert authority.negative_authorized is False
+
+
+def test_task37b_identity_snapshot_encodes_without_edges_or_absence() -> None:
+    evidence = encode_graphify_structural_evidence_v2_observation_evidence(
+        identity_document(), evidence_id="obs.task37b.identity", claim_fingerprint="claim"
+    )
+    decoded = decode_code_graph_observation_evidence(evidence)
+    assert decoded.graph_model.edges == ()
+    assert decoded.graph_model.absence_subjects == ()
+
+
+@pytest.mark.parametrize("target", ["unrelated-target-node", None])
+def test_task37b_empty_identity_path_requires_exact_identity_query(target: str | None) -> None:
+    doc = identity_document()
+    doc["query"]["target"] = target
+    with pytest.raises(GraphifyStructuralEvidenceError):
+        valid(doc)
+
+
+def test_task37b_non_empty_identity_rules_are_unchanged() -> None:
+    doc = identity_document()
+    doc["paths"][0]["supporting_evidence_keys"] = ["df:" + "0" * 64]
+    with pytest.raises(GraphifyStructuralEvidenceError):
+        valid(doc)
+
+
+@pytest.mark.parametrize("field", ["max_paths", "max_expansions"])
+def test_task37b_query_bounds_match_producer_minimums(field: str) -> None:
+    doc = document()
+    doc["query"][field] = 0
+    with pytest.raises(GraphifyStructuralEvidenceError):
+        valid(reseal(doc))
+
+
+def test_task37b_coverage_query_bounds_match_producer_minimums() -> None:
+    doc = document()
+    doc["coverage"]["query_bounds"]["max_paths"] = 0
+    with pytest.raises(GraphifyStructuralEvidenceError):
+        valid(reseal(doc))
+
+
+def test_task37b_max_depth_zero_stays_producer_valid() -> None:
+    snapshot = valid(unresolved_zero_depth_document())
+    assert snapshot.query["max_depth"] == 0
+    assert snapshot.to_gvr_traversal_dict()["paths"] == []
+
+
+def test_task37b_typed_state_is_deeply_immutable() -> None:
+    snapshot = valid()
+
+    def attempt(target: Any, key: str, value: Any) -> None:
+        target[key] = value
+
+    for target, key, value in (
+        (snapshot.coverage, "complete_supported_search", True),
+        (snapshot.query, "max_paths", 1),
+        (snapshot.document, "fingerprint", "0" * 64),
+        (snapshot.facts[0], "source", "mutated"),
+        (snapshot.blockers[0], "reason", "mutated"),
+    ):
+        with pytest.raises(TypeError):
+            attempt(target, key, value)
+
+    # Derived authority surfaces are unchanged by every failed mutation.
+    assert snapshot.coverage["complete_supported_search"] is False
+    assert snapshot.fingerprint == graphify_structural_evidence_fingerprint(snapshot.to_dict())
+    assert snapshot.to_dict() == document()
+
+
+def test_task37b_direct_typed_construction_is_sealed_out() -> None:
+    with pytest.raises(GraphifyStructuralEvidenceError):
+        GraphifyStructuralEvidenceV2(
+            document=document(),
+            source_revision_scope=None,
+            analysis_binding=None,
+            query={},
+            coverage={},
+            facts=(),
+            paths=(),
+            blockers=(),
+            analyzer_revision="attacker/1",
+        )
+
+
+def test_task37b_trusted_adapter_revalidates_typed_objects() -> None:
+    forged = valid()
+    forged_doc = forged.to_dict()
+    forged_doc["coverage"]["complete_supported_search"] = True
+    object.__setattr__(forged, "document", forged_doc)
+    with pytest.raises(GraphifyStructuralEvidenceError):
+        encode_graphify_structural_evidence_v2_observation_evidence(
+            forged, evidence_id="obs.task37b.forged", claim_fingerprint="claim"
+        )
