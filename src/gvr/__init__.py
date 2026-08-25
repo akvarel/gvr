@@ -178,7 +178,25 @@ from .model import (
     VerificationVerdict,
     combine_verdicts,
 )
-from .adapters.graphify import GraphifyTraversalEvidence, encode_graphify_code_graph_observation_evidence, ingest_traversal_graph, ingest_traversal_result
+from .adapters.graphify import (
+    GraphifyTraversalEvidence,
+    encode_graphify_code_graph_observation_evidence,
+    encode_graphify_structural_evidence_v2_observation_evidence,
+    ingest_traversal_graph,
+    ingest_traversal_result,
+)
+from .structural_evidence import (
+    GraphifySourceRevisionScope,
+    GraphifyStructuralAnalysisBinding,
+    GraphifyStructuralEvidenceError,
+    GraphifyStructuralEvidenceV2,
+    graphify_analysis_binding_fingerprint,
+    graphify_source_scope_fingerprint,
+    graphify_structural_evidence_fingerprint,
+    ingest_graphify_structural_evidence_v2,
+    parse_graphify_structural_evidence_v2,
+    validate_graphify_structural_evidence_v2,
+)
 from .evidence_providers import (
     AUDIT_OBSERVATION_FINGERPRINT_FORMAT,
     AUDIT_OBSERVATION_KIND,

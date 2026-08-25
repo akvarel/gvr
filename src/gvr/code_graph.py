@@ -295,6 +295,7 @@ class GraphEvidenceModel:
     facts: GraphFacts
     _legacy_source_snapshot: Mapping[str, Any]
     _typed_authority: bool
+    _authority_metadata: Mapping[str, Any]
 
     def __init__(
         self,
@@ -312,6 +313,8 @@ class GraphEvidenceModel:
         facts: GraphFacts | None = None,
         _legacy_source_snapshot: Mapping[str, Any] | None = None,
         _typed_authority: bool | None = None,
+        authority_metadata: Mapping[str, Any] | None = None,
+        _authority_metadata: Mapping[str, Any] | None = None,
     ) -> None:
         supplied_typed_authority = any(item is not None for item in (provider_identity, source_revision, query_scope, coverage, facts))
         snapshot = _snapshot(source_snapshot if source_snapshot is not None else (_legacy_source_snapshot or {}))
@@ -337,6 +340,8 @@ class GraphEvidenceModel:
         object.__setattr__(self, "facts", facts)
         object.__setattr__(self, "_legacy_source_snapshot", snapshot)
         object.__setattr__(self, "_typed_authority", supplied_typed_authority if _typed_authority is None else _typed_authority)
+        metadata = authority_metadata if authority_metadata is not None else (_authority_metadata or {})
+        object.__setattr__(self, "_authority_metadata", _snapshot(metadata))
 
     @property
     def provider(self) -> str:
@@ -363,6 +368,11 @@ class GraphEvidenceModel:
         return self._legacy_source_snapshot or self.source_revision.to_dict()
 
     @property
+    def authority_metadata(self) -> Mapping[str, Any]:
+        """Immutable transport metadata for authority extensions such as Graphify v2."""
+        return self._authority_metadata
+
+    @property
     def evidence(self) -> tuple[GraphEvidence, ...]:
         return self.nodes + self.edges
 
@@ -376,13 +386,16 @@ class GraphEvidenceModel:
         return VerificationVerdict.UNKNOWN
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        document = {
             "provider_identity": self.provider_identity.to_dict(),
             "source_revision": self.source_revision.to_dict(),
             "query_scope": self.query_scope.to_dict(),
             "coverage": self.coverage.to_dict(),
             "facts": self.facts.to_dict(),
         }
+        if self._authority_metadata:
+            document["authority_metadata"] = self._authority_metadata
+        return document
 
 
 def _graph_evidence_sort_key(item: GraphEvidence) -> tuple[str, ...]:
@@ -588,6 +601,7 @@ def _encode_code_graph_observation_evidence(
         "claim_fingerprint": str(claim_fingerprint),
         "typed_authority": graph_model._typed_authority,
         "source_snapshot": graph_model.source_snapshot,
+        "authority_metadata": graph_model.authority_metadata,
         "source_revision": graph_model.source_revision.to_dict(),
         "query_scope": graph_model.query_scope.to_dict(),
         "coverage": graph_model.coverage.to_dict(),
@@ -640,6 +654,9 @@ def decode_code_graph_observation_evidence(
         )
     if payload.get("graph_model_fingerprint") != graph_model.fingerprint:
         raise CodeGraphObservationError("code graph observation graph model fingerprint mismatch")
+    recorded_authority = _mapping(payload.get("authority_metadata", {}), "authority_metadata")
+    if _snapshot(recorded_authority) != _snapshot(graph_model.authority_metadata):
+        raise CodeGraphObservationError("code graph observation authority metadata mismatch")
     if _mapping(payload.get("source_revision", {}), "source_revision") != graph_model.source_revision.to_dict():
         raise CodeGraphObservationError("code graph observation source revision mismatch")
     if _snapshot(_mapping(payload.get("query_scope", {}), "query_scope")) != _snapshot(graph_model.query_scope.to_dict()):
@@ -723,6 +740,7 @@ def graph_model_from_dict(document: Mapping[str, Any]) -> GraphEvidenceModel:
                 blockers=tuple(_graph_blocker_from_dict(item) for item in _sequence(facts.get("blockers", ()), "blockers")),
                 absence_subjects=tuple(str(item) for item in _sequence(facts.get("absence_subjects", ()), "absence_subjects")),
             ),
+            authority_metadata=_mapping(document.get("authority_metadata", {}), "authority_metadata"),
         )
     except CodeGraphObservationError:
         raise

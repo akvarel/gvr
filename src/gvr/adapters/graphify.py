@@ -24,6 +24,10 @@ from ..graphify_contract import (
     validate_graphify_positive_traversal,
 )
 from ..model import Evidence, VerificationVerdict
+from ..structural_evidence import (
+    GraphifyStructuralEvidenceV2,
+    ingest_graphify_structural_evidence_v2,
+)
 
 
 _COMPLETE = "COMPLETE_FOR_SUPPORTED_CONSTRUCT"
@@ -354,6 +358,7 @@ def encode_graphify_code_graph_observation_evidence(
     family_id: str = "graphify",
     source_revision: SourceRevisionIdentity | None = None,
     source_snapshot: Mapping[str, Any] | None = None,
+    authority_metadata: Mapping[str, Any] | None = None,
 ) -> Evidence:
     """Encode a precomputed Graphify traversal snapshot for execution.
 
@@ -379,6 +384,69 @@ def encode_graphify_code_graph_observation_evidence(
             blockers=graph.blockers,
             absence_subjects=graph.absence_subjects,
         ),
+        authority_metadata=authority_metadata,
+    )
+    origin = _attest_active_builtin_provider_origin(graph.provider_identity, adapter_kind="graphify")
+    return _encode_code_graph_observation_evidence(
+        graph,
+        evidence_id=evidence_id,
+        claim=claim,
+        claim_fingerprint=claim_fingerprint,
+        _validated_origin=origin,
+    )
+
+
+def encode_graphify_structural_evidence_v2_observation_evidence(
+    snapshot: Mapping[str, Any] | GraphifyStructuralEvidenceV2,
+    *,
+    evidence_id: str,
+    claim: Any | None = None,
+    claim_fingerprint: str | None = None,
+) -> Evidence:
+    """Encode a full Graphify v2 snapshot through the trusted Graphify adapter.
+
+    The parser is the only authority boundary. The native traversal envelope is
+    derived from the validated snapshot object and cannot be supplied separately.
+    The adapter may receive local VERIFIED origin under the accepted trust context;
+    serialized content alone remains UNVERIFIED.
+    """
+    if isinstance(snapshot, GraphifyStructuralEvidenceV2):
+        validated = snapshot
+    else:
+        validated = ingest_graphify_structural_evidence_v2(snapshot)
+    scope = validated.source_revision_scope
+    projection = validated.to_gvr_traversal_dict()
+    # The producer projection legitimately permits an open-ended traversal
+    # (target=None) with returned partial paths. The existing native envelope
+    # validator requires a concrete endpoint for path-shape checking, so use a
+    # private validation view only. The persisted typed query/coverage below is
+    # reconstructed from the original validated snapshot, never from this view.
+    validation_view = dict(projection)
+    if validation_view.get("target") is None and validation_view.get("paths"):
+        last = validation_view["paths"][-1]["supporting_evidence"][-1]
+        validation_view["target"] = str(last.get("target") or "")
+        validation_view["target_node_found"] = True
+    graph = ingest_traversal_graph(validation_view)
+    graph = GraphEvidenceModel(
+        provider_identity=ProviderImplementationIdentity(
+            "graphify", "graphify", "graphify", provider_kind="graphify"
+        ),
+        source_revision=SourceRevisionIdentity("graphify", scope.source_revision),
+        query_scope=_graphify_query_scope(projection),
+        coverage=_graphify_coverage(projection),
+        facts=GraphFacts(
+            nodes=graph.nodes,
+            edges=graph.edges,
+            blockers=graph.blockers,
+            absence_subjects=graph.absence_subjects,
+        ),
+        authority_metadata={
+            "format": validated.format,
+            "snapshot": validated.to_dict(),
+            "source_revision_scope": validated.source_revision_scope.to_dict(),
+            "analysis_binding": validated.analysis_binding.to_dict(),
+            "snapshot_fingerprint": validated.fingerprint,
+        },
     )
     origin = _attest_active_builtin_provider_origin(graph.provider_identity, adapter_kind="graphify")
     return _encode_code_graph_observation_evidence(
