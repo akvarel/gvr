@@ -84,7 +84,16 @@ def _assert_exact(result: dict[str, object]) -> None:
     assert authority.positive_authorized
     assert validate_graphify_positive_traversal(result)
     assert set(edge.confidence for edge in ingest_traversal_graph(result).edges) == {EvidenceConfidence.EXACT}
-    assert verify_data_flow_claim(_claim(), result).verdict is VerificationVerdict.PASS
+    claim = DataFlowClaim(
+        DataFlowClaimKind.CAN_FLOW_TO,
+        str(result["start"]),
+        str(result["target"]),
+        scope=DataFlowQueryScope(
+            effective_allowed_relations=frozenset(FULL_RELATIONS),
+            stop_nodes=frozenset(result["query_bounds"]["stop_nodes"]),
+        ),
+    )
+    assert verify_data_flow_claim(claim, result).verdict is VerificationVerdict.PASS
 
 
 def test_task33e_false_complete_identity_absence_is_impossible_on_all_surfaces() -> None:
@@ -216,7 +225,7 @@ def test_task33e_codeflow_cannot_rescue_malformed_graphify_and_sqlite_replay_is_
     )
 
     claim = path_claim("task33e-replay")
-    malformed = graphify_path_snapshot()
+    malformed = deepcopy(graphify_path_snapshot())
     malformed["query_bounds"]["max_expansions"] = malformed["expanded_count"] + 1
     _truncate(malformed, "MAX_EXPANSIONS")
     graphify = encode_graphify_code_graph_observation_evidence(

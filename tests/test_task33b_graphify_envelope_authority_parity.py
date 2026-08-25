@@ -203,6 +203,7 @@ def test_task33b_truncated_exact_positive_witness_preserves_existential_authorit
         complete_supported_search=False,
         search_coverage="PARTIAL",
     )
+    result["query_bounds"]["max_paths"] = len(result["paths"])
     result["completeness_certificate"].update(
         termination_reason="MAX_PATHS",
         complete_supported_search=False,

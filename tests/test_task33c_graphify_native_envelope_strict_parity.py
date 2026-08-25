@@ -157,6 +157,7 @@ def test_task33c_truncated_exact_positive_and_complete_negative_semantics_remain
         search_coverage="PARTIAL",
         complete_supported_search=False,
     )
+    positive["query_bounds"]["max_expansions"] = positive["expanded_count"]
     positive["completeness_certificate"].update(
         termination_reason="MAX_EXPANSIONS",
         search_coverage="PARTIAL",

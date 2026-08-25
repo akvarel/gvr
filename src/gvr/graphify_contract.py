@@ -301,6 +301,7 @@ def validate_graphify_envelope_authority(result: Mapping[str, Any]) -> GraphifyE
     returned_nodes: set[str] = set()
     required_expansions = 0
     path_bounds_valid = True
+    zero_step_identity_paths = 0
     for path in paths:
         missing_path = sorted(_NATIVE_PATH_FIELDS - path.keys())
         if missing_path:
@@ -315,6 +316,9 @@ def validate_graphify_envelope_authority(result: Mapping[str, Any]) -> GraphifyE
         if not isinstance(identity, (list, tuple)) or not all(isinstance(key, str) for key in identity):
             raise GraphEvidenceModelError("Graphify path_identity must be ordered public df keys")
         steps = _mapping_sequence(path.get("steps"), "path steps")
+        supporting = _mapping_sequence(path.get("supporting_evidence"), "path supporting evidence")
+        if not steps and not identity and not supporting:
+            zero_step_identity_paths += 1
         required_expansions = max(required_expansions, len(steps))
         if len(steps) > limits["max_depth"]:
             path_bounds_valid = False
@@ -332,20 +336,25 @@ def validate_graphify_envelope_authority(result: Mapping[str, Any]) -> GraphifyE
     path_identities = tuple(tuple(path["path_identity"]) for path in paths)
     non_identity_path_count = sum(bool(identity) for identity in path_identities)
     path_set_valid = len(set(path_identities)) == len(path_identities)
-    counts_valid = counts_valid and expanded >= required_expansions and visited >= max(1, len(returned_nodes))
-    if expanded > 0 and visited < 2:
-        counts_valid = False
-    if resolution == "RESOLVED" and visited > expanded + 1:
-        counts_valid = False
-    if non_identity_path_count > expanded:
-        counts_valid = False
-    if resolution != "RESOLVED" and (visited != 0 or expanded != 0):
+    if resolution == "RESOLVED":
+        counts_valid = counts_valid and expanded >= required_expansions and visited >= max(1, len(returned_nodes))
+        if expanded > 0 and visited < 2:
+            counts_valid = False
+        if visited > expanded + 1:
+            counts_valid = False
+        if non_identity_path_count > expanded:
+            counts_valid = False
+    elif paths or visited != 0 or expanded != 0:
         counts_valid = False
 
     truncation_valid = truncated is (termination in _TRUNCATION_REASONS)
     resolved = resolution == "RESOLVED" and result["start_node_found"] is True and result["target_node_found"] is True
     if resolution == "RESOLVED":
-        resolution_state_valid = termination in {"COMPLETE", *_TRUNCATION_REASONS}
+        resolution_state_valid = (
+            result["start_node_found"] is True
+            and result["target_node_found"] is True
+            and termination in {"COMPLETE", *_TRUNCATION_REASONS}
+        )
     elif resolution == "START_NODE_NOT_FOUND":
         resolution_state_valid = (
             termination == resolution and not truncated and not paths
@@ -356,8 +365,16 @@ def validate_graphify_envelope_authority(result: Mapping[str, Any]) -> GraphifyE
         resolution_state_valid = (
             termination == resolution and not truncated and not paths
             and visited == 0 and expanded == 0
+            and result["start_node_found"] is True
             and result["target_node_found"] is False
         )
+    identity_state_valid = not resolved or start != target or (
+        len(paths) == 1 and zero_step_identity_paths == 1
+    )
+    termination_bound_valid = (
+        (termination != "MAX_EXPANSIONS" or expanded == limits["max_expansions"])
+        and (termination != "MAX_PATHS" or len(paths) == limits["max_paths"])
+    )
     expected_coverage = (
         "UNKNOWN" if resolution != "RESOLVED"
         else "PARTIAL" if truncated or blocking or epistemic["encountered_partial_evidence"] or epistemic["encountered_unknown_evidence"]
@@ -373,19 +390,23 @@ def validate_graphify_envelope_authority(result: Mapping[str, Any]) -> GraphifyE
     common = (
         direction_valid and partition_valid and certificate_valid and path_set_valid
         and counts_valid and truncation_valid and resolution_state_valid
+        and identity_state_valid and termination_bound_valid
         and coverage_valid and completeness_valid
     )
     positive = (
         common and bool(paths) and resolved and result["query_validity"] is True
         and not blocking and not epistemic["encountered_may_evidence"]
         and not epistemic["encountered_partial_evidence"] and not epistemic["encountered_unknown_evidence"]
-        and not ((stop_nodes - {target}) & returned_nodes)
+        and not ((stop_nodes - {start, target}) & returned_nodes)
     )
-    negative = common and not paths and expected_complete and not epistemic["encountered_may_evidence"]
+    negative = (
+        common and not paths and start != target
+        and expected_complete and not epistemic["encountered_may_evidence"]
+    )
     return GraphifyEnvelopeAuthority(
         positive_authorized=positive,
         negative_authorized=negative,
-        current_native=True,
+        current_native=resolution_state_valid,
         direction=direction,
         start=start,
         target=target,

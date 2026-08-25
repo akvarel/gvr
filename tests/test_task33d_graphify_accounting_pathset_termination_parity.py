@@ -163,6 +163,7 @@ def test_task33d_target_stop_truncation_and_complete_negative_regressions() -> N
         search_coverage="PARTIAL",
         complete_supported_search=False,
     )
+    truncated["query_bounds"]["max_expansions"] = truncated["expanded_count"]
     truncated["completeness_certificate"].update(
         termination_reason="MAX_EXPANSIONS",
         search_coverage="PARTIAL",
