@@ -30,6 +30,9 @@ _HASH_RE = re.compile(r"^(?:sha256:)?[0-9a-f]{64}$")
 _DF_RE = re.compile(r"^df:[0-9a-f]{64}$")
 _BND_RE = re.compile(r"^bnd:[0-9a-f]{64}$")
 _DIAG_RE = re.compile(r"^diag:.+$")
+# Producer parity: the only resolutions under which a boundary event blocks
+# (and therefore degrades a zero-step identity answer to PARTIAL coverage).
+_BLOCKING_BOUNDARY_RESOLUTIONS = frozenset({"AMBIGUOUS", "UNRESOLVED", "UNSUPPORTED"})
 
 def _freeze(value: Any) -> Any:
     """Recursively seal a validated JSON-transport value tree.
@@ -253,6 +256,52 @@ class GraphifyStructuralAnalysisBinding:
         }
 
 
+def _native_boundary_event(blocker: Mapping[str, Any]) -> dict[str, Any]:
+    """Project one sealed v2 blocker into the producer's public native shape.
+
+    Mirrors ``StructuralEvidenceBlocker.to_gvr_boundary_event`` of the producer,
+    restored to the full native envelope vocabulary by joining the sealed
+    top-level fields with the carried diagnostic ``details`` so authority
+    consumers see the same boundary events the producer emits.
+    """
+    details = blocker.get("details")
+    details = details if isinstance(details, Mapping) else {}
+
+    def native(*names: str) -> Any:
+        for name in names:
+            value = blocker.get(name)
+            if value not in (None, ""):
+                return value
+        for name in names:
+            if isinstance(value := details.get(name), (str, int, float)) and value not in ("",):
+                return value
+        return ""
+
+    return {
+        "type": "boundary_event",
+        "diagnostic_kind": str(native("diagnostic_kind", "diagnosticKind", "kind")),
+        "capability": str(native("capability")),
+        "framework": str(native("framework")),
+        "boundary_evidence_key": str(blocker["key"]),
+        "diagnostic_node_id": str(native("diagnostic_node_id", "diagnosticNodeId")),
+        "diagnostic_evidence_key": str(blocker["diagnostic_key"]),
+        "canonical_caller_file": str(native("canonical_caller_file")),
+        "caller_location": str(native("caller_location", "callerLocation")),
+        "resolution": str(blocker["resolution"]),
+        "reason": str(blocker["reason"]),
+        "receiver": str(native("receiver", "receiver_fqn")),
+        "receiver_fqn": str(native("receiver_fqn", "receiverFqn")),
+        "receiver_confidence": str(native("receiver_confidence", "receiverConfidence")),
+        "method": str(native("method")),
+        "arity": int(native("arity") or 0),
+        "import_context": str(native("import_context", "importContext")),
+        "candidate_count": int(native("candidate_count", "candidateCount") or 0),
+        "repository_fqn": str(native("repository_fqn", "repositoryFqn")),
+        "entity_fqn": str(native("entity_fqn", "entityFqn")),
+        "mapping_target": str(native("mapping_target", "mappingTarget")),
+    }
+
+
 @dataclass(frozen=True)
 class GraphifyStructuralEvidenceV2:
     """Typed GVR view of one validated full Graphify v2 snapshot.
@@ -316,7 +365,7 @@ class GraphifyStructuralEvidenceV2:
         bounds = dict(coverage.get("query_bounds") or query)
         return {
             "paths": paths,
-            "boundary_events": [_thaw(blocker) for blocker in self.blockers],
+            "boundary_events": [_thaw(_native_boundary_event(blocker)) for blocker in self.blockers],
             "complete_supported_search": coverage["complete_supported_search"],
             "search_coverage": coverage["search_coverage"],
             "termination_reason": coverage["termination_reason"],
@@ -504,30 +553,48 @@ def ingest_graphify_structural_evidence_v2(
     if sum(1 for identity in path_ids if not identity) > 1:
         raise GraphifyStructuralEvidenceError("at most one producer zero-step identity path is allowed")
     if any(not identity for identity in path_ids):
-        # The identity answer is only producer-valid in the fully resolved,
-        # complete, unblocked, untruncated state the producer emits it in.
-        identity_state = (
+        if len(path_ids) != 1:
+            # The producer emits the zero-step identity answer only as a single
+            # standalone path; mixing it with non-empty evidence paths is a
+            # contract violation even when every other field looks valid.
+            raise GraphifyStructuralEvidenceError(
+                "producer zero-step identity path cannot be mixed with non-empty evidence paths"
+            )
+        # Parser-vs-authority separation: both producer-valid zero-step identity
+        # states parse. Decisiveness is decided later by the authority surface.
+        common_identity_state = (
             coverage.get("input_resolution") == "RESOLVED"
             and coverage.get("query_validity") is True
             and coverage.get("start_node_found") is True
             and coverage.get("target_node_found") is True
             and coverage.get("truncated") is False
             and coverage.get("termination_reason") == "COMPLETE"
-            and coverage.get("complete_supported_search") is True
-            and coverage.get("search_coverage") == "COMPLETE_FOR_SUPPORTED_CONSTRUCT"
+            and coverage.get("visited_count") == 1
+            and coverage.get("expanded_count") == 0
             and coverage.get("encountered_partial_evidence") is False
             and coverage.get("encountered_unknown_evidence") is False
             and coverage.get("encountered_may_evidence") is False
-            and coverage.get("visited_count") == 1
-            and coverage.get("expanded_count") == 0
         )
-        if not identity_state:
-            raise GraphifyStructuralEvidenceError(
-                "zero-step identity path requires the producer's resolved complete identity state"
+        blockers = _sequence(document["blockers"], "blockers")
+        clean_identity_state = (
+            common_identity_state
+            and coverage.get("complete_supported_search") is True
+            and coverage.get("search_coverage") == "COMPLETE_FOR_SUPPORTED_CONSTRUCT"
+            and not blockers
+        )
+        boundary_identity_state = (
+            common_identity_state
+            and coverage.get("complete_supported_search") is False
+            and coverage.get("search_coverage") == "PARTIAL"
+            and bool(blockers)
+            and all(
+                str(blocker.get("resolution") or "") in _BLOCKING_BOUNDARY_RESOLUTIONS
+                for blocker in blockers
             )
-        if _sequence(document["blockers"], "blockers"):
+        )
+        if not clean_identity_state and not boundary_identity_state:
             raise GraphifyStructuralEvidenceError(
-                "zero-step identity snapshots cannot carry boundary blockers"
+                "zero-step identity path requires the producer's resolved clean or blocking-boundary identity state"
             )
     path_id_set = set(path_ids)
     facts = tuple(_validate_fact(_require_mapping(item, "fact"), path_id_set) for item in _sequence(document["facts"], "facts"))
