@@ -104,21 +104,29 @@ def main() -> int:
         snapshot.to_gvr_traversal_dict()["complete_supported_search"] is False,
     )
 
-    # Attack 5: direct construction of the sealed typed object.
-    def direct_construct() -> None:
-        GraphifyStructuralEvidenceV2(
-            document={},
+    # Attack 5: direct construction of a typed view grants no authority.
+    def direct_instance(mutated: dict):
+        return GraphifyStructuralEvidenceV2(
+            document=mutated,
             source_revision_scope=None,
             analysis_binding=None,
-            query={},
-            coverage={},
-            facts=(),
-            paths=(),
-            blockers=(),
-            analyzer_revision="attacker/1",
+            query=mutated["query"],
+            coverage=mutated["coverage"],
+            facts=tuple(mutated["facts"]),
+            paths=tuple(mutated["paths"]),
+            blockers=tuple(mutated["blockers"]),
+            analyzer_revision=mutated["analyzer_revision"],
         )
 
-    expect_raises(GraphifyStructuralEvidenceError, direct_construct, "direct-typed-construction-sealed-out")
+    forged_view_doc = document()
+    forged_view_doc["coverage"]["complete_supported_search"] = True
+    expect_raises(
+        GraphifyStructuralEvidenceError,
+        lambda: encode_graphify_structural_evidence_v2_observation_evidence(
+            direct_instance(forged_view_doc), evidence_id="attack.direct", claim_fingerprint="claim"
+        ),
+        "direct-typed-construction-gains-no-authority",
+    )
 
     # Attack 6: forged typed object handed to the trusted adapter.
     forged = ingest_graphify_structural_evidence_v2(document())

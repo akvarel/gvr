@@ -7,7 +7,7 @@ is granted only by the trusted adapter path in :mod:`gvr.adapters.graphify`.
 from __future__ import annotations
 
 from copy import deepcopy
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 import hashlib
 import json
 import math
@@ -31,36 +31,16 @@ _DF_RE = re.compile(r"^df:[0-9a-f]{64}$")
 _BND_RE = re.compile(r"^bnd:[0-9a-f]{64}$")
 _DIAG_RE = re.compile(r"^diag:.+$")
 
-_INGESTION_SEAL = object()
-
-
-class _FrozenList(list):
-    """List that refuses every mutating operation after ingestion."""
-
-    def _immutable(self, *args: Any, **kwargs: Any) -> None:
-        raise TypeError("structural evidence state is immutable")
-
-    __setitem__ = _immutable
-    __delitem__ = _immutable
-    append = _immutable
-    extend = _immutable
-    insert = _immutable
-    pop = _immutable
-    remove = _immutable
-    sort = _immutable
-    reverse = _immutable
-    clear = _immutable
-    __iadd__ = _immutable
-    __imul__ = _immutable
-
-
 def _freeze(value: Any) -> Any:
-    """Recursively seal a validated JSON-transport value tree."""
+    """Recursively seal a validated JSON-transport value tree.
+
+    Sequences become tuples and mappings become read-only proxies, so no
+    reachable mutation path (including ``list.__setitem__`` style escapes)
+    can alter sealed state.
+    """
     if isinstance(value, Mapping):
         return MappingProxyType({str(key): _freeze(item) for key, item in value.items()})
-    if isinstance(value, list):
-        return _FrozenList(_freeze(item) for item in value)
-    if isinstance(value, tuple):
+    if isinstance(value, (list, tuple)):
         return tuple(_freeze(item) for item in value)
     return value
 
@@ -275,11 +255,12 @@ class GraphifyStructuralAnalysisBinding:
 
 @dataclass(frozen=True)
 class GraphifyStructuralEvidenceV2:
-    """Sealed GVR representation of one validated full Graphify v2 snapshot.
+    """Typed GVR view of one validated full Graphify v2 snapshot.
 
-    Instances can only be created by :func:`ingest_graphify_structural_evidence_v2`;
-    every authority-bearing field is deeply immutable so post-ingestion mutation
-    cannot bypass the validated canonical state.
+    The instance itself is an inert, deeply immutable container and grants no
+    authority on its own: every typed-object boundary must revalidate the
+    canonical document (see the trusted adapter). Sealed state cannot be
+    mutated through any reachable path.
     """
 
     document: Mapping[str, Any]
@@ -291,14 +272,6 @@ class GraphifyStructuralEvidenceV2:
     paths: tuple[Mapping[str, Any], ...]
     blockers: tuple[Mapping[str, Any], ...]
     analyzer_revision: str
-    _authority_seal: Any = field(default=None, repr=False, compare=False)
-
-    def __post_init__(self) -> None:
-        if self._authority_seal is not _INGESTION_SEAL:
-            raise GraphifyStructuralEvidenceError(
-                "GraphifyStructuralEvidenceV2 can only be constructed by "
-                "ingest_graphify_structural_evidence_v2"
-            )
 
     @property
     def format(self) -> str:
@@ -319,15 +292,16 @@ class GraphifyStructuralEvidenceV2:
         fact_by_key = {str(fact["key"]): fact for fact in self.facts}
         paths: list[dict[str, Any]] = []
         for path in self.paths:
-            supporting = [_thaw(fact_by_key[key]) for key in path["supporting_evidence_keys"]]
+            keys = [str(key) for key in path["supporting_evidence_keys"]]
+            supporting = [_thaw(fact_by_key[key]) for key in keys]
             steps = [
                 {
-                    "source": fact["source"],
-                    "target": fact["target"],
-                    "relation": fact["relation"],
-                    "evidence": _thaw(fact),
+                    "source": item["source"],
+                    "target": item["target"],
+                    "relation": item["relation"],
+                    "evidence": _thaw(fact_by_key[key]),
                 }
-                for fact in supporting
+                for key, item in zip(keys, supporting)
             ]
             paths.append({
                 "path_identity": list(path["path_identity"]),
@@ -337,8 +311,8 @@ class GraphifyStructuralEvidenceV2:
                 "path_receiver_confidence": path["receiver_confidence"],
                 "path_coverage": path["coverage"],
             })
-        query = dict(self.query)
-        coverage = dict(self.coverage)
+        query = _thaw(self.query)
+        coverage = _thaw(self.coverage)
         bounds = dict(coverage.get("query_bounds") or query)
         return {
             "paths": paths,
@@ -506,17 +480,55 @@ def ingest_graphify_structural_evidence_v2(
         identity = tuple(str(key) for key in _sequence(item.get("path_identity"), "path.path_identity"))
         supporting = tuple(str(key) for key in _sequence(item.get("supporting_evidence_keys"), "path.supporting_evidence_keys"))
         if not identity:
-            # Producer-valid zero-step identity: the only empty path identity allowed
-            # is the point-to-point answer of a bound start == target query.
+            # Producer-valid zero-step identity: the only empty path identity
+            # allowed is the point-to-point answer of a bound start == target
+            # query, carrying the producer's exact identity labels.
             if not is_identity_query or supporting:
                 raise GraphifyStructuralEvidenceError(
                     "empty path identity is only valid as the producer zero-step identity path of a start == target query"
                 )
+            for label, expected in (
+                ("exactness", "EXACT_FOR_RETURNED_PATH"),
+                ("receiver_confidence", "PROVEN"),
+                ("coverage", "COMPLETE_FOR_SUPPORTED_CONSTRUCT"),
+            ):
+                if item.get(label) != expected:
+                    raise GraphifyStructuralEvidenceError(
+                        f"zero-step identity path {label} must be {expected}"
+                    )
         elif identity != supporting or any(not _DF_RE.fullmatch(key) for key in identity):
             raise GraphifyStructuralEvidenceError("path identity must exactly match ordered df evidence keys")
         for key in ("exactness", "receiver_confidence", "coverage"):
             _require_string(item.get(key), f"path.{key}")
         path_ids.append(identity)
+    if sum(1 for identity in path_ids if not identity) > 1:
+        raise GraphifyStructuralEvidenceError("at most one producer zero-step identity path is allowed")
+    if any(not identity for identity in path_ids):
+        # The identity answer is only producer-valid in the fully resolved,
+        # complete, unblocked, untruncated state the producer emits it in.
+        identity_state = (
+            coverage.get("input_resolution") == "RESOLVED"
+            and coverage.get("query_validity") is True
+            and coverage.get("start_node_found") is True
+            and coverage.get("target_node_found") is True
+            and coverage.get("truncated") is False
+            and coverage.get("termination_reason") == "COMPLETE"
+            and coverage.get("complete_supported_search") is True
+            and coverage.get("search_coverage") == "COMPLETE_FOR_SUPPORTED_CONSTRUCT"
+            and coverage.get("encountered_partial_evidence") is False
+            and coverage.get("encountered_unknown_evidence") is False
+            and coverage.get("encountered_may_evidence") is False
+            and coverage.get("visited_count") == 1
+            and coverage.get("expanded_count") == 0
+        )
+        if not identity_state:
+            raise GraphifyStructuralEvidenceError(
+                "zero-step identity path requires the producer's resolved complete identity state"
+            )
+        if _sequence(document["blockers"], "blockers"):
+            raise GraphifyStructuralEvidenceError(
+                "zero-step identity snapshots cannot carry boundary blockers"
+            )
     path_id_set = set(path_ids)
     facts = tuple(_validate_fact(_require_mapping(item, "fact"), path_id_set) for item in _sequence(document["facts"], "facts"))
     fact_keys = {str(fact["key"]) for fact in facts}
@@ -557,7 +569,6 @@ def ingest_graphify_structural_evidence_v2(
         paths=tuple(_freeze(seen_paths[key]) for key in sorted(seen_paths)),
         blockers=tuple(_freeze(seen_blockers[key]) for key in sorted(seen_blockers)),
         analyzer_revision=str(document["analyzer_revision"]),
-        _authority_seal=_INGESTION_SEAL,
     )
 
 

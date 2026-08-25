@@ -29,6 +29,8 @@ from gvr.adapters.graphify import (
 )
 from gvr.graphify_contract import validate_graphify_envelope_authority
 from gvr.structural_evidence import (
+    GraphifySourceRevisionScope,
+    GraphifyStructuralAnalysisBinding,
     GraphifyStructuralEvidenceError,
     GraphifyStructuralEvidenceV2,
     graphify_analysis_binding_fingerprint,
@@ -539,6 +541,57 @@ def test_task37b_non_empty_identity_rules_are_unchanged() -> None:
         valid(doc)
 
 
+def test_task37b_duplicate_identity_paths_fail_closed() -> None:
+    doc = identity_document()
+    doc["paths"].append(deepcopy(doc["paths"][0]))
+    with pytest.raises(GraphifyStructuralEvidenceError):
+        valid(reseal(doc))
+
+
+@pytest.mark.parametrize(
+    ("label", "value"),
+    [
+        ("exactness", "PARTIAL"),
+        ("receiver_confidence", "MAY"),
+        ("coverage", "PARTIAL"),
+    ],
+)
+def test_task37b_identity_path_labels_must_be_producer_exact(label: str, value: str) -> None:
+    doc = identity_document()
+    doc["paths"][0][label] = value
+    with pytest.raises(GraphifyStructuralEvidenceError):
+        valid(reseal(doc))
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("input_resolution", "TARGET_NODE_NOT_FOUND"),
+        ("termination_reason", "MAX_DEPTH"),
+        ("truncated", True),
+        ("complete_supported_search", False),
+        ("search_coverage", "PARTIAL"),
+        ("target_node_found", False),
+        ("query_validity", False),
+        ("visited_count", 2),
+        ("expanded_count", 1),
+        ("encountered_may_evidence", True),
+    ],
+)
+def test_task37b_identity_state_must_be_resolved_and_complete(field: str, value: Any) -> None:
+    doc = identity_document()
+    doc["coverage"][field] = value
+    with pytest.raises(GraphifyStructuralEvidenceError):
+        valid(reseal(doc))
+
+
+def test_task37b_identity_snapshot_with_blockers_fails_closed() -> None:
+    doc = identity_document()
+    doc["blockers"] = document()["blockers"]
+    with pytest.raises(GraphifyStructuralEvidenceError):
+        valid(reseal(doc))
+
+
 @pytest.mark.parametrize("field", ["max_paths", "max_expansions"])
 def test_task37b_query_bounds_match_producer_minimums(field: str) -> None:
     doc = document()
@@ -582,19 +635,45 @@ def test_task37b_typed_state_is_deeply_immutable() -> None:
     assert snapshot.to_dict() == document()
 
 
-def test_task37b_direct_typed_construction_is_sealed_out() -> None:
-    with pytest.raises(GraphifyStructuralEvidenceError):
-        GraphifyStructuralEvidenceV2(
-            document=document(),
-            source_revision_scope=None,
-            analysis_binding=None,
-            query={},
-            coverage={},
-            facts=(),
-            paths=(),
-            blockers=(),
-            analyzer_revision="attacker/1",
+def test_task37b_direct_construction_gains_no_typed_authority() -> None:
+    """A hand-built typed view is inert: every typed-object boundary revalidates."""
+    doc = document()
+    scope = GraphifySourceRevisionScope(**doc["source_revision_scope"])
+    binding = GraphifyStructuralAnalysisBinding(**doc["analysis_binding"])
+
+    def direct_instance(mutated: dict) -> GraphifyStructuralEvidenceV2:
+        return GraphifyStructuralEvidenceV2(
+            document=mutated,
+            source_revision_scope=scope,
+            analysis_binding=binding,
+            query=mutated["query"],
+            coverage=mutated["coverage"],
+            facts=tuple(mutated["facts"]),
+            paths=tuple(mutated["paths"]),
+            blockers=tuple(mutated["blockers"]),
+            analyzer_revision=mutated["analyzer_revision"],
         )
+
+    # Forged coverage under a stale fingerprint is rejected at the trusted boundary.
+    forged_doc = deepcopy(doc)
+    forged_doc["coverage"]["complete_supported_search"] = True
+    with pytest.raises(GraphifyStructuralEvidenceError):
+        encode_graphify_structural_evidence_v2_observation_evidence(
+            direct_instance(forged_doc), evidence_id="obs.task37b.forged", claim_fingerprint="claim"
+        )
+
+    # Authority comes from the revalidated canonical content, not from the instance:
+    # a directly built view over the true document encodes identically to an ingested one.
+    honest = direct_instance(doc)
+    honest_evidence = encode_graphify_structural_evidence_v2_observation_evidence(
+        honest, evidence_id="obs.task37b.honest", claim_fingerprint="claim"
+    )
+    ingested_evidence = encode_graphify_structural_evidence_v2_observation_evidence(
+        doc, evidence_id="obs.task37b.ingested", claim_fingerprint="claim"
+    )
+    assert decode_code_graph_observation_evidence(honest_evidence).graph_model.fingerprint == (
+        decode_code_graph_observation_evidence(ingested_evidence).graph_model.fingerprint
+    )
 
 
 def test_task37b_trusted_adapter_revalidates_typed_objects() -> None:
