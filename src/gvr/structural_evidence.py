@@ -7,11 +7,12 @@ is granted only by the trusted adapter path in :mod:`gvr.adapters.graphify`.
 from __future__ import annotations
 
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import hashlib
 import json
 import math
 import re
+from types import MappingProxyType
 from typing import Any, Mapping
 
 from .graphify_contract import validate_graphify_df_evidence
@@ -29,6 +30,48 @@ _HASH_RE = re.compile(r"^(?:sha256:)?[0-9a-f]{64}$")
 _DF_RE = re.compile(r"^df:[0-9a-f]{64}$")
 _BND_RE = re.compile(r"^bnd:[0-9a-f]{64}$")
 _DIAG_RE = re.compile(r"^diag:.+$")
+
+_INGESTION_SEAL = object()
+
+
+class _FrozenList(list):
+    """List that refuses every mutating operation after ingestion."""
+
+    def _immutable(self, *args: Any, **kwargs: Any) -> None:
+        raise TypeError("structural evidence state is immutable")
+
+    __setitem__ = _immutable
+    __delitem__ = _immutable
+    append = _immutable
+    extend = _immutable
+    insert = _immutable
+    pop = _immutable
+    remove = _immutable
+    sort = _immutable
+    reverse = _immutable
+    clear = _immutable
+    __iadd__ = _immutable
+    __imul__ = _immutable
+
+
+def _freeze(value: Any) -> Any:
+    """Recursively seal a validated JSON-transport value tree."""
+    if isinstance(value, Mapping):
+        return MappingProxyType({str(key): _freeze(item) for key, item in value.items()})
+    if isinstance(value, list):
+        return _FrozenList(_freeze(item) for item in value)
+    if isinstance(value, tuple):
+        return tuple(_freeze(item) for item in value)
+    return value
+
+
+def _thaw(value: Any) -> Any:
+    """Rebuild plain mutable JSON values from sealed state."""
+    if isinstance(value, Mapping):
+        return {str(key): _thaw(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_thaw(item) for item in value]
+    return value
 
 
 class GraphifyStructuralEvidenceError(ValueError):
@@ -232,7 +275,12 @@ class GraphifyStructuralAnalysisBinding:
 
 @dataclass(frozen=True)
 class GraphifyStructuralEvidenceV2:
-    """Immutable GVR representation of one validated full Graphify v2 snapshot."""
+    """Sealed GVR representation of one validated full Graphify v2 snapshot.
+
+    Instances can only be created by :func:`ingest_graphify_structural_evidence_v2`;
+    every authority-bearing field is deeply immutable so post-ingestion mutation
+    cannot bypass the validated canonical state.
+    """
 
     document: Mapping[str, Any]
     source_revision_scope: GraphifySourceRevisionScope
@@ -243,6 +291,14 @@ class GraphifyStructuralEvidenceV2:
     paths: tuple[Mapping[str, Any], ...]
     blockers: tuple[Mapping[str, Any], ...]
     analyzer_revision: str
+    _authority_seal: Any = field(default=None, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        if self._authority_seal is not _INGESTION_SEAL:
+            raise GraphifyStructuralEvidenceError(
+                "GraphifyStructuralEvidenceV2 can only be constructed by "
+                "ingest_graphify_structural_evidence_v2"
+            )
 
     @property
     def format(self) -> str:
@@ -257,19 +313,19 @@ class GraphifyStructuralEvidenceV2:
         return {"repository": PROVIDER_ID, "revision": self.source_revision_scope.source_revision}
 
     def to_dict(self) -> dict[str, Any]:
-        return deepcopy(dict(self.document))
+        return _thaw(self.document)
 
     def to_gvr_traversal_dict(self) -> dict[str, Any]:
         fact_by_key = {str(fact["key"]): fact for fact in self.facts}
         paths: list[dict[str, Any]] = []
         for path in self.paths:
-            supporting = [deepcopy(fact_by_key[key]) for key in path["supporting_evidence_keys"]]
+            supporting = [_thaw(fact_by_key[key]) for key in path["supporting_evidence_keys"]]
             steps = [
                 {
                     "source": fact["source"],
                     "target": fact["target"],
                     "relation": fact["relation"],
-                    "evidence": deepcopy(fact),
+                    "evidence": _thaw(fact),
                 }
                 for fact in supporting
             ]
@@ -286,7 +342,7 @@ class GraphifyStructuralEvidenceV2:
         bounds = dict(coverage.get("query_bounds") or query)
         return {
             "paths": paths,
-            "boundary_events": [deepcopy(blocker) for blocker in self.blockers],
+            "boundary_events": [_thaw(blocker) for blocker in self.blockers],
             "complete_supported_search": coverage["complete_supported_search"],
             "search_coverage": coverage["search_coverage"],
             "termination_reason": coverage["termination_reason"],
@@ -353,9 +409,9 @@ def _validate_query(query: Mapping[str, Any]) -> dict[str, Any]:
         raise GraphifyStructuralEvidenceError("query.direction must be FORWARD or BACKWARD")
     for key in ("requested_allowed_relations", "effective_allowed_relations", "rejected_relations", "stop_nodes"):
         _sequence(result.get(key), f"query.{key}")
-    for key in ("max_depth", "max_paths", "max_expansions"):
-        if type(result.get(key)) is not int or result[key] < 0:
-            raise GraphifyStructuralEvidenceError(f"query.{key} must be a non-negative integer")
+    for key, minimum in (("max_depth", 0), ("max_paths", 1), ("max_expansions", 1)):
+        if type(result.get(key)) is not int or result[key] < minimum:
+            raise GraphifyStructuralEvidenceError(f"query.{key} must be an integer >= {minimum}")
     return result
 
 
@@ -396,6 +452,13 @@ def _validate_coverage(coverage: Mapping[str, Any]) -> dict[str, Any]:
     if type(result.get("visited_count")) is not int or type(result.get("expanded_count")) is not int:
         raise GraphifyStructuralEvidenceError("coverage counts must be integers")
     _require_mapping(result.get("query_bounds"), "coverage.query_bounds")
+    # Producer parity: run_data_flow_query rejects max_paths/max_expansions below 1.
+    for name, minimum in (("max_depth", 0), ("max_paths", 1), ("max_expansions", 1)):
+        value = result["query_bounds"].get(name)
+        if type(value) is not int or value < minimum:
+            raise GraphifyStructuralEvidenceError(
+                f"coverage.query_bounds.{name} must be an integer >= {minimum}"
+            )
     return result
 
 
@@ -432,12 +495,24 @@ def ingest_graphify_structural_evidence_v2(
     query = _validate_query(_require_mapping(document["query"], "query"))
     coverage = _validate_coverage(_require_mapping(document["coverage"], "coverage"))
     raw_paths = _sequence(document["paths"], "paths")
+    identity_target = query.get("target")
+    is_identity_query = (
+        identity_target is not None
+        and str(identity_target) == str(query.get("start"))
+    )
     path_ids: list[tuple[str, ...]] = []
     for path in raw_paths:
         item = _require_mapping(path, "path")
         identity = tuple(str(key) for key in _sequence(item.get("path_identity"), "path.path_identity"))
         supporting = tuple(str(key) for key in _sequence(item.get("supporting_evidence_keys"), "path.supporting_evidence_keys"))
-        if not identity or identity != supporting or any(not _DF_RE.fullmatch(key) for key in identity):
+        if not identity:
+            # Producer-valid zero-step identity: the only empty path identity allowed
+            # is the point-to-point answer of a bound start == target query.
+            if not is_identity_query or supporting:
+                raise GraphifyStructuralEvidenceError(
+                    "empty path identity is only valid as the producer zero-step identity path of a start == target query"
+                )
+        elif identity != supporting or any(not _DF_RE.fullmatch(key) for key in identity):
             raise GraphifyStructuralEvidenceError("path identity must exactly match ordered df evidence keys")
         for key in ("exactness", "receiver_confidence", "coverage"):
             _require_string(item.get(key), f"path.{key}")
@@ -472,17 +547,17 @@ def ingest_graphify_structural_evidence_v2(
     expected_fingerprint = graphify_structural_evidence_fingerprint(document)
     if document["fingerprint"] != expected_fingerprint:
         raise GraphifyStructuralEvidenceError("snapshot fingerprint mismatch")
-    canonical = deepcopy(dict(document))
     return GraphifyStructuralEvidenceV2(
-        document=canonical,
+        document=_freeze(dict(document)),
         source_revision_scope=scope,
         analysis_binding=binding,
-        query=query,
-        coverage=coverage,
-        facts=tuple(seen_facts[key] for key in sorted(seen_facts)),
-        paths=tuple(seen_paths[key] for key in sorted(seen_paths)),
-        blockers=tuple(seen_blockers[key] for key in sorted(seen_blockers)),
+        query=_freeze(query),
+        coverage=_freeze(coverage),
+        facts=tuple(_freeze(seen_facts[key]) for key in sorted(seen_facts)),
+        paths=tuple(_freeze(seen_paths[key]) for key in sorted(seen_paths)),
+        blockers=tuple(_freeze(seen_blockers[key]) for key in sorted(seen_blockers)),
         analyzer_revision=str(document["analyzer_revision"]),
+        _authority_seal=_INGESTION_SEAL,
     )
 
 

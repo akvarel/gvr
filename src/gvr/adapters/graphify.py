@@ -411,7 +411,10 @@ def encode_graphify_structural_evidence_v2_observation_evidence(
     serialized content alone remains UNVERIFIED.
     """
     if isinstance(snapshot, GraphifyStructuralEvidenceV2):
-        validated = snapshot
+        # Mandatory full revalidation: a typed object is never trusted as carried
+        # state. Re-ingesting its serialized document re-checks every binding and
+        # the snapshot fingerprint, so forged or mutated instances fail closed.
+        validated = ingest_graphify_structural_evidence_v2(snapshot.to_dict())
     else:
         validated = ingest_graphify_structural_evidence_v2(snapshot)
     scope = validated.source_revision_scope
@@ -423,9 +426,12 @@ def encode_graphify_structural_evidence_v2_observation_evidence(
     # reconstructed from the original validated snapshot, never from this view.
     validation_view = dict(projection)
     if validation_view.get("target") is None and validation_view.get("paths"):
-        last = validation_view["paths"][-1]["supporting_evidence"][-1]
-        validation_view["target"] = str(last.get("target") or "")
-        validation_view["target_node_found"] = True
+        for candidate_path in reversed(validation_view["paths"]):
+            if candidate_path["supporting_evidence"]:
+                last = candidate_path["supporting_evidence"][-1]
+                validation_view["target"] = str(last.get("target") or "")
+                validation_view["target_node_found"] = True
+                break
     graph = ingest_traversal_graph(validation_view)
     graph = GraphEvidenceModel(
         provider_identity=ProviderImplementationIdentity(
