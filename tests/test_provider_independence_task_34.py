@@ -16,7 +16,7 @@ from gvr import (
     encode_code_graph_observation_evidence,
 )
 from gvr.code_graph import GraphEvidenceModel
-from gvr.provider_independence import _attest_active_builtin_provider_origin
+from gvr.provider_independence import _attest_active_builtin_provider_origin, observation_subject_for
 from gvr.model import VerificationIssue, VerificationReport, VerificationVerdict
 from gvr.verifiers.corroboration import ProviderVerificationObservation, reconcile_provider_observations
 
@@ -67,10 +67,19 @@ def observation(
     if kind in {"graphify", "codeflow"} or authority is not None:
         context = authority or ProviderTrustContext.host_runtime("task34-builtins")
         graph = GraphEvidenceModel(provider_identity=provider_identity)
+        subject = observation_subject_for(graph, "claim")
         with context.activate():
             if kind in {"graphify", "codeflow"}:
-                assertion = _attest_active_builtin_provider_origin(provider_identity, adapter_kind=kind)
-                origin = context.validate(provider_identity, assertion.to_dict())
+                assertion = _attest_active_builtin_provider_origin(
+                    provider_identity,
+                    adapter_kind=kind,
+                    observation_subject_fingerprint=subject.fingerprint,
+                )
+                origin = context.validate(
+                    provider_identity,
+                    assertion.to_dict(),
+                    observation_subject_fingerprint=subject.fingerprint,
+                )
             else:
                 encoded = context.encode_code_graph_observation_evidence(
                     graph, evidence_id=evidence_id, claim_fingerprint="claim"

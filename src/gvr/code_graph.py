@@ -11,6 +11,7 @@ from .provider_independence import (
     VerifiedIndependenceFamily,
     _unverified_assertion,
     _validate_recorded_provider_origin,
+    observation_subject_for,
 )
 from .model import Evidence, VerificationVerdict
 
@@ -536,6 +537,22 @@ def claim_fingerprint_for_observation(claim: Any) -> str:
     )
 
 
+def resolved_observation_claim_fingerprint(
+    *,
+    claim: Any | None = None,
+    claim_fingerprint: str | None = None,
+) -> str:
+    """Finalize the exact claim fingerprint for an observation before issuance."""
+
+    if claim_fingerprint is None:
+        if claim is None:
+            raise CodeGraphObservationError("claim or claim_fingerprint is required")
+        return claim_fingerprint_for_observation(claim)
+    if claim is not None and claim_fingerprint_for_observation(claim) != str(claim_fingerprint):
+        raise CodeGraphObservationError("claim conflicts with the supplied claim fingerprint")
+    return str(claim_fingerprint)
+
+
 def encode_code_graph_observation_evidence(
     graph_model: GraphEvidenceModel,
     *,
@@ -574,16 +591,15 @@ def _encode_code_graph_observation_evidence(
         raise CodeGraphObservationError("graph_model must be a GraphEvidenceModel")
     if source_snapshot is not None and _snapshot(source_snapshot) != graph_model.source_snapshot:
         raise CodeGraphObservationError("source snapshot authority override is forbidden")
-    if claim_fingerprint is None:
-        if claim is None:
-            raise CodeGraphObservationError("claim or claim_fingerprint is required")
-        claim_fingerprint = claim_fingerprint_for_observation(claim)
     identity = graph_model.provider_identity
     origin = _validated_origin or _unverified_assertion(identity)
     independence = origin.family
     provider_id = identity.provider_id
     if not provider_id:
         raise CodeGraphObservationError("graph model provider is required")
+    claim_fingerprint = resolved_observation_claim_fingerprint(
+        claim=claim, claim_fingerprint=claim_fingerprint
+    )
     if implementation_id is not None and str(implementation_id) != identity.implementation_id:
         if graph_model._typed_authority:
             raise CodeGraphObservationError("provider implementation authority override is forbidden")
@@ -668,8 +684,16 @@ def decode_code_graph_observation_evidence(
     if provider_id != graph_model.provider:
         raise CodeGraphObservationError("code graph observation provider does not match graph model provider")
     recorded_origin = _mapping(payload.get("provider_origin", {}), "provider_origin")
+    # Recompute the exact observation subject from the validated transport state
+    # and require the recorded origin to be bound to exactly this subject.
+    observation_claim_fingerprint = _required_string(payload, "claim_fingerprint")
+    subject = observation_subject_for(graph_model, observation_claim_fingerprint)
     try:
-        origin, validated_origin = _validate_recorded_provider_origin(graph_model.provider_identity, recorded_origin)
+        origin, validated_origin = _validate_recorded_provider_origin(
+            graph_model.provider_identity,
+            recorded_origin,
+            observation_subject_fingerprint=subject.fingerprint,
+        )
     except ValueError as exc:
         raise CodeGraphObservationError(str(exc)) from exc
     independence = origin.family
@@ -681,7 +705,7 @@ def decode_code_graph_observation_evidence(
         provider_id=provider_id,
         implementation_id=_required_string(payload, "implementation_id"),
         family_id=family_id,
-        claim_fingerprint=_required_string(payload, "claim_fingerprint"),
+        claim_fingerprint=observation_claim_fingerprint,
         graph_model=graph_model,
         graph_model_fingerprint=graph_model.fingerprint,
         independence=independence,

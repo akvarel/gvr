@@ -16,7 +16,9 @@ if TYPE_CHECKING:
     from .model import Evidence
 
 PROVIDER_IMPLEMENTATION_REGISTRY_FINGERPRINT_FORMAT = "gvr.provider_implementation_registry.v3"
-_PROVIDER_ORIGIN_FORMAT = "gvr.provider_origin_assertion.v2"
+_PROVIDER_ORIGIN_FORMAT = "gvr.provider_origin_assertion.v3"
+_LEGACY_PROVIDER_ORIGIN_FORMAT = "gvr.provider_origin_assertion.v2"
+PROVIDER_OBSERVATION_SUBJECT_FINGERPRINT_FORMAT = "gvr.provider_observation_subject.v1"
 _UNTRUSTED_CONFIGURATION = "untrusted"
 _CONSTRUCTION_TOKEN = object()
 
@@ -44,6 +46,73 @@ class VerifiedIndependenceFamily:
 
 
 @dataclass(frozen=True)
+class ProviderObservationSubject:
+    """Canonical observation subject bound into a provider-origin assertion.
+
+    The subject fingerprint commits the exact observation content a provider
+    attests: the authorized implementation identity, the graph model
+    fingerprint (which transitively covers typed source revision, query scope,
+    coverage, graph facts/edges/blockers and Graphify-v2 authority metadata),
+    and the exact atomic claim fingerprint. A VERIFIED provider origin therefore
+    means ``this authorized implementation, under this active trust context,
+    issued THIS EXACT observation subject`` and cannot be transplanted onto a
+    different observation.
+    """
+
+    provider_kind: str
+    provider_id: str
+    implementation_id: str
+    family_id: str
+    graph_model_fingerprint: str
+    claim_fingerprint: str
+
+    def __post_init__(self) -> None:
+        for name in (
+            "provider_kind",
+            "provider_id",
+            "implementation_id",
+            "family_id",
+            "graph_model_fingerprint",
+            "claim_fingerprint",
+        ):
+            value = str(getattr(self, name))
+            if not value:
+                raise ValueError(f"provider observation subject {name} must be non-empty")
+            object.__setattr__(self, name, value)
+
+    def to_dict(self) -> dict[str, str]:
+        return {
+            "provider_kind": self.provider_kind,
+            "provider_id": self.provider_id,
+            "implementation_id": self.implementation_id,
+            "family_id": self.family_id,
+            "graph_model_fingerprint": self.graph_model_fingerprint,
+            "claim_fingerprint": self.claim_fingerprint,
+        }
+
+    @property
+    def fingerprint(self) -> str:
+        return canonical_fingerprint(
+            self.to_dict(),
+            fingerprint_format=PROVIDER_OBSERVATION_SUBJECT_FINGERPRINT_FORMAT,
+        )
+
+
+def observation_subject_for(graph_model: Any, claim_fingerprint: str) -> ProviderObservationSubject:
+    """Build the canonical observation subject for a validated graph model."""
+
+    identity = getattr(graph_model, "provider_identity")
+    return ProviderObservationSubject(
+        provider_kind=str(getattr(identity, "provider_kind", "")),
+        provider_id=str(getattr(identity, "provider_id", "")),
+        implementation_id=str(getattr(identity, "implementation_id", "")),
+        family_id=str(getattr(identity, "family_id", "")),
+        graph_model_fingerprint=str(getattr(graph_model, "fingerprint")),
+        claim_fingerprint=str(claim_fingerprint),
+    )
+
+
+@dataclass(frozen=True)
 class ProviderImplementationRegistration:
     implementation_id: str
     provider_kind: str
@@ -67,7 +136,7 @@ class ProviderImplementationRegistration:
 class ProviderOriginAssertion:
     """Serializable claim about provider origin. It is not trusted until validated."""
 
-    __slots__ = ("provider_kind", "implementation_id", "family", "configuration_identity", "registry_fingerprint", "context_key_id", "seal")
+    __slots__ = ("provider_kind", "implementation_id", "family", "configuration_identity", "registry_fingerprint", "context_key_id", "observation_subject_fingerprint", "seal")
 
     def __init__(
         self,
@@ -78,6 +147,7 @@ class ProviderOriginAssertion:
         configuration_identity: str,
         registry_fingerprint: str,
         context_key_id: str,
+        observation_subject_fingerprint: str,
         seal: str,
         _token: object,
     ) -> None:
@@ -89,6 +159,7 @@ class ProviderOriginAssertion:
         self.configuration_identity = str(configuration_identity)
         self.registry_fingerprint = str(registry_fingerprint)
         self.context_key_id = str(context_key_id)
+        self.observation_subject_fingerprint = str(observation_subject_fingerprint)
         self.seal = str(seal)
 
     @property
@@ -104,6 +175,7 @@ class ProviderOriginAssertion:
             "configuration_identity": self.configuration_identity,
             "registry_fingerprint": self.registry_fingerprint,
             "context_key_id": self.context_key_id,
+            "observation_subject_fingerprint": self.observation_subject_fingerprint,
         }
 
     def to_dict(self) -> dict[str, object]:
@@ -136,6 +208,10 @@ class ValidatedProviderOrigin:
     @property
     def implementation_id(self) -> str:
         return self.assertion.implementation_id
+
+    @property
+    def observation_subject_fingerprint(self) -> str:
+        return self.assertion.observation_subject_fingerprint
 
 
 _BUILTIN_REGISTRATIONS = (
@@ -236,11 +312,20 @@ class ProviderTrustContext:
             _ACTIVE_TRUST.reset(token)
 
     def encode_code_graph_observation_evidence(self, graph_model: "GraphEvidenceModel", **kwargs: Any) -> "Evidence":
-        from .code_graph import _encode_code_graph_observation_evidence
+        from .code_graph import _encode_code_graph_observation_evidence, resolved_observation_claim_fingerprint
 
         if _active_context() is not self:
             raise RuntimeError("ProviderTrustContext must be active while encoding trusted provider evidence")
-        assertion = self._issue_registered(graph_model.provider_identity)
+        # Issuance order is mandatory: the exact claim fingerprint is finalized
+        # first, then the canonical observation subject is computed from the
+        # finalized graph model plus that claim, and only then does the active
+        # trust context issue an origin bound to exactly that subject.
+        claim_fingerprint = resolved_observation_claim_fingerprint(
+            claim=kwargs.get("claim"), claim_fingerprint=kwargs.get("claim_fingerprint")
+        )
+        kwargs["claim_fingerprint"] = claim_fingerprint
+        subject = observation_subject_for(graph_model, claim_fingerprint)
+        assertion = self._issue_registered(graph_model.provider_identity, subject.fingerprint)
         return _encode_code_graph_observation_evidence(graph_model, _validated_origin=assertion, **kwargs)
 
     def _seal(self, document: Mapping[str, Any]) -> str:
@@ -251,13 +336,13 @@ class ProviderTrustContext:
         key = (str(getattr(identity, "provider_kind", "")), str(getattr(identity, "implementation_id", "")))
         return next((item for item in self.registry.registrations if (item.provider_kind, item.implementation_id) == key), None)
 
-    def _issue_registered(self, identity: object) -> ProviderOriginAssertion:
+    def _issue_registered(self, identity: object, observation_subject_fingerprint: str) -> ProviderOriginAssertion:
         registration = self._registration(identity)
         if registration is None or registration.provider_kind in {"graphify", "codeflow"}:
             return _unverified_assertion(identity)
-        return self._issue(identity, registration.family)
+        return self._issue(identity, registration.family, observation_subject_fingerprint)
 
-    def _issue_builtin(self, identity: object, capability: _AdapterCapability) -> ProviderOriginAssertion:
+    def _issue_builtin(self, identity: object, capability: _AdapterCapability, observation_subject_fingerprint: str) -> ProviderOriginAssertion:
         if capability.context is not self or capability is not self._capabilities.get(capability.adapter_kind):
             raise RuntimeError("invalid built-in provider capability")
         if str(getattr(identity, "provider_kind", "")) != capability.adapter_kind:
@@ -265,9 +350,9 @@ class ProviderTrustContext:
         registration = self._registration(identity)
         if registration is None or registration.provider_kind != capability.adapter_kind:
             raise ValueError("unknown built-in adapter implementation")
-        return self._issue(identity, registration.family)
+        return self._issue(identity, registration.family, observation_subject_fingerprint)
 
-    def _issue(self, identity: object, family: VerifiedIndependenceFamily) -> ProviderOriginAssertion:
+    def _issue(self, identity: object, family: VerifiedIndependenceFamily, observation_subject_fingerprint: str) -> ProviderOriginAssertion:
         assertion = ProviderOriginAssertion(
             provider_kind=str(getattr(identity, "provider_kind", "")),
             implementation_id=str(getattr(identity, "implementation_id", "")),
@@ -275,6 +360,7 @@ class ProviderTrustContext:
             configuration_identity=self.configuration_identity,
             registry_fingerprint=self.registry.fingerprint,
             context_key_id=self._key_id,
+            observation_subject_fingerprint=str(observation_subject_fingerprint),
             seal="",
             _token=_CONSTRUCTION_TOKEN,
         )
@@ -285,11 +371,19 @@ class ProviderTrustContext:
             configuration_identity=assertion.configuration_identity,
             registry_fingerprint=assertion.registry_fingerprint,
             context_key_id=assertion.context_key_id,
+            observation_subject_fingerprint=assertion.observation_subject_fingerprint,
             seal=self._seal(assertion._unsigned_dict()),
             _token=_CONSTRUCTION_TOKEN,
         )
 
-    def validate(self, identity: object, document: Mapping[str, Any]) -> ValidatedProviderOrigin:
+    def validate(self, identity: object, document: Mapping[str, Any], *, observation_subject_fingerprint: str) -> ValidatedProviderOrigin:
+        document_format = str(document.get("format", ""))
+        if document_format == _LEGACY_PROVIDER_ORIGIN_FORMAT or "observation_subject_fingerprint" not in document:
+            # Fail closed: an identity-only seal authenticates the provider, not
+            # the observation content, so it can never be upgraded to VERIFIED.
+            raise ValueError("legacy provider origin without observation-subject binding cannot be verified")
+        if str(document["observation_subject_fingerprint"]) != str(observation_subject_fingerprint):
+            raise ValueError("provider origin observation-subject binding mismatch")
         if str(document.get("configuration_identity", "")) != self.configuration_identity:
             raise ValueError("provider origin configuration identity mismatch")
         if str(document.get("registry_fingerprint", "")) != self.registry.fingerprint:
@@ -299,7 +393,7 @@ class ProviderTrustContext:
         registration = self._registration(identity)
         if registration is None:
             raise ValueError("provider origin is not authorized by this context")
-        expected = self._issue(identity, registration.family)
+        expected = self._issue(identity, registration.family, observation_subject_fingerprint)
         same_document = canonical_json(document, fingerprint_format=_PROVIDER_ORIGIN_FORMAT) == canonical_json(expected.to_dict(), fingerprint_format=_PROVIDER_ORIGIN_FORMAT)
         if not hmac.compare_digest(str(document.get("seal", "")), expected.seal) or not same_document:
             raise ValueError("provider origin assertion seal mismatch")
@@ -311,26 +405,41 @@ def _active_context() -> ProviderTrustContext | None:
     return None if active is None else active.context
 
 
-def _attest_active_builtin_provider_origin(identity: object, *, adapter_kind: str) -> ProviderOriginAssertion:
+def _attest_active_builtin_provider_origin(
+    identity: object,
+    *,
+    adapter_kind: str,
+    observation_subject_fingerprint: str,
+) -> ProviderOriginAssertion:
     active = _ACTIVE_TRUST.get()
     if active is None:
         return _unverified_assertion(identity)
     capability = active.capabilities.get(adapter_kind)
     if capability is None:
         raise RuntimeError("active ProviderTrustContext lacks built-in adapter capability")
-    return active.context._issue_builtin(identity, capability)
+    return active.context._issue_builtin(identity, capability, observation_subject_fingerprint)
 
 
-def _validate_recorded_provider_origin(identity: object, document: Mapping[str, Any]) -> tuple[ProviderOriginAssertion, ValidatedProviderOrigin | None]:
+def _validate_recorded_provider_origin(
+    identity: object,
+    document: Mapping[str, Any],
+    *,
+    observation_subject_fingerprint: str,
+) -> tuple[ProviderOriginAssertion, ValidatedProviderOrigin | None]:
     if str(document.get("configuration_identity", "")) == _UNTRUSTED_CONFIGURATION:
         expected = _unverified_assertion(identity)
-        if canonical_json(document, fingerprint_format=_PROVIDER_ORIGIN_FORMAT) != canonical_json(expected.to_dict(), fingerprint_format=_PROVIDER_ORIGIN_FORMAT):
+        ignored = ("format", "observation_subject_fingerprint")
+        normalized = {key: value for key, value in document.items() if key not in ignored}
+        expected_document = {key: value for key, value in expected.to_dict().items() if key not in ignored}
+        if canonical_json(normalized, fingerprint_format=_PROVIDER_ORIGIN_FORMAT) != canonical_json(expected_document, fingerprint_format=_PROVIDER_ORIGIN_FORMAT):
             raise ValueError("unverified provider origin mismatch")
+        if str(document.get("observation_subject_fingerprint", "")) != "":
+            raise ValueError("unverified provider origin cannot carry an observation-subject binding")
         return expected, None
     context = _active_context()
     if context is None:
         raise ValueError("verified provider origin requires an active ProviderTrustContext")
-    validated = context.validate(identity, document)
+    validated = context.validate(identity, document, observation_subject_fingerprint=observation_subject_fingerprint)
     return validated.assertion, validated
 
 
@@ -352,6 +461,7 @@ def _unverified_assertion(identity: object) -> ProviderOriginAssertion:
         configuration_identity=_UNTRUSTED_CONFIGURATION,
         registry_fingerprint=registry.fingerprint,
         context_key_id="",
+        observation_subject_fingerprint="",
         seal="",
         _token=_CONSTRUCTION_TOKEN,
     )

@@ -16,6 +16,8 @@ from ..code_graph import (
     ProviderImplementationIdentity,
     SourceRevisionIdentity,
     _encode_code_graph_observation_evidence,
+    observation_subject_for,
+    resolved_observation_claim_fingerprint,
 )
 from ..provider_independence import _attest_active_builtin_provider_origin
 from ..graphify_contract import (
@@ -386,7 +388,15 @@ def encode_graphify_code_graph_observation_evidence(
         ),
         authority_metadata=authority_metadata,
     )
-    origin = _attest_active_builtin_provider_origin(graph.provider_identity, adapter_kind="graphify")
+    claim_fingerprint = resolved_observation_claim_fingerprint(
+        claim=claim, claim_fingerprint=claim_fingerprint
+    )
+    subject = observation_subject_for(graph, claim_fingerprint)
+    origin = _attest_active_builtin_provider_origin(
+        graph.provider_identity,
+        adapter_kind="graphify",
+        observation_subject_fingerprint=subject.fingerprint,
+    )
     return _encode_code_graph_observation_evidence(
         graph,
         evidence_id=evidence_id,
@@ -454,7 +464,15 @@ def encode_graphify_structural_evidence_v2_observation_evidence(
             "snapshot_fingerprint": validated.fingerprint,
         },
     )
-    origin = _attest_active_builtin_provider_origin(graph.provider_identity, adapter_kind="graphify")
+    claim_fingerprint = resolved_observation_claim_fingerprint(
+        claim=claim, claim_fingerprint=claim_fingerprint
+    )
+    subject = observation_subject_for(graph, claim_fingerprint)
+    origin = _attest_active_builtin_provider_origin(
+        graph.provider_identity,
+        adapter_kind="graphify",
+        observation_subject_fingerprint=subject.fingerprint,
+    )
     return _encode_code_graph_observation_evidence(
         graph,
         evidence_id=evidence_id,
